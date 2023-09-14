@@ -1,0 +1,4 @@
+defaults:
+  - base_epsilon_sampler
+  - thresholder: no_thresholder
+  - _self_

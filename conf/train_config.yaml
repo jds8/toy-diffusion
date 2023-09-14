@@ -1,0 +1,5 @@
+defaults:
+  - base_train_config
+  - sampler: base_velocity_sampler
+  - diffusion: base_temporal_unet
+  - _self_
