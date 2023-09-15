@@ -39,7 +39,7 @@ class SamplerConfig(BaseSamplerConfig):
 
 @dataclass
 class EpsilonSamplerConfig(SamplerConfig):
-    _target_: str = 'models.sampler.EpsilonSampler'
+    _target_: str = 'models.toy_sampler.EpsilonSampler'
 
     def name(self):
         return 'EpsilonSampler'
@@ -47,7 +47,7 @@ class EpsilonSamplerConfig(SamplerConfig):
 
 @dataclass
 class MuSamplerConfig(SamplerConfig):
-    _target_: str = 'models.sampler.MuSampler'
+    _target_: str = 'models.toy_sampler.MuSampler'
 
     def name(self):
         return 'MuSampler'
