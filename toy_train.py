@@ -164,7 +164,7 @@ def train(cfg):
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
     likelihood = hydra.utils.instantiate(cfg.likelihood)
 
-    trainer = ToyTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model)
+    trainer = ToyTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model, likelihood=likelihood)
 
     trainer.train()
 
