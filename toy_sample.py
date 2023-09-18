@@ -88,10 +88,11 @@ class ToyEvaluator:
             #     )
             # else:
             #     raise NotImplementedError
+            posterior_mean = self.sampler.get_posterior_mean(x, unconditional_output, time)
             x = self.sampler.reverse_sample(
-                x, unconditional_output, t.item(), unconditional_output,
+                x, t.item(), posterior_mean,
             )
-            return x
+        return x
 
     def viz_trajs(self, traj, end_time, idx, clf=True):
         full_state_pred = traj.detach().squeeze(0).cpu().numpy()
@@ -144,11 +145,11 @@ def sample(cfg):
         # likelihood=likelihood,
     )
     trajs = std.sample_trajectories()
-    # undiffed_trajs = trajs.cumsum(dim=-2)
-    # out_trajs = torch.cat([
-    #     torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
-    #     undiffed_trajs
-    # ], dim=1)
+    undiffed_trajs = trajs.cumsum(dim=-2)
+    out_trajs = torch.cat([
+        torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
+        undiffed_trajs
+    ], dim=1)
     end_time = torch.tensor(1.)
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)

@@ -100,7 +100,8 @@ class ToyTrainer:
 
         plt.plot(torch.linspace(0, end_time, full_state_pred.shape[0]), full_state_pred, color='green')
 
-        plt.savefig('figs/train_{}.pdf'.format(idx))
+        if idx % 100 == 0:
+            plt.savefig('figs/train_{}.pdf'.format(idx))
 
         if clf:
             plt.clf()
@@ -108,6 +109,13 @@ class ToyTrainer:
     def train_batch(self):
         trajs = integrate(self.sde, timesteps=self.cfg.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
         x0 = trajs.W.diff(dim=1).unsqueeze(-1)
+        # undiffed_trajs = x0.cumsum(dim=-2)
+        # out_trajs = torch.cat([
+        #     torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
+        #     undiffed_trajs
+        # ], dim=1)
+        # for idx, traj in enumerate(out_trajs):
+        #     self.viz_trajs(traj, self.end_time, idx, clf=False)
         l2_loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()

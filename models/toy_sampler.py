@@ -145,7 +145,7 @@ class AbstractSampler:
         xt = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
         return xt, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
 
-    def reverse_sample(self, xt, unconditional_output, t, conditional_mean):
+    def reverse_sample(self, xt, t, conditional_mean):
         noise = torch.randn_like(xt)
         nonzero_mask = torch.tensor(t != 0, dtype=self.betas.dtype)  # no noise when t == 0
         posterior_variance = self.posterior_variance[t]
@@ -159,11 +159,11 @@ class AbstractSampler:
     def classifier_guided_reverse_sample(self, xt, unconditional_output, t, grad_log_lik=0.):
         mean = self.get_posterior_mean(xt, unconditional_output, t=torch.tensor([t]))
         conditional_mean = mean + self.guidance_coef * self.posterior_variance[t] * grad_log_lik
-        return self.reverse_sample(xt, unconditional_output, t, conditional_mean)
+        return self.reverse_sample(xt, t, conditional_mean)
 
     def classifier_free_reverse_sample(self, xt, unconditional_output, t, conditional_output):
         conditional_mean = self.get_classifier_free_mean(xt, unconditional_output, torch.tensor([t]), conditional_output)
-        return self.reverse_sample(xt, unconditional_output, t, conditional_mean)
+        return self.reverse_sample(xt, t, conditional_mean)
 
     def combine_eps(self, unconditional_eps, conditional_eps):
         return (1 + self.guidance_coef) * conditional_eps - self.guidance_coef * unconditional_eps

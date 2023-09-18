@@ -23,7 +23,7 @@ class BaseConfig:
 @dataclass
 class TrainConfig(BaseConfig):
     batch_size: int = 1024
-    lr: float = 0.001
+    lr: float = 0.0001
     no_wandb: bool = 1
     delete_local_model: bool = False
     max_gradient: float = 1.
