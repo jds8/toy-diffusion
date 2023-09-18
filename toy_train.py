@@ -31,7 +31,7 @@ class ToyTrainer:
             cfg,
             sampler,
             diffusion_model,
-            likelihood=None,
+            likelihood,
     ):
         self.cfg = cfg
         self.sde = SDE(self.cfg.sde_drift, self.cfg.sde_diffusion)
@@ -109,13 +109,6 @@ class ToyTrainer:
     def train_batch(self):
         trajs = integrate(self.sde, timesteps=self.cfg.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
         x0 = trajs.W.diff(dim=1).unsqueeze(-1)
-        # undiffed_trajs = x0.cumsum(dim=-2)
-        # out_trajs = torch.cat([
-        #     torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
-        #     undiffed_trajs
-        # ], dim=1)
-        # for idx, traj in enumerate(out_trajs):
-        #     self.viz_trajs(traj, self.end_time, idx, clf=False)
         l2_loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
@@ -137,9 +130,8 @@ class ToyTrainer:
                 print(e)
 
     def forward_process(self, x0):
-        cond = None
-        # cond = self.likelihood.condition(x0).mean if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
-        # cond = cond.reshape(-1, 1)
+        cond = self.likelihood.condition(x0).mean if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        cond = cond.reshape(-1, 1)
         t = dist.Categorical(
             torch.ones(
                 self.sampler.diffusion_timesteps,
@@ -170,7 +162,7 @@ def train(cfg):
     d_model = torch.tensor(1)
     sampler = hydra.utils.instantiate(cfg.sampler)
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-    # likelihood = hydra.utils.instantiate(cfg.likelihood)
+    likelihood = hydra.utils.instantiate(cfg.likelihood)
 
     trainer = ToyTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model)
 
