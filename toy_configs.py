@@ -4,7 +4,7 @@ from hydra.core.config_store import ConfigStore
 from models.toy_diffusion_models_config import EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, TemporalUnetConfig, \
     TemporalTransformerUnetConfig
-# from likelihood_configs import DistLikelihoodConfig
+from toy_likelihood_configs import DistLikelihoodConfig
 
 
 def register_configs() -> None:
@@ -44,8 +44,8 @@ def register_configs() -> None:
         name='temporal_transformer_unet',
         node=TemporalTransformerUnetConfig,
     )
-    # cs.store(
-    #     group="likelihood",
-    #     name="base_likelihood",
-    #     node=DistLikelihoodConfig,
-    # )
+    cs.store(
+        group="likelihood",
+        name="base_likelihood",
+        node=DistLikelihoodConfig,
+    )

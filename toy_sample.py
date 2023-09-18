@@ -7,9 +7,14 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
+from torchdiffeq import odeint
+
 from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path
 from models.toy_sampler import Sampler
+from toy_likelihoods import Likelihood
+from models.toy_temporal import TemporalTransformerUnet
+from models.toy_diffusion_models_config import GuidanceType
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -24,12 +29,14 @@ class ToyEvaluator:
         cfg: SampleConfig,
         sampler: Sampler,
         diffusion_model: nn.Module,
+        likelihood: Likelihood,
     ):
         self.cfg = cfg
-        # self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond > 0. else None
+        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond > 0. else None
         self.sampler = sampler
         self.diffusion_model = diffusion_model.to(device)
         self.diffusion_model.eval()
+        self.likelihood = likelihood
 
         self.load_model()
 
@@ -43,12 +50,12 @@ class ToyEvaluator:
         except Exception as e:
             print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
 
-    # def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
-    #     x0_hat = self.sampler.predict_xstart(xt, model_output, t)
-    #     if isinstance(self.diffusion_model, TemporalTransformerUnet):
-    #         return self.likelihood.grad_log_lik(cond, xt, x0_hat, cond_traj)
-    #     else:
-    #         return self.likelihood.grad_log_lik(cond, xt, x0_hat)
+    def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
+        x0_hat = self.sampler.predict_xstart(xt, model_output, t)
+        if isinstance(self.diffusion_model, TemporalTransformerUnet):
+            return self.likelihood.grad_log_lik(cond, xt, x0_hat, cond_traj)
+        else:
+            return self.likelihood.grad_log_lik(cond, xt, x0_hat)
 
     def sample_trajectories(self, cond_traj=None):
         x = torch.randn(
@@ -61,37 +68,37 @@ class ToyEvaluator:
             if t % 100 == 0:
                 print(x[0, 0])
             time = t.reshape(-1)
-            # if isinstance(self.diffusion_model, TemporalTransformerUnet):
-            #     unconditional_output = self.diffusion_model(x, time, None, None)
-            # else:
-            #     unconditional_output = self.diffusion_model(x, time, None)
+            if isinstance(self.diffusion_model, TemporalTransformerUnet):
+                unconditional_output = self.diffusion_model(x, time, None, None)
+            else:
+                unconditional_output = self.diffusion_model(x, time, None)
             unconditional_output = self.diffusion_model(x, time, None)
-            # if self.cfg.guidance == GuidanceType.Classifier:
-            #     with torch.enable_grad():
-            #         xt = x.detach().clone().requires_grad_(True)
-            #         grad_log_lik = self.grad_log_lik(xt, time, self.cond, unconditional_output, cond_traj)
-            #     x = self.sampler.classifier_guided_reverse_sample(
-            #         xt=x, unconditional_output=unconditional_output,
-            #         t=t.item(), grad_log_lik=grad_log_lik
-            #     )
-            # elif self.cfg.guidance == GuidanceType.ClassifierFree:
-            #     if self.cond is None or self.cond <= 0.:
-            #         conditional_output = unconditional_output
-            #     else:
-            #         if isinstance(self.diffusion_model, TemporalTransformerUnet):
-            #             conditional_output = self.diffusion_model(x, time, cond_traj, self.cond)
-            #         else:
-            #             conditional_output = self.diffusion_model(x, time, self.cond)
-            #     x = self.sampler.classifier_free_reverse_sample(
-            #         xt=x, unconditional_output=unconditional_output,
-            #         conditional_output=conditional_output, t=t.item()
-            #     )
-            # else:
-            #     raise NotImplementedError
-            posterior_mean = self.sampler.get_posterior_mean(x, unconditional_output, time)
-            x = self.sampler.reverse_sample(
-                x, t.item(), posterior_mean,
-            )
+            if self.cfg.guidance == GuidanceType.Classifier:
+                with torch.enable_grad():
+                    xt = x.detach().clone().requires_grad_(True)
+                    grad_log_lik = self.grad_log_lik(xt, time, self.cond, unconditional_output, cond_traj)
+                x = self.sampler.classifier_guided_reverse_sample(
+                    xt=x, unconditional_output=unconditional_output,
+                    t=t.item(), grad_log_lik=grad_log_lik
+                )
+            elif self.cfg.guidance == GuidanceType.ClassifierFree:
+                if self.cond is None or self.cond <= 0.:
+                    conditional_output = unconditional_output
+                else:
+                    if isinstance(self.diffusion_model, TemporalTransformerUnet):
+                        conditional_output = self.diffusion_model(x, time, cond_traj, self.cond)
+                    else:
+                        conditional_output = self.diffusion_model(x, time, self.cond)
+                x = self.sampler.classifier_free_reverse_sample(
+                    xt=x, unconditional_output=unconditional_output,
+                    conditional_output=conditional_output, t=t.item()
+                )
+            else:
+                print('Unknown guidance: {}... defaulting to unconditional sampling'.format(self.cfg.guidance))
+                posterior_mean = self.sampler.get_posterior_mean(x, unconditional_output, time)
+                x = self.sampler.reverse_sample(
+                    x, t.item(), posterior_mean,
+                )
         return x
 
     def viz_trajs(self, traj, end_time, idx, clf=True):
@@ -136,13 +143,13 @@ def sample(cfg):
     d_model = torch.tensor(1)
     sampler = hydra.utils.instantiate(cfg.sampler)
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-    # likelihood = hydra.utils.instantiate(cfg.likelihood)
+    likelihood = hydra.utils.instantiate(cfg.likelihood)
 
     std = ToyEvaluator(
         cfg=cfg,
         sampler=sampler,
         diffusion_model=diffusion_model,
-        # likelihood=likelihood,
+        likelihood=likelihood,
     )
     trajs = std.sample_trajectories()
     undiffed_trajs = trajs.cumsum(dim=-2)
@@ -154,7 +161,7 @@ def sample(cfg):
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
     # TODO: remove
-    # std_trajs = torch.rand(20, 39, 4, device=device)
+    # std_trajs = torch.rand(100, 1000, 1, device=device)
     # log_lik = std.log_likelihood(std_trajs, extra_args={'cond': None})
 
 

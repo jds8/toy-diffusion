@@ -3,7 +3,7 @@
 from typing import Optional
 from dataclasses import dataclass
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
-# from likelihood_configs import LikelihoodConfig
+from toy_likelihood_configs import LikelihoodConfig
 
 from omegaconf import OmegaConf
 
@@ -12,7 +12,7 @@ from omegaconf import OmegaConf
 class BaseConfig:
     sampler: BaseSamplerConfig = BaseSamplerConfig()
     diffusion: ModelConfig = ModelConfig()
-    # likelihood: LikelihoodConfig = LikelihoodConfig()
+    likelihood: LikelihoodConfig = LikelihoodConfig()
     sde_drift: float = 0.
     sde_diffusion: float = 1.
     sde_steps: int = 1000
@@ -47,5 +47,5 @@ def get_model_path(cfg: TrainConfig):
 @dataclass
 class SampleConfig(BaseConfig):
     num_samples: int = 10
-    # cond: Optional[float] = None
-    # guidance: GuidanceType = GuidanceType.ClassifierFree
+    cond: Optional[float] = None
+    guidance: GuidanceType = GuidanceType.Classifier

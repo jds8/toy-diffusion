@@ -179,6 +179,9 @@ class Sampler(AbstractSampler):
 
 
 class EpsilonSampler(Sampler):
+    def predict_xstart(self, xt, eps, t):
+        return self.sqrt_recip_alphas_cumprod[t] * xt - self.sqrt_recipm1_alphas_cumprod[t] * eps
+
     def get_posterior_mean(self, xt, eps, t):
         return self.sqrt_recip_alphas[t] * (xt - (self.betas / self.sqrt_one_minus_alphas_cumprod)[t] * eps)
 
