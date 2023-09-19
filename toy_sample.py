@@ -4,11 +4,13 @@ import warnings
 import hydra
 from hydra.core.config_store import ConfigStore
 import torch
+import torch.distributions as dist
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
 from torchdiffeq import odeint
 
+from toy_plot import SDE
 from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path
 from models.toy_sampler import Sampler
@@ -32,7 +34,7 @@ class ToyEvaluator:
         likelihood: Likelihood,
     ):
         self.cfg = cfg
-        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond > 0. else None
+        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond > 0. else None
         self.sampler = sampler
         self.diffusion_model = diffusion_model.to(device)
         self.diffusion_model.eval()
@@ -112,7 +114,7 @@ class ToyEvaluator:
             plt.clf()
 
     @torch.no_grad()
-    def log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
+    def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
         extra_args = {} if extra_args is None else extra_args
         s_in = x.new_ones([x.shape[0]])
         # hutchinson's trick
@@ -137,6 +139,15 @@ class ToyEvaluator:
         ll_prior = torch.distributions.Normal(0, self.sampler.betas[-1]).log_prob(latent).flatten(1).sum(1)
         return ll_prior + delta_ll, {'fevals': fevals}
 
+    def analytic_log_likelihood(self, x: torch.Tensor, sde: SDE, dt: torch.Tensor):
+        llk = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
+        x_prev = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
+        for xn in x.split(dim=1, split_size=1)[1:]:
+            x_next = xn[:, 0]
+            llk_prev = dist.Normal(x_prev + sde.drift * dt, sde.diffusion ** 2 * dt).log_prob(x_next)
+            llk += llk_prev
+            x_prev = x_next
+        return llk
 
 @hydra.main(version_base=None, config_path="conf", config_name="sample_config")
 def sample(cfg):
@@ -160,9 +171,13 @@ def sample(cfg):
     end_time = torch.tensor(1.)
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
+
     # TODO: remove
     # std_trajs = torch.rand(100, 1000, 1, device=device)
-    # log_lik = std.log_likelihood(std_trajs, extra_args={'cond': None})
+    # sde = SDE(cfg.sde_drift, cfg.sde_diffusion)
+    # dt = torch.tensor(1., device=device) / cfg.sde_steps
+    # log_lik = std.analytic_log_likelihood(std_trajs, sde, dt)
+    # log_lik = std.ode_log_likelihood(std_trajs, extra_args={'cond': None})
 
 
 if __name__ == "__main__":
