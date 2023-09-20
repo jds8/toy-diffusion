@@ -84,7 +84,9 @@ class GuidanceType(Enum):
 
 @dataclass
 class ModelConfig:
-    traj_length: int = 40
+
+    def name(self):
+        return 'ModelConfig'
 
 
 @dataclass

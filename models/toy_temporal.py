@@ -18,9 +18,40 @@ from models.toy_helpers import (
 )
 
 
+class ResidualBlock(nn.Module):
+
+    def __init__(self, inp_channels, out_channels, embed_dim, kernel_size=5):
+        super().__init__()
+
+        self.blocks = nn.ModuleList([
+            Conv1dBlock(inp_channels, out_channels, kernel_size),
+            Conv1dBlock(out_channels, out_channels, kernel_size),
+        ])
+
+        self.time_mlp = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(embed_dim, out_channels),
+            Rearrange('batch t -> batch t 1'),
+        )
+
+        self.residual_conv = nn.Conv1d(inp_channels, out_channels, 1) \
+            if inp_channels != out_channels else nn.Identity()
+
+    def forward(self, x, t):
+        '''
+            x : [ batch_size x inp_channels x traj_length ]
+            t : [ batch_size x embed_dim ]
+            returns:
+            out : [ batch_size x out_channels x traj_length ]
+        '''
+        out = self.blocks[0](x) + self.time_mlp(t)
+        out = self.blocks[1](out)
+        return out + self.residual_conv(x)
+
+
 class ResidualTemporalBlock(nn.Module):
 
-    def __init__(self, inp_channels, out_channels, embed_dim, traj_length, kernel_size=5):
+    def __init__(self, inp_channels, out_channels, embed_dim, kernel_size=5):
         super().__init__()
 
         self.blocks = nn.ModuleList([
@@ -65,7 +96,6 @@ class TemporalUnet(nn.Module):
 
     def __init__(
         self,
-        traj_length,
         d_model,
         cond_dim,
         dim=32,
@@ -79,7 +109,6 @@ class TemporalUnet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
-        self.traj_length = traj_length
         self.d_model = d_model
 
         time_dim = dim
@@ -114,32 +143,27 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, traj_length=traj_length),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
-            if not is_last:
-                traj_length = traj_length // 2
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, traj_length=traj_length),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
-
-            if not is_last:
-                traj_length = traj_length * 2
 
         self.final_conv = nn.Sequential(
             Conv1dBlock(dim, dim, kernel_size=5),
@@ -186,7 +210,7 @@ class TemporalUnet(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
-class TemporalRegressor(nn.Module):
+class TemporalClassifier(nn.Module):
 
     def __init__(
         self,
@@ -197,15 +221,17 @@ class TemporalRegressor(nn.Module):
         dim_mults=(1, 2, 4, 8),
         attention=False,
         device=None,
+        num_classes=4,
     ):
         super().__init__()
 
         dims = [d_model, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
+        self.in_out = in_out
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
-        self.traj_length = traj_length
         self.d_model = d_model
+        self.num_classes = num_classes
 
         time_dim = dim
         self.time_dim = time_dim
@@ -216,20 +242,6 @@ class TemporalRegressor(nn.Module):
             nn.Linear(dim * 4, dim),
         )
 
-        self.cond_dim = cond_dim
-        self.cond_mlp = nn.Sequential(
-            nn.Linear(self.cond_dim, dim),
-            nn.Mish(),
-            nn.Linear(dim, dim),
-        )
-
-        self.bool_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim),
-            nn.Mish(),
-            nn.Linear(dim, dim),
-        )
-
         self.downs = nn.ModuleList([])
         num_resolutions = len(in_out)
 
@@ -238,21 +250,22 @@ class TemporalRegressor(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, traj_length=traj_length),
+                ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
-            if not is_last:
-                traj_length = traj_length // 2
-
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block1 = ResidualBlock(mid_dim, mid_dim, embed_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block2 = ResidualBlock(mid_dim, mid_dim, embed_dim=time_dim)
 
-    def forward(self, x, time, cond):
+        self.final_conv = nn.Sequential(
+            nn.Linear(mid_dim * traj_length // 8, self.num_classes),
+        )
+
+    def forward(self, x, time):
         '''
             x : [ batch x traj_length x transition ]
         '''
@@ -261,27 +274,23 @@ class TemporalRegressor(nn.Module):
         x = einops.rearrange(x, 'b h t -> b t h')
 
         t = self.time_mlp(time)
-        cond = cond if cond is not None else torch.ones(t.shape[0], 1, device=x.device) * -1
-        cemb = self.cond_mlp(cond).reshape(cond.shape[0], -1)
-
-        use_cond = (cond > 0.).to(torch.float).reshape(cond.shape)
-        bool_emb = self.bool_mlp(use_cond).reshape(cemb.shape)
         h = []
 
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
-            x = resnet(x, t, cemb, bool_emb)
-            x = resnet2(x, t, cemb, bool_emb)
+            x = resnet(x, t)
+            x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
 
-        x = self.mid_block1(x, t, cemb, bool_emb)
+        x = self.mid_block1(x, t)
         x = self.mid_attn(x)
-        x = self.mid_block2(x, t, cemb, bool_emb)
+        x = self.mid_block2(x, t)
 
-        x = self.final_conv(x)
+        x = x.flatten(1)
 
-        x = einops.rearrange(x, 'b t h -> b h t')
+        y = self.final_conv(x)
+
         return y
 
 
@@ -289,7 +298,6 @@ class TemporalTransformerUnet(nn.Module):
 
     def __init__(
         self,
-        traj_length,
         d_model,
         cond_dim,
         dim=32,
@@ -303,7 +311,6 @@ class TemporalTransformerUnet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
-        self.traj_length = traj_length
         self.d_model = d_model
         self.attention = attention
 
@@ -339,40 +346,34 @@ class TemporalTransformerUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, traj_length=traj_length),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, Attention(dim_out, permute=True))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
-            if not is_last:
-                traj_length = traj_length // 2
-
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, permute=True))) if attention else nn.Identity()
-        self.mid_block3 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
-        self.mid_block4 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, traj_length=traj_length)
+        self.mid_block3 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block4 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, traj_length=traj_length),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, traj_length=traj_length),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, Attention(dim_in, permute=True))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
-
-            if not is_last:
-                traj_length = traj_length * 2
 
         self.final_conv1 = Conv1dBlock(dim, dim, kernel_size=5)
 

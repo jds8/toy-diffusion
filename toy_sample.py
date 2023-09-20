@@ -15,7 +15,7 @@ from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path
 from models.toy_sampler import Sampler
 from toy_likelihoods import Likelihood
-from models.toy_temporal import TemporalTransformerUnet
+from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier
 from models.toy_diffusion_models_config import GuidanceType
 
 
@@ -54,10 +54,11 @@ class ToyEvaluator:
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
+        cumsum_x0_hat = x0_hat.cumsum(dim=1)
         if isinstance(self.diffusion_model, TemporalTransformerUnet):
-            return self.likelihood.grad_log_lik(cond, xt, x0_hat, cond_traj)
+            return self.likelihood.grad_log_lik(cond, xt, cumsum_x0_hat, cond_traj)
         else:
-            return self.likelihood.grad_log_lik(cond, xt, x0_hat)
+            return self.likelihood.grad_log_lik(cond, xt, cumsum_x0_hat)
 
     def sample_trajectories(self, cond_traj=None):
         x = torch.randn(
