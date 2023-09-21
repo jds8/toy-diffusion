@@ -54,9 +54,9 @@ class ToyTrainer:
     def initialize_optimizer(self):
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
         try:
-            self.classifier_optimizer = torch.optim.Adam(self.classifier.parameters(), self.cfg.lr)
+            self.classifier_optimizer = torch.optim.Adam(self.classifier.parameters(), self.cfg.classifier_lr)
         except:
-            self.classifier_optimizer = torch.optim.Adam([self.classifier], self.cfg.lr)
+            self.classifier_optimizer = torch.optim.Adam([self.classifier], self.cfg.classifier_lr)
         self.num_steps = 0
 
     def clip_gradients(self):
@@ -173,7 +173,6 @@ class ToyTrainer:
         ])
         eps = torch.randn_like(x0)
         xt, to_predict = self.sampler.forward_sample(x_start=x0, t=t, noise=eps)
-        print('xt max: {}'.format(xt.max()))
 
         model_output = self.diffusion_model(xt, t, cond)
 
@@ -193,8 +192,9 @@ class ToyTrainer:
         return F.cross_entropy(predicted_unnormalized_logits, true_class)
 
     def get_class(self, x0):
-        final_state = torch.abs(x0.cumsum(-2)[:, -1, 0])
-        return torch.min(torch.abs(final_state).floor(), torch.tensor(3., device=device)).to(torch.long)
+        final_state = x0.cumsum(dim=1)[:, -1, 0]
+        # return torch.min(torch.abs(final_state).floor(), torch.tensor(self.classifier.num_classes, device=device)).to(torch.long)
+        return (final_state > 0).to(torch.long)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="train_config")
@@ -212,7 +212,13 @@ def train(cfg):
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
     likelihood = hydra.utils.instantiate(cfg.likelihood)
     # classifier = None
-    classifier = TemporalClassifier(1000, d_model, cfg.diffusion.cond_dim)
+    num_classes = 2
+    classifier = TemporalClassifier(
+        traj_length=1000,
+        d_model=d_model,
+        cond_dim=cfg.diffusion.cond_dim,
+        num_classes=num_classes,
+    )
 
     trainer = ToyTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model, likelihood=likelihood, classifier=classifier)
 
