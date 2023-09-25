@@ -4,7 +4,7 @@ from hydra.core.config_store import ConfigStore
 from models.toy_diffusion_models_config import EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, TemporalUnetConfig, \
     TemporalTransformerUnetConfig
-from toy_likelihood_configs import DistLikelihoodConfig, RLAILikelihoodConfig
+from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
 
 
 def register_configs() -> None:
@@ -50,7 +50,17 @@ def register_configs() -> None:
         node=DistLikelihoodConfig,
     )
     cs.store(
+        group='likelihood',
+        name='general_dist_likelihood',
+        node=GeneralDistLikelihoodConfig,
+    )
+    cs.store(
         group="likelihood",
         name="rlai_likelihood",
         node=RLAILikelihoodConfig,
+    )
+    cs.store(
+        group='likelihood',
+        name='classifier_likelihood',
+        node=ClassifierLikelihoodConfig,
     )

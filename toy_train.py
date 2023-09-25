@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from toy_plot import SDE, Trajectories, integrate
-from toy_train_config import TrainConfig, get_model_path
+from toy_train_config import TrainConfig, get_model_path, get_classifier_path
 from toy_configs import register_configs
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier
 
@@ -42,6 +42,12 @@ class ToyTrainer:
         self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
         self.likelihood = likelihood
         self.classifier = classifier.to(device) if classifier is not None else nn.Parameter(torch.rand(3, 4))
+        try:
+            classifier_path = get_classifier_path(self.cfg)
+            self.classifier.load_state_dict(torch.load('{}'.format(classifier_path)))
+        except:
+            print('Not loading classifier state_dict')
+            pass
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
@@ -188,7 +194,12 @@ class ToyTrainer:
 
     def get_classifier_loss(self, x0, xt, t):
         true_class = self.get_class(x0)
-        predicted_unnormalized_logits = self.classifier(xt, t)
+        predicted_unnormalized_logits = self.classifier(x0, t-t)
+        predicted_class = nn.Softmax()(predicted_unnormalized_logits).argmax(dim=-1)
+        training_accuracy = (true_class == predicted_class).to(float).mean()
+        print('training accuracy: {}'.format(training_accuracy))
+        if training_accuracy > 0.92:
+            import pdb; pdb.set_trace()
         return F.cross_entropy(predicted_unnormalized_logits, true_class)
 
     def get_class(self, x0):
@@ -212,7 +223,7 @@ def train(cfg):
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
     likelihood = hydra.utils.instantiate(cfg.likelihood)
     # classifier = None
-    num_classes = 2
+    num_classes = 4
     classifier = TemporalClassifier(
         traj_length=1000,
         d_model=d_model,

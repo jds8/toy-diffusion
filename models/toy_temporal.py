@@ -198,7 +198,8 @@ class TemporalUnet(nn.Module):
         x = self.mid_block2(x, t, cemb, bool_emb)
 
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
-            x = torch.cat((x, h.pop()), dim=1)
+            hpop = h.pop()
+            x = torch.cat((x, hpop), dim=1)
             x = resnet(x, t, cemb, bool_emb)
             x = resnet2(x, t, cemb, bool_emb)
             x = attn(x)
@@ -265,33 +266,118 @@ class TemporalClassifier(nn.Module):
             nn.Linear(mid_dim * traj_length // 8, self.num_classes),
         )
 
+        self.other_layer = nn.Linear(1000, 2)
+
+    def forward(self, x, time):
+        '''
+            x : [ batch x traj_length x transition ]
+        '''
+
+        # b_dim, h_dim, t_dim = x.shape
+        # x = einops.rearrange(x, 'b h t -> b t h')
+
+        # t = self.time_mlp(time)
+        # h = []
+
+        # import pdb; pdb.set_trace()
+        # for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
+        #     x = resnet(x, t)
+        #     x = resnet2(x, t)
+        #     x = attn(x)
+        #     h.append(x)
+        #     x = downsample(x)
+
+        # x = self.mid_block1(x, t)
+        # x = self.mid_attn(x)
+        # x = self.mid_block2(x, t)
+
+        # x = x.flatten(1)
+
+        # y = self.final_conv(x)
+
+        y = self.other_layer(x[..., 0])
+        return y
+
+
+class NewTemporalClassifier(nn.Module):
+
+    def __init__(
+        self,
+        traj_length,
+        d_model,
+        cond_dim,
+        dim=32,
+        dim_mults=(1, 2, 4, 8),
+        attention=True,
+        device=None,
+        num_classes=4,
+    ):
+        super().__init__()
+
+        dims = [d_model, *map(lambda m: dim * m, dim_mults)]
+        in_out = list(zip(dims[:-1], dims[1:]))
+        self.in_out = in_out
+        print(f'[ models/temporal ] Channel dimensions: {in_out}')
+
+        self.d_model = d_model
+        self.num_classes = num_classes
+
+        time_dim = dim
+        self.time_dim = time_dim
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(dim),
+            nn.Linear(dim, dim * 4),
+            nn.Mish(),
+            nn.Linear(dim * 4, dim),
+        )
+
+        # for ind, (dim_in, dim_out) in enumerate(in_out):
+        #     is_last = ind >= (num_resolutions - 1)
+
+        #     self.downs.append(nn.ModuleList([
+        #         ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
+        #         ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+        #         Residual(PreNorm(dim_out, Attention(dim_out, permute=True))) if attention else nn.Identity(),
+        #         Downsample1d(dim_out) if not is_last else nn.Identity()
+        #     ]))
+
+        # mid_dim = dims[-1]
+        # self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        # self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        # self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, permute=True))) if attention else nn.Identity()
+        # self.mid_block3 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        # self.mid_block4 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+
+        self.residual1 = ResidualBlock(1, dim, embed_dim=time_dim)
+        self.residual2 = ResidualBlock(dim, dim, embed_dim=time_dim)
+        self.residual3 = nn.Conv1d(dim, 1, 1)
+
+        self.hidden_dim = 2048
+        self.final_layer = nn.Sequential(
+            nn.Linear(1000, self.hidden_dim),
+            nn.SiLU(),
+            nn.Linear(self.hidden_dim, num_classes)
+        )
+
     def forward(self, x, time):
         '''
             x : [ batch x traj_length x transition ]
         '''
 
         b_dim, h_dim, t_dim = x.shape
-        x = einops.rearrange(x, 'b h t -> b t h')
+        # x = einops.rearrange(x, 'b h t -> b t h')
 
-        t = self.time_mlp(time)
-        h = []
+        # t = self.time_mlp(time)
 
-        for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
-            x = resnet(x, t)
-            x = resnet2(x, t)
-            x = attn(x)
-            h.append(x)
-            x = downsample(x)
+        # y = self.residual1(x, t)
+        # y = self.residual2(y, t)
+        # y = self.residual3(y)
 
-        x = self.mid_block1(x, t)
-        x = self.mid_attn(x)
-        x = self.mid_block2(x, t)
+        # y = einops.rearrange(y, 'b t h -> b h t')
+        # y = self.final_layer(y[..., 0])
+        # return y
 
-        x = x.flatten(1)
-
-        y = self.final_conv(x)
-
-        return y
+        return self.final_layer(x[..., 0])
 
 
 class TemporalTransformerUnet(nn.Module):

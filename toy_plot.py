@@ -2,6 +2,7 @@
 
 import warnings
 
+from typing import List
 from collections import namedtuple
 import torch
 import torch.distributions as dist
@@ -24,9 +25,9 @@ def integrate(sde: SDE, timesteps: torch.Tensor, end_time: torch.Tensor, n_sampl
     Integrates the SDE to time "end_time" independently "n_samples" times over "timesteps" steps
     """
     dt = end_time/timesteps
-    W = torch.zeros(n_samples, timesteps+1, device=device)
-    llk = torch.zeros(n_samples, timesteps+1, device=device)
-    is_rare = torch.zeros(n_samples, timesteps+1, device=device)
+    W = torch.zeros(n_samples, timesteps+1, device=n_samples.device)
+    llk = torch.zeros(n_samples, timesteps+1, device=n_samples.device)
+    is_rare = torch.zeros(n_samples, timesteps+1, device=n_samples.device)
     for timestep in range(1, timesteps+1):
         dW = dist.Normal(0, torch.sqrt(dt)).sample(n_samples)
         mu = W[:, timestep-1] + sde.drift * dt
@@ -34,6 +35,12 @@ def integrate(sde: SDE, timesteps: torch.Tensor, end_time: torch.Tensor, n_sampl
         llk[:, timestep] = llk[:, timestep-1] + dist.Normal(mu, sde.diffusion ** 2 * dt).log_prob(W[:, timestep])
         is_rare[:, timestep] = torch.abs(W[:, timestep] - sde.drift * dt * timestep) > 3 * torch.sqrt(dt * timestep)
     return Trajectories(W, llk, is_rare, dt)
+
+def index_trajs(trajs: Trajectories, idx: List[int]):
+    W = trajs.W[idx].reshape(len(idx), -1)
+    llk = trajs.llk[idx].reshape(len(idx), -1)
+    is_rare = trajs.is_rare[idx].reshape(len(idx), -1)
+    return Trajectories(W, llk, is_rare, trajs.dt)
 
 def plot_motions(trajs, savefig=False):
     """

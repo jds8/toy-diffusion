@@ -70,6 +70,17 @@ def sigmoid_beta_schedule(timesteps):
     betas = torch.linspace(-6, 6, timesteps)
     return torch.sigmoid(betas) * (beta_end - beta_start) + beta_start
 
+def get_beta_schedule(beta_schedule: BetaSchedule):
+    if beta_schedule == BetaSchedule.LinearSchedule:
+        return linear_beta_schedule
+    elif beta_schedule == BetaSchedule.CosineSchedule:
+        return cosine_beta_schedule
+    elif beta_schedule == BetaSchedule.QuadraticSchedule:
+        return quadratic_beta_schedule
+    elif beta_schedule == BetaSchedule.SigmoidSchedule:
+        return sigmoid_beta_schedule
+    else:
+        raise NotImplementedError
 
 class AbstractSampler:
     def __init__(self, beta_schedule, diffusion_timesteps: int, guidance_coef: float):
@@ -78,7 +89,7 @@ class AbstractSampler:
         self.guidance_coef = guidance_coef
 
         # define beta schedule
-        beta_schedule_fn = self.get_beta_schedule(beta_schedule)
+        beta_schedule_fn = get_beta_schedule(beta_schedule)
         self.betas = beta_schedule_fn(diffusion_timesteps)
 
         # define alphas
@@ -95,18 +106,6 @@ class AbstractSampler:
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
         self.posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
-
-    def get_beta_schedule(self, beta_schedule: BetaSchedule):
-        if beta_schedule == BetaSchedule.LinearSchedule:
-            return linear_beta_schedule
-        elif beta_schedule == BetaSchedule.CosineSchedule:
-            return cosine_beta_schedule
-        elif beta_schedule == BetaSchedule.QuadraticSchedule:
-            return quadratic_beta_schedule
-        elif beta_schedule == BetaSchedule.SigmoidSchedule:
-            return sigmoid_beta_schedule
-        else:
-            raise NotImplementedError
 
     def extract(self, a, t, x_shape):
         batch_size = t.shape[0]

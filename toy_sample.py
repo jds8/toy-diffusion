@@ -12,9 +12,9 @@ from torchdiffeq import odeint
 
 from toy_plot import SDE
 from toy_configs import register_configs
-from toy_train_config import SampleConfig, get_model_path
+from toy_train_config import SampleConfig, get_model_path, get_classifier_path
 from models.toy_sampler import Sampler
-from toy_likelihoods import Likelihood
+from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier
 from models.toy_diffusion_models_config import GuidanceType
 
@@ -34,7 +34,7 @@ class ToyEvaluator:
         likelihood: Likelihood,
     ):
         self.cfg = cfg
-        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond > 0. else None
+        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
         self.sampler = sampler
         self.diffusion_model = diffusion_model.to(device)
         self.diffusion_model.eval()
@@ -46,19 +46,20 @@ class ToyEvaluator:
         model_path = get_model_path(self.cfg)
         try:
             # load softmax model
-            print('attempting to load model: {}'.format(model_path))
+            print('attempting to load diffusion model: {}'.format(model_path))
             self.diffusion_model.load_state_dict(torch.load('{}'.format(model_path)))
-            print('successfully loaded')
+            print('successfully loaded diffusion model')
         except Exception as e:
             print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
-        cumsum_x0_hat = x0_hat.cumsum(dim=1)
         if isinstance(self.diffusion_model, TemporalTransformerUnet):
-            return self.likelihood.grad_log_lik(cond, xt, cumsum_x0_hat, cond_traj)
+            return self.likelihood.grad_log_lik(cond, xt, x0_hat, cond_traj)
+        elif type(self.likelihood) in [ClassifierLikelihood, GeneralDistLikelihood]:
+            return self.likelihood.grad_log_lik(cond, xt, x0_hat, t)
         else:
-            return self.likelihood.grad_log_lik(cond, xt, cumsum_x0_hat)
+            return self.likelihood.grad_log_lik(cond, xt, x0_hat)
 
     def sample_trajectories(self, cond_traj=None):
         x = torch.randn(
@@ -77,15 +78,18 @@ class ToyEvaluator:
                 unconditional_output = self.diffusion_model(x, time, None)
             unconditional_output = self.diffusion_model(x, time, None)
             if self.cfg.guidance == GuidanceType.Classifier:
-                with torch.enable_grad():
-                    xt = x.detach().clone().requires_grad_(True)
-                    grad_log_lik = self.grad_log_lik(xt, time, self.cond, unconditional_output, cond_traj)
+                if self.cond is not None:
+                    with torch.enable_grad():
+                        xt = x.detach().clone().requires_grad_(True)
+                        grad_log_lik = self.grad_log_lik(xt, time, self.cond, unconditional_output, cond_traj)
+                else:
+                    grad_log_lik = torch.tensor(0.)
                 x = self.sampler.classifier_guided_reverse_sample(
                     xt=x, unconditional_output=unconditional_output,
                     t=t.item(), grad_log_lik=grad_log_lik
                 )
             elif self.cfg.guidance == GuidanceType.ClassifierFree:
-                if self.cond is None or self.cond <= 0.:
+                if self.cond is None or self.cond < 0.:
                     conditional_output = unconditional_output
                 else:
                     if isinstance(self.diffusion_model, TemporalTransformerUnet):
@@ -169,11 +173,16 @@ def sample(cfg):
         torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
         undiffed_trajs
     ], dim=1)
-    end_time = torch.tensor(1.)
+    end_time = torch.tensor(1., device=device)
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
 
-    # TODO: remove
+    dt = end_time / cfg.sde_steps
+    analytic_llk = std.analytic_log_likelihood(out_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
+    ode_llk = std.ode_log_likelihood(undiffed_trajs, extra_args={'cond': None})
+    mse_llk = torch.nn.MSELoss()(analytic_llk.squeeze(), ode_llk[0])
+
+    # # TODO: remove
     # std_trajs = torch.rand(100, 1000, 1, device=device)
     # sde = SDE(cfg.sde_drift, cfg.sde_diffusion)
     # dt = torch.tensor(1., device=device) / cfg.sde_steps

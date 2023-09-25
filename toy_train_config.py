@@ -32,6 +32,12 @@ class TrainConfig(BaseConfig):
     p_uncond: float = 1.
 
 
+def get_path(cfg: TrainConfig, model_name):
+    return "{}/{}".format(
+        cfg.model_dir,
+        model_name,
+    )
+
 def get_model_path(cfg: TrainConfig):
     if cfg.model_name:
         model_name = cfg.model_name
@@ -39,11 +45,16 @@ def get_model_path(cfg: TrainConfig):
         sampler_name = OmegaConf.to_object(cfg.sampler).name()
         diffusion_name = OmegaConf.to_object(cfg.diffusion).name()
         model_name = "{}_{}".format(sampler_name, diffusion_name)
-    return "{}/{}".format(
-        cfg.model_dir,
-        model_name,
-    )
+    return get_path(cfg, model_name)
 
+def get_classifier_path(cfg: TrainConfig):
+    if cfg.likelihood.classifier_name:
+        model_name = cfg.likelihood.classifier_name
+    else:
+        sampler_name = OmegaConf.to_object(cfg.sampler).name()
+        diffusion_name = OmegaConf.to_object(cfg.diffusion).name()
+        model_name = "{}_{}_classifier".format(sampler_name, diffusion_name)
+    return get_path(cfg, model_name)
 
 @dataclass
 class SampleConfig(BaseConfig):

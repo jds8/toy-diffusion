@@ -4,6 +4,11 @@ import torch
 import numpy as np
 from toy_likelihood_configs import DistanceFunction
 
+from models.toy_temporal import NewTemporalClassifier
+from models.toy_sampler import get_beta_schedule
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def final_state_dist(traj: torch.Tensor) -> torch.Tensor:
     return traj[..., -1, :].sum(-1)
 
@@ -13,15 +18,14 @@ def final_state_dist_from_cond(traj: torch.Tensor, cond: torch.Tensor) -> torch.
 # def linear_dist(traj: torch.Tensor) -> torch.Tensor:
 #     return ( (traj[..., 0, :2] - traj[..., -1, :2]) ** 2 ).sum(dim=-1).sqrt()
 
-# def traj_dist(traj: torch.Tensor, cond_traj: torch.Tensor):
-#     return ( (traj[..., :2] - cond_traj[..., :2]) ** 2 ).sum(dim=(-1, -2)).sqrt()
+def traj_dist(traj: torch.Tensor, cond_traj: torch.Tensor):
+    return ( (traj[..., :2] - cond_traj[..., :2]) ** 2 ).sum(dim=(-1, -2)).sqrt()
 
-# def curve_dist(traj: torch.Tensor, traj_mean: torch.Tensor, traj_std: torch.Tensor) -> torch.Tensor:
-#     curve_traj_file = 'speed_mega_trajectory_cluster_16.csv'
-#     curve_traj = np.loadtxt(curve_traj_file)
-#     curve_tensor = torch.tensor(curve_traj, dtype=traj.dtype, device=traj.device)[:, :2].diff(dim=-2)
-#     curve_tensor = (curve_tensor - traj_mean[..., :2]) / traj_std[..., :2]
-#     return traj_dist(traj, curve_tensor)
+def curve_dist(traj: torch.Tensor) -> torch.Tensor:
+    curve_traj_file = 'condition_traj.csv'
+    curve_traj = np.loadtxt(curve_traj_file)
+    curve_tensor = torch.tensor(curve_traj, dtype=traj.dtype, device=traj.device)[:, :2].diff(dim=-2)
+    return traj_dist(traj, curve_tensor)
 
 
 class Likelihood:
@@ -62,6 +66,35 @@ class DistLikelihood(Likelihood):
         return sum_grad
 
 
+class GeneralDistLikelihood(Likelihood):
+    def __init__(self, beta_schedule, timesteps, dist_fun_type):
+        self.beta_schedule = beta_schedule
+        beta_schedule_fn = get_beta_schedule(beta_schedule)
+        self.timesteps = timesteps
+        self.betas = beta_schedule_fn(timesteps)
+        self.betas = torch.ones_like(self.betas) * 0.2
+        self.cond = self.get_rare_traj()
+
+    def condition(self, *x):
+        mu, t = x
+        if mu.isnan().any():
+            import pdb; pdb.set_trace()
+        normals = torch.distributions.Normal(mu.squeeze(-1), self.betas[t])
+        return normals
+
+    def get_rare_traj(self):
+        rare_traj_file = 'rare_traj.pt'
+        rare_traj = torch.load(rare_traj_file).to(device)
+        return rare_traj.diff(dim=-1)
+
+    def grad_log_lik(self, _, wrt, *x):
+        # computes gradient of log p(y|x) with respect to wrt
+        normals = self.condition(*x)
+        log_probs = normals.log_prob(self.cond)
+        sum_grad = torch.autograd.grad(log_probs.sum(), wrt, retain_graph=True)[0]
+        return sum_grad
+
+
 class RLAILikelihood(Likelihood):
     def __init__(self, dist_fun_type):
         self.dist_fun_type = dist_fun_type
@@ -84,5 +117,27 @@ class RLAILikelihood(Likelihood):
         r = final_state_dist_from_cond(*x, y)
         bernoullis = torch.distributions.Bernoulli(torch.exp(-r))
         log_probs = bernoullis.log_prob(torch.tensor(1., device=y.device))
+        sum_grad = torch.autograd.grad(log_probs.sum(), wrt, retain_graph=True)[0]
+        return sum_grad
+
+
+class ClassifierLikelihood(Likelihood):
+    def __init__(self, classifier_name, cond_dim, num_classes):
+        self.classifier = NewTemporalClassifier(
+            traj_length=1000,
+            d_model=torch.tensor(1),
+            cond_dim=cond_dim,
+            num_classes=num_classes,
+        ).to(device)
+        self.classifier.load_state_dict(torch.load('{}'.format(classifier_name)))
+
+    def get_condition(self, *x):
+        return torch.nn.Softmax(dim=-1)(self.classifier(*x)).argmax(dim=-1)
+
+    def grad_log_lik(self, y, wrt, *x):
+        predicted_unnormalized_logits = self.classifier(*x)
+        probs = torch.nn.Softmax(dim=-1)(predicted_unnormalized_logits)
+        cats = torch.distributions.Categorical(probs)
+        log_probs = cats.log_prob(y)
         sum_grad = torch.autograd.grad(log_probs.sum(), wrt, retain_graph=True)[0]
         return sum_grad
