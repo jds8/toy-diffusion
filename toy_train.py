@@ -60,16 +60,17 @@ class ToyTrainer:
     def clip_gradients(self):
         nn.utils.clip_grad_norm_(self.diffusion_model.module.parameters(), self.cfg.max_gradient)
 
-    def likelihood_weighting(self, model_output, to_predict, xt, t):
-        loss_fn = torch.nn.MSELoss()
+    def likelihood_weighting(self, model_output, to_predict, x0, t, noise):
+        _, std = self.sampler.marginal_prob(x0, t)
+        score = self.sampler.get_sf_estimator(model_output, x0, t)
+        losses = (score + noise / std) ** 2  # score = -eps / std so we have *plus sign*
         g2 = self.sampler.sde(torch.zeros_like(model_output), t)[1] ** 2
-        losses = jnp.square(score + batch_mul(z, 1. / std))
-        return loss_fn(model_output, to_predict) * g2
+        return losses * g2
 
     def get_loss_fn(self):
         return {
-            'l1': lambda model_output, to_predict, xt, t : torch.nn.L1Loss()(model_output, to_predict),
-            'l2': lambda model_output, to_predict, xt, t : torch.nn.MSELoss()(model_output, to_predict),
+            'l1': lambda model_output, to_predict, x0, t, noise : torch.nn.L1Loss()(model_output, to_predict),
+            'l2': lambda model_output, to_predict, x0, t, noise : torch.nn.MSELoss()(model_output, to_predict),
             'likelihood_weighting': self.likelihood_weighting,
         }[self.cfg.loss_fn]
 
@@ -127,11 +128,11 @@ class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0):
         cond = self.likelihood.get_condition(x0) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
-        xt, t, to_predict = self.sampler.forward_sample(x_start=x0)
+        xt, t, noise, to_predict = self.sampler.forward_sample(x_start=x0)
 
         model_output = self.diffusion_model(xt, t, cond)
 
-        loss = self.loss_fn(model_output, to_predict, xt, t)
+        loss = self.loss_fn(model_output, to_predict, xt, t, noise)
 
         return loss
 

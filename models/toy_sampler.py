@@ -203,7 +203,7 @@ class VPSDEEpsilonSampler(VPSDESampler):
         return self.get_posterior_mean(xt, eps, t)
 
     def get_sf_estimator(self, eps_pred, xt, t):
-        _, sigma_t = self.marginal_prob(xt, t)
+        _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
         return -eps_pred / sigma_t
 
 
@@ -265,7 +265,7 @@ class AbstractDiscreteSampler(AbstractSampler):
             self.sqrt_one_minus_alphas_cumprod, t, x_start.shape
         )
         xt = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
-        return xt, t, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        return xt, t, noise, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
 
     def reverse_sample(self, xt, t, conditional_mean):
         noise = torch.randn_like(xt)
