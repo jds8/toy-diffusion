@@ -92,6 +92,38 @@ class ResidualTemporalBlock(nn.Module):
         return out + self.residual_conv(x)
 
 
+class TemporalIDK(nn.Module):
+
+    def __init__(
+        self,
+        device=None,
+    ):
+        super().__init__()
+
+        dim = 32
+        time_dim = dim
+        self.time_dim = time_dim
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(dim),
+            nn.Linear(dim, dim * 4),
+            nn.Mish(),
+            nn.Linear(dim * 4, dim),
+        )
+
+        dim_in = 1
+        self.resnet1 = ResidualBlock(dim_in, time_dim, embed_dim=time_dim)
+
+        self.final_conv = nn.Sequential(
+            Conv1dBlock(dim, dim, kernel_size=5),
+            nn.Conv1d(dim, 1, 1),
+        )
+
+    def forward(self, x, time, cond):
+        t = self.time_mlp(time)
+        x = self.resnet1(x, t)
+        return self.final_conv(x)
+
+
 class TemporalUnet(nn.Module):
 
     def __init__(
@@ -199,7 +231,11 @@ class TemporalUnet(nn.Module):
 
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
             hpop = h.pop()
-            x = torch.cat((x, hpop), dim=1)
+            try:
+                x = torch.cat((x, hpop), dim=1)
+            except:
+                import pdb; pdb.set_trace()
+                x = torch.cat((x, hpop), dim=1)
             x = resnet(x, t, cemb, bool_emb)
             x = resnet2(x, t, cemb, bool_emb)
             x = attn(x)
@@ -482,7 +518,7 @@ class TemporalTransformerUnet(nn.Module):
         cond_traj = einops.rearrange(cond_traj, 'b h t -> b t h')
 
         t = self.time_mlp(time)
-        cond = cond if cond is not None else torch.ones(t.shape[0], 1) * -1
+        cond = cond if cond is not None else torch.ones(t.shape[0], 1, device=x.device) * -1
         cemb = self.cond_mlp(cond).reshape(cond.shape[0], -1)
 
         use_cond = (cond > 0.).to(torch.float).reshape(cond.shape)

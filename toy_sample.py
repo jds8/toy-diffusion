@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 
 from torchdiffeq import odeint
 
-from toy_plot import SDE
+from toy_plot import SDE, analytical_log_likelihood
 from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path, get_classifier_path
-from models.toy_sampler import Sampler
+from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
-from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier
+from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalIDK
 from models.toy_diffusion_models_config import GuidanceType
 
 
@@ -29,7 +29,7 @@ class ToyEvaluator:
     def __init__(
         self,
         cfg: SampleConfig,
-        sampler: Sampler,
+        sampler: AbstractSampler,
         diffusion_model: nn.Module,
         likelihood: Likelihood,
     ):
@@ -61,13 +61,27 @@ class ToyEvaluator:
         else:
             return self.likelihood.grad_log_lik(cond, xt, x0_hat)
 
+    def viz_trajs(self, traj, end_time, idx, clf=True, clr='green'):
+        full_state_pred = traj.detach().squeeze(0).cpu().numpy()
+
+        plt.plot(torch.linspace(0, end_time, full_state_pred.shape[0]), full_state_pred, color=clr)
+
+        plt.savefig('figs/sample_{}.pdf'.format(idx))
+
+        if clf:
+            plt.clf()
+
+
+class DiscreteEvaluator(ToyEvaluator):
     def sample_trajectories(self, cond_traj=None):
-        x = torch.randn(
+        # x = torch.distributions.Normal(0, self.sampler.sqrt_one_minus_alphas_cumprod[-1]).sample([
+        #     self.cfg.num_samples, 1, 1
+        # ])
+        x = torch.distributions.Normal(0, self.sampler.sqrt_one_minus_alphas_cumprod[-1]).sample([
             self.cfg.num_samples,
             self.cfg.sde_steps,
             self.diffusion_model.d_model,
-            device=device
-        )
+        ])
         for t in torch.arange(self.sampler.diffusion_timesteps-1, -1, -1, device=device):
             if t % 100 == 0:
                 print(x[0, 0])
@@ -76,7 +90,6 @@ class ToyEvaluator:
                 unconditional_output = self.diffusion_model(x, time, None, None)
             else:
                 unconditional_output = self.diffusion_model(x, time, None)
-            unconditional_output = self.diffusion_model(x, time, None)
             if self.cfg.guidance == GuidanceType.Classifier:
                 if self.cond is not None:
                     with torch.enable_grad():
@@ -108,20 +121,10 @@ class ToyEvaluator:
                 )
         return x
 
-    def viz_trajs(self, traj, end_time, idx, clf=True):
-        full_state_pred = traj.detach().squeeze(0).cpu().numpy()
-
-        plt.plot(torch.linspace(0, end_time, full_state_pred.shape[0]), full_state_pred, color='green')
-
-        plt.savefig('figs/sample_{}.pdf'.format(idx))
-
-        if clf:
-            plt.clf()
-
     @torch.no_grad()
     def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
+        """ THIS PROBABLY SHOULDN'T BE USED """
         extra_args = {} if extra_args is None else extra_args
-        s_in = x.new_ones([x.shape[0]])
         # hutchinson's trick
         v = torch.randint_like(x, 2) * 2 - 1
         fevals = 0
@@ -130,64 +133,158 @@ class ToyEvaluator:
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
                 diffusion_time = t.reshape(-1) * self.sampler.diffusion_timesteps
-                sf_est = self.diffusion_model(x, diffusion_time, **extra_args)
-                coef = -0.5 * self.sampler.interpolate_beta(diffusion_time)
+                model_output = self.diffusion_model(x, diffusion_time, **extra_args)
+                sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=diffusion_time)
+                coef = -0.5 * interpolate_schedule(diffusion_time, self.sampler.betas)
                 dx_dt = coef * (x + sf_est)
                 fevals += 1
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
-        times = torch.tensor([0., 1.], device=x.device)
+        times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
         latent, delta_ll = sol[0][-1], sol[1][-1]
-        ll_prior = torch.distributions.Normal(0, self.sampler.betas[-1]).log_prob(latent).flatten(1).sum(1)
+        ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
+        # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
         return ll_prior + delta_ll, {'fevals': fevals}
 
-    def analytic_log_likelihood(self, x: torch.Tensor, sde: SDE, dt: torch.Tensor):
-        llk = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
-        x_prev = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
-        for xn in x.split(dim=1, split_size=1)[1:]:
-            x_next = xn[:, 0]
-            llk_prev = dist.Normal(x_prev + sde.drift * dt, sde.diffusion ** 2 * dt).log_prob(x_next)
-            llk += llk_prev
-            x_prev = x_next
-        return llk
 
-@hydra.main(version_base=None, config_path="conf", config_name="sample_config")
+class ContinuousEvaluator(ToyEvaluator):
+    def sample_trajectories(self, cond_traj=None, atol=1e-4, rtol=1e-4):
+        x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+                self.cfg.num_samples, 1, 1
+        ])
+
+        fevals = 0
+        def ode_fn(t, x):
+            nonlocal fevals
+            time = t.reshape(-1)
+            model_output = self.diffusion_model(x, time, cond_traj)
+            sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
+            dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
+            fevals += 1
+            return dx_dt
+
+        times = torch.tensor([self.sampler.t_eps, 1.], device=x_min.device)
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+        import pdb; pdb.set_trace()
+        sample = sol[0]
+        return sample
+
+    @torch.no_grad()
+    def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
+        extra_args = {} if extra_args is None else extra_args
+        # hutchinson's trick
+        v = torch.randint_like(x, 2) * 2 - 1
+        fevals = 0
+        def ode_fn(t, x):
+            nonlocal fevals
+            with torch.enable_grad():
+                x = x[0].detach().requires_grad_()
+                diffusion_time = t.reshape(-1)
+                model_output = self.diffusion_model(x, diffusion_time, **extra_args)
+                sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=diffusion_time)
+                coef = -0.5 * self.sampler.continuous_beta_schedule(t)
+                dx_dt = coef * (x + sf_est)
+                fevals += 1
+                grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
+                d_ll = (v * grad).flatten(1).sum(1)
+            return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
+        x_min = x, x.new_zeros([x.shape[0]])
+        times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+        latent, delta_ll = sol[0][-1], sol[1][-1]
+        ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
+        # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
+        return ll_prior + delta_ll, {'fevals': fevals}
+
+
+def plt_llk(traj, lik, plot_type='scatter'):
+    full_state_pred = traj.detach().squeeze().cpu().numpy()
+    full_state_lik = lik.detach().squeeze().cpu().numpy()
+
+    if plot_type == 'scatter':
+        plt.scatter(full_state_pred, full_state_lik, color='blue')
+    else:
+        idx = full_state_pred.argsort()
+        sorted_state = full_state_pred[idx]
+        sorted_lik = full_state_lik[idx]
+        plt.plot(sorted_state, sorted_lik, color='red')
+
+    plt.savefig('figs/scatter.pdf')
+
+
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
     d_model = torch.tensor(1)
     sampler = hydra.utils.instantiate(cfg.sampler)
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
+    diffusion_model = TemporalIDK()
     likelihood = hydra.utils.instantiate(cfg.likelihood)
 
-    std = ToyEvaluator(
+    std = ContinuousEvaluator(
         cfg=cfg,
         sampler=sampler,
         diffusion_model=diffusion_model,
         likelihood=likelihood,
     )
-    trajs = std.sample_trajectories()
+    end_time = torch.tensor(1., device=device)
+
+    cond_traj = None
+    # rare_traj_file = 'rare_traj.pt'
+    # rare_traj = torch.load(rare_traj_file).to(device)
+    # std.viz_trajs(rare_traj, end_time, 100, clf=False, clr='red')
+    # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
+
+    trajs = std.sample_trajectories(cond_traj)
     undiffed_trajs = trajs.cumsum(dim=-2)
     out_trajs = torch.cat([
         torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
         undiffed_trajs
     ], dim=1)
-    end_time = torch.tensor(1., device=device)
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
 
+    # TODO: remove
     dt = end_time / cfg.sde_steps
-    analytic_llk = std.analytic_log_likelihood(out_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
-    ode_llk = std.ode_log_likelihood(undiffed_trajs, extra_args={'cond': None})
-    mse_llk = torch.nn.MSELoss()(analytic_llk.squeeze(), ode_llk[0])
+    sample_trajs = out_trajs[:, 1].reshape(-1, 1, 1)
+    analytical_llk = torch.distributions.Normal(1, 2).log_prob(sample_trajs)
+    print('analytical_llk: {}'.format(analytical_llk))
+    ode_llk = std.ode_log_likelihood(sample_trajs, extra_args={'cond': None})
+    print('\node_llk: {}'.format(ode_llk))
+    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    print('\nmse_llk: {}'.format(mse_llk))
+
+    plt.clf()
+    plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
+    plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
+    import pdb; pdb.set_trace()
+
+    # dt = end_time / cfg.sde_steps
+    # analytical_llk = analytical_log_likelihood(out_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
+    # print('analytical_llk: {}'.format(analytical_llk))
+    # ode_llk = std.ode_log_likelihood(trajs, extra_args={'cond': None})
+    # print('\node_llk: {}'.format(ode_llk))
+    # mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    # print('\nmse_llk: {}'.format(mse_llk))
 
     # # TODO: remove
-    # std_trajs = torch.rand(100, 1000, 1, device=device)
+    # std_trajs = torch.randn(10, 1000, 1, device=device)
+    # undiffed_trajs = std_trajs.cumsum(dim=-2)
+    # out_trajs = torch.cat([
+    #     torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
+    #     undiffed_trajs
+    # ], dim=1)
     # sde = SDE(cfg.sde_drift, cfg.sde_diffusion)
     # dt = torch.tensor(1., device=device) / cfg.sde_steps
-    # log_lik = std.analytic_log_likelihood(std_trajs, sde, dt)
-    # log_lik = std.ode_log_likelihood(std_trajs, extra_args={'cond': None})
+    # analytical_llk = analytical_log_likelihood(out_trajs, sde, dt)
+    # print('analytical_llk: {}'.format(analytical_llk))
+    # ode_llk = std.ode_log_likelihood(std_trajs, extra_args={'cond': None})
+    # print('\node_llk: {}'.format(ode_llk))
+    # mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    # print('\nmse_llk: {}'.format(mse_llk))
+    # import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
@@ -196,7 +293,7 @@ if __name__ == "__main__":
         suppresswarning()
 
     cs = ConfigStore.instance()
-    cs.store(name="base_sample_config", node=SampleConfig)
+    cs.store(name="vpsde_sample_config", node=SampleConfig)
     register_configs()
 
     with torch.no_grad():

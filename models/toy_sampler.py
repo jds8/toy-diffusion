@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import torch
+import torch.distributions as dist
 import torch.nn.functional as F
 import numpy as np
 import torch.nn as nn
@@ -82,11 +83,139 @@ def get_beta_schedule(beta_schedule: BetaSchedule):
     else:
         raise NotImplementedError
 
+def interpolate_schedule(diffusion_time, schedule, decreasing=False):
+    floor = torch.floor(diffusion_time)
+    ceil = torch.ceil(diffusion_time)
+    if ceil < len(schedule):
+        ceil_beta = schedule[ceil.to(torch.long)]
+    else:
+        ceil_beta = schedule[-1]
+    if floor < len(schedule):
+        floor_beta = schedule[floor.to(torch.long)]
+    else:
+        floor_beta = schedule[-1]
+    if decreasing:
+        beta = ceil_beta + (diffusion_time - floor) * (floor_beta - ceil_beta)
+    else:
+        beta = floor_beta + (diffusion_time - floor) * (ceil_beta - floor_beta)
+    return beta
+
+
 class AbstractSampler:
-    def __init__(self, beta_schedule, diffusion_timesteps: int, guidance_coef: float):
-        self.beta_schedule = beta_schedule
+    def __init__(self, diffusion_timesteps: int, guidance_coef: float):
         self.diffusion_timesteps = diffusion_timesteps
         self.guidance_coef = guidance_coef
+
+    def prior_logp(self, z):
+        raise NotImplementedError
+
+    def forward_sample(self, x_start):
+        raise NotImplementedError
+
+    def reverse_sample(self, xt, t, conditional_mean):
+        raise NotImplementedError
+
+    def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
+        raise NotImplementedError
+
+    def classifier_free_reverse_sample(self, xt, unconditional_output, t, conditional_output):
+        conditional_mean = self.get_classifier_free_mean(xt, unconditional_output, torch.tensor([t]), conditional_output)
+        return self.reverse_sample(xt, t, conditional_mean)
+
+    def combine_eps(self, unconditional_eps, conditional_eps):
+        return (1 + self.guidance_coef) * conditional_eps - self.guidance_coef * unconditional_eps
+
+    def get_sf_estimator(self, model_output, xt, t):
+        raise NotImplementedError
+
+    def get_ground_truth(self, eps, xt, x0, t):
+        raise NotImplementedError
+
+#######################
+# Continuous Samplers #
+#######################
+
+class AbstractContinuousSampler(AbstractSampler):
+    def continuous_beta_schedule(timesteps: int):
+        raise NotImplementedError
+
+
+class VPSDESampler(AbstractContinuousSampler):
+    # heavily inspired by score_sde/sde_lib.py from Song et al. Score-Based Generative Modeling Through SDE
+    def __init__(self, diffusion_timesteps: int, guidance_coef: float, beta0: float, beta1: float, t_eps: float):
+        super().__init__(diffusion_timesteps, guidance_coef)
+        self.beta0 = beta0
+        self.beta1 = beta1
+        self.t_eps = t_eps
+
+    def continuous_beta_schedule(self, timestep: torch.Tensor):
+        return self.beta0 + timestep * (self.beta1 - self.beta0)
+
+    def sde(self, x: torch.Tensor, t: torch.Tensor):
+        beta_t = self.continuous_beta_schedule(t)
+        drift = -0.5 * beta_t * x
+        diffusion = beta_t.sqrt()
+        return drift, diffusion
+
+    def probability_flow_ode(self, x: torch.Tensor, t: torch.Tensor, score: torch.Tensor):
+        drift, diffusion = self.sde(x, t)
+        dx_dt = drift - 0.5 * diffusion ** 2 * score
+        return dx_dt
+
+    def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
+        log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
+        mean = log_mean_coeff.exp() * x
+        std = (1 - (2. * log_mean_coeff).exp()).sqrt()
+        return mean, std
+
+    def prior_logp(self, z: torch.Tensor):
+        return torch.distributions.Normal(0, 1).log_prob(z)
+
+    # forward diffusion (using the nice property)
+    def forward_sample(self, x_start):
+        lower = torch.tensor(self.t_eps, device=x_start.device)
+        upper = torch.tensor(1., device=x_start.device)
+        t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
+        noise = torch.rand_like(x_start)
+        mean, std = self.marginal_prob(x_start, t)
+        xt = mean + std * noise
+        return xt, t, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+
+    def reverse_sample(self, xt, t, conditional_mean):
+        '''
+        reverse probability flow ODE sampler
+        provenance: score_sde/sampling.py
+        '''
+        noise = torch.randn_like(xt)
+        nonzero_mask = torch.tensor(t != 0, dtype=self.betas.dtype)  # no noise when t == 0
+        posterior_variance = self.posterior_variance[t]
+        var = nonzero_mask * posterior_variance.sqrt() * noise
+        out = conditional_mean + var
+        return out
+
+
+class VPSDEEpsilonSampler(VPSDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        return eps
+
+    def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
+        eps = self.combine_eps(unconditional_output, conditional_output)
+        return self.get_posterior_mean(xt, eps, t)
+
+    def get_sf_estimator(self, eps_pred, xt, t):
+        _, sigma_t = self.marginal_prob(xt, t)
+        return -eps_pred / sigma_t
+
+
+#####################
+# Discrete Samplers #
+#####################
+
+class AbstractDiscreteSampler(AbstractSampler):
+    def __init__(self, beta_schedule, diffusion_timesteps: int, guidance_coef: float):
+        super().__init__(diffusion_timesteps, guidance_coef)
+        self.beta_schedule = beta_schedule
+        self.t_eps = 0.
 
         # define beta schedule
         beta_schedule_fn = get_beta_schedule(beta_schedule)
@@ -112,22 +241,6 @@ class AbstractSampler:
         out = a.gather(-1, t)
         return out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
 
-    def interpolate_beta(self, diffusion_time):
-        floor = torch.floor(diffusion_time)
-        ceil = torch.ceil(diffusion_time)
-        if ceil < len(self.betas):
-            ceil_beta = self.betas[ceil.to(torch.long)]
-        else:
-            ceil_beta = self.betas[-1]
-        if floor < len(self.betas):
-            floor_beta = self.betas[floor.to(torch.long)]
-        else:
-            floor_beta = self.betas[-1]
-        return floor_beta + (diffusion_time - floor) * (ceil_beta - floor_beta)
-
-    def get_ground_truth(self, eps, xt, x0, t):
-        raise NotImplementedError
-
     def bad_predict_xstart(self, xt, t, nsamples):
         shape = (nsamples,) + tuple(xt.shape)
         return (
@@ -136,13 +249,23 @@ class AbstractSampler:
         )
 
     # forward diffusion (using the nice property)
-    def forward_sample(self, x_start, t, noise):
+    def forward_sample(self, x_start):
+        t = dist.Categorical(
+            torch.ones(
+                self.diffusion_timesteps,
+                device=x_start.device
+            )
+        ).sample([
+            x_start.shape[0]
+        ])
+        noise = torch.randn_like(x_start)
+
         sqrt_alphas_cumprod_t = self.extract(self.sqrt_alphas_cumprod, t, x_start.shape)
         sqrt_one_minus_alphas_cumprod_t = self.extract(
             self.sqrt_one_minus_alphas_cumprod, t, x_start.shape
         )
         xt = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
-        return xt, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        return xt, t, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
 
     def reverse_sample(self, xt, t, conditional_mean):
         noise = torch.randn_like(xt)
@@ -160,24 +283,14 @@ class AbstractSampler:
         conditional_mean = mean + self.guidance_coef * self.posterior_variance[t] * grad_log_lik
         return self.reverse_sample(xt, t, conditional_mean)
 
-    def classifier_free_reverse_sample(self, xt, unconditional_output, t, conditional_output):
-        conditional_mean = self.get_classifier_free_mean(xt, unconditional_output, torch.tensor([t]), conditional_output)
-        return self.reverse_sample(xt, t, conditional_mean)
-
-    def combine_eps(self, unconditional_eps, conditional_eps):
-        return (1 + self.guidance_coef) * conditional_eps - self.guidance_coef * unconditional_eps
-
+    def prior_logp(self, z):
+        return torch.distributions.Normal(0, self.sampler.sqrt_one_minus_alphas_cumprod[-1]).log_prob(z)
 
 ###################
 # PREDICTION TYPE #
 ###################
 
-class Sampler(AbstractSampler):
-    def get_ground_truth(self, eps, xt, x0, t):
-        raise NotImplementedError
-
-
-class EpsilonSampler(Sampler):
+class EpsilonSampler(AbstractDiscreteSampler):
     def predict_xstart(self, xt, eps, t):
         return self.sqrt_recip_alphas_cumprod[t] * xt - self.sqrt_recipm1_alphas_cumprod[t] * eps
 
@@ -191,8 +304,12 @@ class EpsilonSampler(Sampler):
         eps = self.combine_eps(unconditional_output, conditional_output)
         return self.get_posterior_mean(xt, eps, t)
 
+    def get_sf_estimator(self, eps_pred, xt, t):
+        sigma_t = interpolate_schedule(t, self.sqrt_one_minus_alphas_cumprod, decreasing=True)
+        return -eps_pred / sigma_t
 
-class MuSampler(Sampler):
+
+class MuSampler(AbstractDiscreteSampler):
     def get_posterior_mean(self, xt, mean, t):
         return mean
 
@@ -204,7 +321,7 @@ class MuSampler(Sampler):
         return (alphas.sqrt() * (1 - alphas_cumprod_prev) * xt + alphas_cumprod_prev.sqrt() * betas * x0) / (1 - alphas_cumprod)
 
 
-class XstartSampler(Sampler):
+class XstartSampler(AbstractDiscreteSampler):
     def set_schedule_from_snr(self, snr, snr_prev):
         self.alphas_cumprod = torch.fill_(torch.ones(self.diffusion_timesteps), torch.sigmoid(torch.log(snr)))
         self.alphas_cumprod_prev = torch.sigmoid(torch.log(snr_prev)) if snr_prev is not None else torch.tensor(1.0)
@@ -228,7 +345,7 @@ class XstartSampler(Sampler):
         return self.get_posterior_mean(xt, classifier_free_xt, t)
 
 
-class ScoreFunctionSampler(Sampler):
+class ScoreFunctionSampler(AbstractDiscreteSampler):
     def get_posterior_mean(self, xt, score_fun_est, t):
         return self.sqrt_recip_alphas[t] * (xt + self.betas[t] * score_fun_est)
 
@@ -237,7 +354,7 @@ class ScoreFunctionSampler(Sampler):
         return (alphas_cumprod.sqrt() * x0 - xt) / (1 - alphas_cumprod)
 
 
-class VelocitySampler(Sampler):
+class VelocitySampler(AbstractDiscreteSampler):
     def predict_xstart(self, xt, vt, t):
         return self.sqrt_alphas_cumprod[t] * xt - self.sqrt_one_minus_alphas_cumprod[t] * vt
 
@@ -258,3 +375,9 @@ class VelocitySampler(Sampler):
         eps = self.combine_eps(unconditional_eps, conditional_eps)
         classifier_free_vt = (eps - self.sqrt_one_minus_alphas_cumprod[t] * xt) / self.sqrt_alphas_cumprod[t]
         return self.get_posterior_mean(xt, classifier_free_vt, t)
+
+    def get_sf_estimator(self, v_pred, xt, t):
+        sigma_t = interpolate_schedule(t, self.sqrt_one_minus_alphas_cumprod)
+        alpha_t = interpolate_schedule(t, self.sqrt_alphas_cumprod)
+        eps_pred = sigma_t * xt + alpha_t * v_pred
+        return -eps_pred / sigma_t

@@ -93,6 +93,16 @@ def plot_rarities(trajs, savefig=False):
         plt.savefig('figs/rarity.pdf')
         plt.clf()
 
+def analytical_log_likelihood(x: torch.Tensor, sde: SDE, dt: torch.Tensor):
+    llk = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
+    x_prev = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
+    for xn in x.split(dim=1, split_size=1)[1:]:
+        x_next = xn[:, 0]
+        llk_prev = dist.Normal(x_prev + sde.drift * dt, sde.diffusion ** 2 * dt).log_prob(x_next)
+        llk += llk_prev
+        x_prev = x_next
+    return llk
+
 
 if __name__ == "__main__":
     with warnings.catch_warnings():

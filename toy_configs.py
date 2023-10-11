@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from hydra.core.config_store import ConfigStore
-from models.toy_diffusion_models_config import EpsilonSamplerConfig, MuSamplerConfig, \
+from models.toy_diffusion_models_config import VPSDEEpsilonSamplerConfig, EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, TemporalUnetConfig, \
     TemporalTransformerUnetConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
@@ -9,6 +9,11 @@ from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodCo
 
 def register_configs() -> None:
     cs = ConfigStore.instance()
+    cs.store(
+        group='sampler',
+        name='vpsde_epsilon_sampler',
+        node=VPSDEEpsilonSamplerConfig,
+    )
     cs.store(
         group='sampler',
         name='base_epsilon_sampler',

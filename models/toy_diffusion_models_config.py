@@ -13,6 +13,8 @@ class BetaSchedule(Enum):
 
 
 class SamplerType(Enum):
+    VPSDEEpsilonSamplerType = 'vpsde_epsilon'
+    VPSDEVelocitySamplerType = 'vpsde_velocity'
     EpsilonSamplerType = 'epsilon'
     MuSamplerType = 'mu'
     XstartSamplerType = 'xstart'
@@ -22,23 +24,41 @@ class SamplerType(Enum):
 
 @dataclass
 class BaseSamplerConfig:
+    diffusion_timesteps: int = 1000
+    guidance_coef: float = 1.
 
     def name(self):
         return 'BaseSampler'
 
 
 @dataclass
-class SamplerConfig(BaseSamplerConfig):
+class DiscreteSamplerConfig(BaseSamplerConfig):
     beta_schedule: BetaSchedule = BetaSchedule.CosineSchedule
-    diffusion_timesteps: int = 1000
-    guidance_coef: float = 1.
 
     def name(self):
-        return 'Sampler'
+        return 'DiscreteSampler'
 
 
 @dataclass
-class EpsilonSamplerConfig(SamplerConfig):
+class VPSDESamplerConfig(BaseSamplerConfig):
+    beta0: float = 0.1
+    beta1: float = 20.
+    t_eps: float = 1e-5
+
+    def name(self):
+        return 'VPSDESampler'
+
+
+@dataclass
+class VPSDEEpsilonSamplerConfig(VPSDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VPSDEEpsilonSampler'
+
+    def name(self):
+        return 'VPSDEEpsilonSampler'
+
+
+@dataclass
+class EpsilonSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.EpsilonSampler'
 
     def name(self):
@@ -46,7 +66,7 @@ class EpsilonSamplerConfig(SamplerConfig):
 
 
 @dataclass
-class MuSamplerConfig(SamplerConfig):
+class MuSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.MuSampler'
 
     def name(self):
@@ -54,7 +74,7 @@ class MuSamplerConfig(SamplerConfig):
 
 
 @dataclass
-class XstartSamplerConfig(SamplerConfig):
+class XstartSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.XstartSampler'
 
     def name(self):
@@ -62,7 +82,7 @@ class XstartSamplerConfig(SamplerConfig):
 
 
 @dataclass
-class ScoreFunctionSamplerConfig(SamplerConfig):
+class ScoreFunctionSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.ScoreFunctionSampler'
 
     def name(self):
@@ -70,7 +90,7 @@ class ScoreFunctionSamplerConfig(SamplerConfig):
 
 
 @dataclass
-class VelocitySamplerConfig(SamplerConfig):
+class VelocitySamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.VelocitySampler'
 
     def name(self):

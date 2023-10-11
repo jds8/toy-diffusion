@@ -21,7 +21,7 @@ class LikelihoodConfig:
 @dataclass
 class DistLikelihoodConfig(LikelihoodConfig):
     dist_fun_type: DistanceFunction = DistanceFunction.FinalState
-    beta_schedule: BetaSchedule = BetaSchedule.CosineSchedule
+    sigma: float = 0.3
     symmetric_llk_condition: bool = True
     _target_: str = 'toy_likelihoods.DistLikelihood'
 
@@ -30,7 +30,6 @@ class DistLikelihoodConfig(LikelihoodConfig):
 class GeneralDistLikelihoodConfig(LikelihoodConfig):
     beta_schedule: BetaSchedule = '${sampler.beta_schedule}'
     timesteps: int = '${sampler.diffusion_timesteps}'
-    # beta_schedule: BetaSchedule = BetaSchedule.CosineSchedule
     dist_fun_type: DistanceFunction = DistanceFunction.Curve
     _target_: str = 'toy_likelihoods.GeneralDistLikelihood'
 
