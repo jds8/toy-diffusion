@@ -65,7 +65,7 @@ class ToyTrainer:
         score = self.sampler.get_sf_estimator(model_output, x0, t)
         losses = (score + noise / std) ** 2  # score = -eps / std so we have *plus sign*
         g2 = self.sampler.sde(torch.zeros_like(model_output), t)[1] ** 2
-        return losses * g2
+        return (losses * g2).mean()
 
     def get_loss_fn(self):
         return {
@@ -165,7 +165,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
     def forward_transformer_process(self, x0, x_cond):
         cond_traj = x_cond if torch.rand(1) > self.cfg.p_uncond else None
         cond = traj_dist(x0, cond_traj).reshape(-1, 1) if cond_traj is not None else None
-        xt, t, to_predict = self.sampler.forward_sample(x_start=x0)
+        xt, t, noise, to_predict = self.sampler.forward_sample(x_start=x0)
 
         model_output = self.diffusion_model(xt, t, cond_traj, cond)
 
