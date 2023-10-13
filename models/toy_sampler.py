@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from collections import namedtuple
+
 import torch
 import torch.distributions as dist
 import torch.nn.functional as F
@@ -101,6 +103,9 @@ def interpolate_schedule(diffusion_time, schedule, decreasing=False):
     return beta
 
 
+ForwardSample = namedtuple('ForwardSample', 'xt t noise to_predict')
+
+
 class AbstractSampler:
     def __init__(self, diffusion_timesteps: int, guidance_coef: float):
         self.diffusion_timesteps = diffusion_timesteps
@@ -152,7 +157,7 @@ class VPSDESampler(AbstractContinuousSampler):
         return self.beta0 + timestep * (self.beta1 - self.beta0)
 
     def sde(self, x: torch.Tensor, t: torch.Tensor):
-        beta_t = self.continuous_beta_schedule(t).reshape(x.shape)
+        beta_t = self.continuous_beta_schedule(t).reshape((-1,) + x.shape[1:])
         drift = -0.5 * beta_t * x
         diffusion = beta_t.sqrt()
         return drift, diffusion
@@ -162,12 +167,15 @@ class VPSDESampler(AbstractContinuousSampler):
         dx_dt = drift - 0.5 * diffusion ** 2 * score
         return dx_dt
 
-    def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
+    def log_mean_coeff(self, x_shape: torch.Size, t: torch.Tensor):
         log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
-        log_mean_coeff = log_mean_coeff.reshape(x.shape)
+        return log_mean_coeff.reshape((-1,) + x_shape[1:])
+
+    def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
+        log_mean_coeff = self.log_mean_coeff(x_shape=x.shape, t=t)
         mean = log_mean_coeff.exp() * x
         std = (1 - (2. * log_mean_coeff).exp()).sqrt()
-        return mean, std
+        return mean, log_mean_coeff, std
 
     def prior_logp(self, z: torch.Tensor):
         return torch.distributions.Normal(0, 1).log_prob(z)
@@ -178,9 +186,14 @@ class VPSDESampler(AbstractContinuousSampler):
         upper = torch.tensor(1., device=x_start.device)
         t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
         noise = torch.rand_like(x_start)
-        mean, std = self.marginal_prob(x_start, t)
+        mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
         xt = mean + std * noise
-        return xt, t, noise, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        return ForwardSample(
+            xt=xt,
+            t=t,
+            noise=noise,
+            to_predict=self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        )
 
     def reverse_sample(self, xt, t, conditional_mean):
         '''
@@ -204,7 +217,19 @@ class VPSDEEpsilonSampler(VPSDESampler):
         return self.get_posterior_mean(xt, eps, t)
 
     def get_sf_estimator(self, eps_pred, xt, t):
-        _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
+        _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
+        return -eps_pred / sigma_t
+
+
+class VPSDEVelocitySampler(VPSDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        return log_mean_coeff.exp() * eps - sigma_t * x0
+
+    def get_sf_estimator(self, v_pred, xt, t):
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        alpha_t = log_mean_coeff.exp()
+        eps_pred = sigma_t * xt + alpha_t * v_pred
         return -eps_pred / sigma_t
 
 
@@ -266,7 +291,9 @@ class AbstractDiscreteSampler(AbstractSampler):
             self.sqrt_one_minus_alphas_cumprod, t, x_start.shape
         )
         xt = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
-        return xt, t, noise, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        return ForwardSample(
+            xt, t, noise, self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        )
 
     def reverse_sample(self, xt, t, conditional_mean):
         noise = torch.randn_like(xt)
@@ -363,12 +390,19 @@ class VelocitySampler(AbstractDiscreteSampler):
         x0_hat = self.predict_xstart(xt, vt, t)
         return (self.alphas[t].sqrt() * (1 - self.alphas_cumprod_prev[t]) * xt + self.alphas_cumprod_prev[t].sqrt() * self.betas[t] * x0_hat) / (1 - self.alphas_cumprod[t])
 
+    # def get_ground_truth(self, eps, xt, x0, t):
+    #     sqrt_alphas_cumprod_t = self.extract(self.sqrt_alphas_cumprod, t, xt.shape)
+    #     sqrt_one_minus_alphas_cumprod_t = self.extract(
+    #         self.sqrt_one_minus_alphas_cumprod, t, xt.shape
+    #     )
+    #     return (sqrt_alphas_cumprod_t * xt - x0) / sqrt_one_minus_alphas_cumprod_t
+
     def get_ground_truth(self, eps, xt, x0, t):
         sqrt_alphas_cumprod_t = self.extract(self.sqrt_alphas_cumprod, t, xt.shape)
         sqrt_one_minus_alphas_cumprod_t = self.extract(
             self.sqrt_one_minus_alphas_cumprod, t, xt.shape
         )
-        return (sqrt_alphas_cumprod_t * xt - x0) / sqrt_one_minus_alphas_cumprod_t
+        return sqrt_alphas_cumprod_t * eps - sqrt_one_minus_alphas_cumprod_t * x0
 
     def get_classifier_free_mean(self, xt, unconditional_vt, t, conditional_vt):
         unconditional_eps = self.sqrt_one_minus_alphas_cumprod[t] * xt + self.sqrt_alphas_cumprod[t] * unconditional_vt

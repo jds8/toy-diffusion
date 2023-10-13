@@ -82,6 +82,7 @@ class DiscreteEvaluator(ToyEvaluator):
             self.cfg.sde_steps,
             self.diffusion_model.d_model,
         ])
+        samples = [x]
         for t in torch.arange(self.sampler.diffusion_timesteps-1, -1, -1, device=device):
             if t % 100 == 0:
                 print(x[0, 0])
@@ -119,7 +120,8 @@ class DiscreteEvaluator(ToyEvaluator):
                 x = self.sampler.reverse_sample(
                     x, t.item(), posterior_mean,
                 )
-        return x
+            samples.append(x)
+        return samples
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
@@ -166,11 +168,10 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             return dx_dt
 
-        times = torch.tensor([self.sampler.t_eps, 1.], device=x_min.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
-        import pdb; pdb.set_trace()
-        sample = sol[0]
-        return sample
+        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        sample = sol[1]
+        return [x_min, sample]
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
@@ -237,7 +238,8 @@ def sample(cfg):
     # std.viz_trajs(rare_traj, end_time, 100, clf=False, clr='red')
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
-    trajs = std.sample_trajectories(cond_traj)
+    sample_traj_out = std.sample_trajectories(cond_traj)
+    trajs = sample_traj_out[-1]
     undiffed_trajs = trajs.cumsum(dim=-2)
     out_trajs = torch.cat([
         torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
