@@ -58,6 +58,14 @@ class VPSDEEpsilonSamplerConfig(VPSDESamplerConfig):
 
 
 @dataclass
+class VPSDEVelocitySamplerConfig(VPSDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VPSDEVelocitySampler'
+
+    def name(self):
+        return 'VPSDEVelocitySampler'
+
+
+@dataclass
 class EpsilonSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.EpsilonSampler'
 

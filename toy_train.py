@@ -39,11 +39,7 @@ class ToyTrainer:
         self.cfg = cfg
         self.sde = SDE(self.cfg.sde_drift, self.cfg.sde_diffusion)
         self.sampler = sampler
-        try:
-            self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
-        except:
-            import pdb; pdb.set_trace()
-            self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
+        self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
         self.likelihood = likelihood
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
@@ -53,6 +49,19 @@ class ToyTrainer:
         self.num_saves = 0
 
         self.initialize_optimizer()
+
+        if self.cfg.model_name:
+            self.load_model()
+
+    def load_model(self):
+        model_path = get_model_path(self.cfg)
+        try:
+            # load softmax model
+            print('attempting to load diffusion model: {}'.format(model_path))
+            self.diffusion_model.module.load_state_dict(torch.load('{}'.format(model_path)))
+            print('successfully loaded diffusion model')
+        except Exception as e:
+            print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
 
     def initialize_optimizer(self):
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
