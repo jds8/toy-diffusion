@@ -1,0 +1,6 @@
+defaults:
+  - vpsde_train_config
+  - sampler: vpsde_epsilon_sampler
+  - diffusion: base_temporal_unet
+  - likelihood: base_likelihood
+  - _self_

@@ -1,0 +1,6 @@
+defaults:
+  - vpsde_sample_config
+  - sampler: vpsde_epsilon_sampler
+  - diffusion: base_temporal_unet
+  - likelihood: base_likelihood
+  - _self_
