@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import warnings
 
+from collections import namedtuple
+
 import hydra
 from hydra.core.config_store import ConfigStore
 import torch
@@ -20,6 +22,10 @@ from models.toy_diffusion_models_config import GuidanceType
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+SampleOutput = namedtuple('SampleOutput', 'samples fevals')
+
 
 def suppresswarning():
     warnings.warn("user", UserWarning)
@@ -121,7 +127,7 @@ class DiscreteEvaluator(ToyEvaluator):
                     x, t.item(), posterior_mean,
                 )
             samples.append(x)
-        return samples
+        return SampleOutput(samples=samples, fevals=-1)
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
@@ -153,6 +159,13 @@ class DiscreteEvaluator(ToyEvaluator):
 
 
 class ContinuousEvaluator(ToyEvaluator):
+    def get_dx_dt(self, t, x, cond_traj=None):
+        time = t.reshape(-1)
+        model_output = self.diffusion_model(x, time, cond_traj)
+        sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
+        dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
+        return dx_dt
+
     def sample_trajectories(self, cond_traj=None, atol=1e-4, rtol=1e-4):
         x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples, 1, 1
@@ -161,17 +174,17 @@ class ContinuousEvaluator(ToyEvaluator):
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
-            time = t.reshape(-1)
-            model_output = self.diffusion_model(x, time, cond_traj)
-            sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
-            dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
             fevals += 1
+            dx_dt = self.get_dx_dt(t, x, cond_traj)
+            print('mean: {}'.format(x.mean()))
+            print('std: {}'.format(x.std()))
+            print('range: {}\n'.format(x.max()-x.min()))
             return dx_dt
 
-        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        times = torch.range(1., self.sampler.t_eps, -0.01, device=x_min.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
-        sample = sol[1]
-        return [x_min, sample]
+        return SampleOutput(samples=sol, fevals=fevals)
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extra_args=None, atol=1e-4, rtol=1e-4):
@@ -181,14 +194,10 @@ class ContinuousEvaluator(ToyEvaluator):
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
+            fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                diffusion_time = t.reshape(-1)
-                model_output = self.diffusion_model(x, diffusion_time, **extra_args)
-                sf_est = self.sampler.get_sf_estimator(model_output, xt=x, t=diffusion_time)
-                coef = -0.5 * self.sampler.continuous_beta_schedule(t)
-                dx_dt = coef * (x + sf_est)
-                fevals += 1
+                dx_dt = self.get_dx_dt(t, x, cond_traj)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
@@ -238,7 +247,9 @@ def sample(cfg):
     # std.viz_trajs(rare_traj, end_time, 100, clf=False, clr='red')
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
-    sample_traj_out = std.sample_trajectories(cond_traj)
+    sample_out = std.sample_trajectories(cond_traj)
+    print('fevals: {}'.format(sample_out.fevals))
+    sample_traj_out = sample_out.samples
     trajs = sample_traj_out[-1]
     undiffed_trajs = trajs.cumsum(dim=-2)
     out_trajs = torch.cat([
@@ -252,7 +263,7 @@ def sample(cfg):
     dt = end_time / cfg.sde_steps
     sample_trajs = out_trajs[:, 1].reshape(-1, 1, 1)
     analytical_llk = torch.distributions.Normal(1, 2).log_prob(sample_trajs)
-    print('analytical_llk: {}'.format(analytical_llk))
+    print('analytical_llk: {}'.format(analytical_llk.squeeze()))
     ode_llk = std.ode_log_likelihood(sample_trajs, extra_args={'cond': None})
     print('\node_llk: {}'.format(ode_llk))
     mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
