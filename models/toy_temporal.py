@@ -109,6 +109,11 @@ class TemporalIDK(nn.Module):
             nn.Mish(),
             nn.Linear(dim * 4, dim),
         )
+        self.x_mlp = nn.Sequential(
+            nn.Linear(1, 64),
+            nn.Mish(),
+            nn.Linear(64, 1),
+        )
 
         dim_in = 1
         self.resnet1 = ResidualBlock(dim_in, time_dim, embed_dim=time_dim)
@@ -121,6 +126,7 @@ class TemporalIDK(nn.Module):
     def forward(self, x, time, cond):
         t = self.time_mlp(time)
         x = self.resnet1(x, t)
+        x = self.x_mlp(x) + x
         return self.final_conv(x)
 
 

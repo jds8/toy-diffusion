@@ -186,6 +186,7 @@ class VPSDESampler(AbstractContinuousSampler):
         upper = torch.tensor(1., device=x_start.device)
         t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
         noise = torch.rand_like(x_start)
+
         mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
         xt = mean + std * noise
         return ForwardSample(

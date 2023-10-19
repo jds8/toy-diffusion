@@ -166,6 +166,18 @@ class ContinuousEvaluator(ToyEvaluator):
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
 
+    def analytical_gaussian_score(self, t, x):
+        '''
+        Compute the analytical score p_t for t \in (0, 1)
+        given the SDE formulation from Song et al. in the case that
+        p_0 = N(1, 2) and p_1 = N(0, 1)
+        '''
+        lmc = self.sampler.log_mean_coeff(x_shape=x.shape, t=t)
+        f = lmc.exp()
+        g = (1 - (2. * lmc).exp())
+        var = 4 * f ** 2 + g
+        return (f - x) / var
+
     def sample_trajectories(self, cond_traj=None, atol=1e-4, rtol=1e-4):
         x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples, 1, 1
@@ -197,7 +209,7 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, cond_traj)
+                dx_dt = self.get_dx_dt(t, x)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
