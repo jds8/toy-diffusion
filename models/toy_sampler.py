@@ -157,7 +157,8 @@ class VPSDESampler(AbstractContinuousSampler):
         return self.beta0 + timestep * (self.beta1 - self.beta0)
 
     def sde(self, x: torch.Tensor, t: torch.Tensor):
-        beta_t = self.continuous_beta_schedule(t).reshape((-1,) + x.shape[1:])
+        beta_t = self.continuous_beta_schedule(t)
+        beta_t = self.continuous_beta_schedule(t).repeat((beta_t.reshape(-1).shape[0],) + x.shape[1:])
         drift = -0.5 * beta_t * x
         diffusion = beta_t.sqrt()
         return drift, diffusion
@@ -169,7 +170,7 @@ class VPSDESampler(AbstractContinuousSampler):
 
     def log_mean_coeff(self, x_shape: torch.Size, t: torch.Tensor):
         log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
-        return log_mean_coeff.reshape((-1,) + x_shape[1:])
+        return log_mean_coeff.repeat((log_mean_coeff.reshape(-1).shape[0],) + x_shape[1:])
 
     def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
         log_mean_coeff = self.log_mean_coeff(x_shape=x.shape, t=t)

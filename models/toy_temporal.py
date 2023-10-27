@@ -123,7 +123,7 @@ class TemporalIDK(nn.Module):
             nn.Conv1d(dim, 1, 1),
         )
 
-    def forward(self, x, time, cond):
+    def forward(self, x, time, cond=None):
         t = self.time_mlp(time)
         x = self.resnet1(x, t)
         x = self.x_mlp(x) + x

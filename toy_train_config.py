@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from enum import Enum
 from typing import Optional
 from dataclasses import dataclass
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
@@ -56,8 +57,22 @@ def get_classifier_path(cfg: TrainConfig):
         model_name = "{}_{}_classifier".format(sampler_name, diffusion_name)
     return get_path(cfg, model_name)
 
+
+class ExampleType(Enum):
+    Gaussian = 'gaussian'
+    BrownianMotion = 'brownian_motion'
+
+
+class TestType(Enum):
+    Gaussian = 'gaussian'
+    BrownianMotion = 'brownian_motion'
+    Test = 'test'
+
+
 @dataclass
 class SampleConfig(BaseConfig):
     num_samples: int = 10
     cond: Optional[float] = None
     guidance: GuidanceType = GuidanceType.Classifier
+    example: ExampleType = ExampleType.BrownianMotion
+    test: TestType = TestType.Test

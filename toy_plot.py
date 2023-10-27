@@ -94,11 +94,17 @@ def plot_rarities(trajs, savefig=False):
         plt.clf()
 
 def analytical_log_likelihood(x: torch.Tensor, sde: SDE, dt: torch.Tensor):
+    '''
+    Computes log p(x_2,x_3,\dots, x_n) using consecutive conditionals.
+    Note that this code makes no assumption about the distribution of x_1.
+    It only assumes that the process is Markovian with $x_t | x_{t-1} \sim Normal(x_{t-1}, dt.sqrt())$
+    transitions
+    '''
     llk = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
-    x_prev = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
+    x_prev = x[:, 0]
     for xn in x.split(dim=1, split_size=1)[1:]:
         x_next = xn[:, 0]
-        llk_prev = dist.Normal(x_prev + sde.drift * dt, sde.diffusion ** 2 * dt).log_prob(x_next)
+        llk_prev = dist.Normal(x_prev + sde.drift * dt, sde.diffusion * dt.sqrt()).log_prob(x_next)
         llk += llk_prev
         x_prev = x_next
     return llk
