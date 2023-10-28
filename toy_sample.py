@@ -243,25 +243,6 @@ class ContinuousEvaluator(ToyEvaluator):
         score = (f * mu_0 - x) / var
         return score
 
-    # def analytical_brownian_motion_score(self, t, x):
-    #     '''
-    #     Compute the analytical score p_t for t \in (0, 1)
-    #     given the SDE formulation from Song et al. in the case that
-    #     p_0(x, s) = N(0, d(s)\sqrt(s)) and p_1(x, s) = N(0, 1)
-    #     '''
-    #     print("WARNING: Using analytical Brownian motion score function")
-    #     x_s = x.clone().squeeze(-1)
-    #     rolled_x = x_s.roll(1)
-    #     rolled_x[:, 0] = 0.
-    #     lmc = self.sampler.log_mean_coeff(x_shape=x.shape, t=t)
-    #     f = lmc.exp().squeeze(-1)
-    #     mu = f * (rolled_x + self.cfg.sde_drift / self.cfg.sde_steps)
-    #     g2 = (1 - (2. * lmc).exp()).squeeze(-1)
-    #     bm_var_s = torch.linspace(0., 1., self.cfg.sde_steps, device=f.device)[self.cfg.sde_steps-f.shape[1]:]
-    #     var = f ** 2 * self.cfg.sde_diffusion ** 2 * bm_var_s + g2
-    #     score = ((mu - x_s) / var).unsqueeze(-1)
-    #     return score
-
     def analytical_brownian_motion_score(self, t, x):
         '''
         Compute the analytical score p_t for t \in (0, 1)
@@ -277,14 +258,6 @@ class ContinuousEvaluator(ToyEvaluator):
         jvs = compute_diffusion_step(sde, diffusion, diffusion_time=t)
         y_dist = jvs.dist.dist
         score = torch.linalg.solve(y_dist.covariance_matrix, (y_dist.loc.reshape(-1, 1) - x))
-
-        # dt = 1. / (self.cfg.sde_steps-1)
-        # cov = f(t) ** 2 * dt
-        # y1 = f(t) ** 2 * dt + g(t) ** 2
-        # y2 = f(t) ** 2 * 2 * dt + g(t) ** 2
-        # cov_mat = torch.tensor([[y1, cov], [cov, y2]], device=device)
-        # mean = torch.zeros(x.shape[1], 1, device=device)
-        # score = torch.linalg.solve(cov_mat, (mean.reshape(-1, 1) - x))
 
         return score
 
@@ -302,6 +275,17 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
 
+    def sample_trajectories_euler_maruyama(self, extras, steps=torch.tensor(1000)):
+        x_min = self.get_x_min()
+        x = x_min.clone()
+
+        steps = steps.to(x.device)
+        for time in torch.linspace(1., 0., steps, device=x.device):
+            sf_est = self.get_score_function(t=time, x=x, extras=extras)
+            x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
+
+        return SampleOutput(samples=[x_min, x], fevals=steps)
+
     def sample_trajectories(self, extras, atol=1e-4, rtol=1e-4):
         x_min = self.get_x_min()
 
@@ -312,7 +296,8 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x, extras)
             return dx_dt
 
-        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        times = torch.tensor([1., 0.], device=x_min.device)
+        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
         # times = torch.arange(1., self.sampler.t_eps, -0.01, device=x_min.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
@@ -321,7 +306,9 @@ class ContinuousEvaluator(ToyEvaluator):
     def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
         extras = {} if extras is None else extras
         # hutchinson's trick
-        v = torch.randint_like(x, 2) * 2 - 1
+        # v = torch.randint_like(x, 2) * 2 - 1
+        # v = torch.randint(2, (10,) + x.shape, device=x.device) * 2 - 1
+        v = torch.randn((10,) + x.shape, device=x.device)
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
@@ -330,10 +317,11 @@ class ContinuousEvaluator(ToyEvaluator):
                 x = x[0].detach().requires_grad_()
                 dx_dt = self.get_dx_dt(t, x, extras)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                d_ll = (v * grad).flatten(1).sum(1)
+                d_ll = (v * grad).mean(0).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
-        times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
+        # times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
+        times = torch.tensor([0., 1.], device=x.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
@@ -444,8 +432,8 @@ def sample(cfg):
 
 
     # TODO: delete
-    mu_0 = torch.tensor(0., device=device)
-    sigma_0 = torch.tensor(1., device=device)
+    mu_0 = torch.tensor(100., device=device)
+    sigma_0 = torch.tensor(60., device=device)
     extras = {'mu_0': mu_0, 'sigma_0': sigma_0}
 
 
@@ -456,7 +444,8 @@ def sample(cfg):
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
 
-    sample_out = std.sample_trajectories(extras)
+    # sample_out = std.sample_trajectories(extras)
+    sample_out = std.sample_trajectories_euler_maruyama(extras)
     print('fevals: {}'.format(sample_out.fevals))
     sample_traj_out = sample_out.samples
     trajs = sample_traj_out[-1]

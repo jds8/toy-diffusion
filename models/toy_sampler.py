@@ -163,7 +163,26 @@ class VPSDESampler(AbstractContinuousSampler):
         diffusion = beta_t.sqrt()
         return drift, diffusion
 
-    def probability_flow_ode(self, x: torch.Tensor, t: torch.Tensor, score: torch.Tensor):
+    def reverse_sde(
+            self,
+            x: torch.Tensor,
+            t: torch.Tensor,
+            score: torch.Tensor,
+            steps: torch.Tensor=torch.tensor(1000)
+    ):
+        dt = -1. / steps
+        z = torch.randn_like(x)
+        drift, diffusion = self.sde(x, t)
+        x_mean = x + (drift - diffusion ** 2 * score) * dt
+        x = x_mean + diffusion * (-dt).sqrt() * z
+        return x, x_mean
+
+    def probability_flow_ode(
+            self,
+            x: torch.Tensor,
+            t: torch.Tensor,
+            score: torch.Tensor
+    ):
         drift, diffusion = self.sde(x, t)
         dx_dt = drift - 0.5 * diffusion ** 2 * score
         return dx_dt
