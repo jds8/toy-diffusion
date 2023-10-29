@@ -296,9 +296,7 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x, extras)
             return dx_dt
 
-        times = torch.tensor([1., 0.], device=x_min.device)
-        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
-        # times = torch.arange(1., self.sampler.t_eps, -0.01, device=x_min.device)
+        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
 
@@ -320,8 +318,7 @@ class ContinuousEvaluator(ToyEvaluator):
                 d_ll = (v * grad).mean(0).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
-        # times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        times = torch.tensor([0., 1.], device=x.device)
+        times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
@@ -444,8 +441,8 @@ def sample(cfg):
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
 
-    # sample_out = std.sample_trajectories(extras)
-    sample_out = std.sample_trajectories_euler_maruyama(extras)
+    sample_out = std.sample_trajectories(extras)
+    # sample_out = std.sample_trajectories_euler_maruyama(extras)
     print('fevals: {}'.format(sample_out.fevals))
     sample_traj_out = sample_out.samples
     trajs = sample_traj_out[-1]
