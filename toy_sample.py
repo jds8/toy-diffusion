@@ -432,8 +432,8 @@ def sample(cfg):
 
 
     # TODO: delete
-    mu_0 = torch.tensor(100., device=device)
-    sigma_0 = torch.tensor(60., device=device)
+    mu_0 = torch.tensor(1., device=device)
+    sigma_0 = torch.tensor(2., device=device)
     extras = {'mu_0': mu_0, 'sigma_0': sigma_0}
 
 
