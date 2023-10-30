@@ -232,7 +232,7 @@ def train(cfg):
     d_model = torch.tensor(1)
     sampler = hydra.utils.instantiate(cfg.sampler)
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-    diffusion_model = TemporalIDK()
+    # diffusion_model = TemporalIDK()
     likelihood = hydra.utils.instantiate(cfg.likelihood)
 
     if isinstance(diffusion_model, TemporalUnet):
