@@ -161,7 +161,7 @@ class ConditionTrainer(ToyTrainer):
         trajs = integrate(self.sde, timesteps=self.cfg.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
         x0 = trajs.W.diff(dim=1).unsqueeze(-1)
         # TODO: Remove
-        x0 = torch.randn(x0.shape[0], 1, 1, device=device) * 2 + 1
+        # x0 = torch.randn(x0.shape[0], 1, 1, device=device) * 2 + 1
         l2_loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()

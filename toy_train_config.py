@@ -61,11 +61,13 @@ def get_classifier_path(cfg: TrainConfig):
 class ExampleType(Enum):
     Gaussian = 'gaussian'
     BrownianMotion = 'brownian_motion'
+    BrownianMotionDiff = 'brownian_motion_diff'
 
 
 class TestType(Enum):
     Gaussian = 'gaussian'
     BrownianMotion = 'brownian_motion'
+    BrownianMotionDiff = 'brownian_motion_diff'
     Test = 'test'
 
 

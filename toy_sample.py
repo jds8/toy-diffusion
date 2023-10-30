@@ -204,6 +204,8 @@ class ContinuousEvaluator(ToyEvaluator):
             return self.analytical_gaussian_score(t=t, x=x, mu_0=extras['mu_0'], sigma_0=extras['sigma_0'])
         elif self.cfg.test == TestType.BrownianMotion:
             return self.analytical_brownian_motion_score(t=t, x=x)
+        elif self.cfg.test == TestType.BrownianMotionDiff:
+            return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
             model_output = self.diffusion_model(x, t, None)
             return self.sampler.get_sf_estimator(model_output, xt=x, t=t)
@@ -213,8 +215,6 @@ class ContinuousEvaluator(ToyEvaluator):
     def get_dx_dt(self, t, x, extras=None):
         time = t.reshape(-1)
         sf_est = self.get_score_function(t=time, x=x, extras=extras)
-        # sf_est = self.analytical_gaussian_score(t=time, x=x, mu_0=extras['mu_0'], sigma_0=extras['sigma_0'])
-        # sf_est = self.analytical_brownian_motion_score(t=time, x=x)
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
 
@@ -261,12 +261,37 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return score
 
+    def analytical_brownian_motion_diff_score(self, t, x):
+        '''
+        Compute the analytical score p_t for t \in (0, 1)
+        given the SDE formulation from Song et al. in the case that
+        p_0(x, s) = N(0, d(s)\sqrt(s)) and p_1(x, s) = N(0, 1)
+        where we consider sequential differences dX_t \equiv X_t - X_{t-1}
+        and where X_t is Brownian Motion so X_t \sim N(X_{t-1}, \sqrt{dt})
+        '''
+        f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
+        g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
+
+        dt = 1. / (self.cfg.sde_steps-1)
+
+        var = f * dt + g ** 2
+
+        score = -x / var
+
+        return score
+
     def get_x_min(self):
         if self.cfg.example == ExampleType.Gaussian:
             return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                     self.cfg.num_samples, 1, 1
             ])
         elif self.cfg.example == ExampleType.BrownianMotion:
+            return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+                self.cfg.num_samples,
+                self.cfg.sde_steps-1,
+                1,
+            ])
+        elif self.cfg.example == ExampleType.BrownianMotionDiff:
             return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
@@ -400,11 +425,38 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std, extras=None):
         plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
+def test_brownian_motion_diff(end_time, cfg, sample_trajs, std, extras=None):
+    dt = end_time / (cfg.sde_steps-1)
+    analytical_trajs = torch.cat([
+        torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
+        sample_trajs.cumsum(dim=-2)
+    ], dim=1)
+
+    analytical_llk = analytical_log_likelihood(analytical_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
+    print('analytical_llk: {}'.format(analytical_llk))
+
+    ode_llk = std.ode_log_likelihood(sample_trajs, extras=extras)
+    print('\node_llk: {}'.format(ode_llk))
+
+    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    print('\nmse_llk: {}'.format(mse_llk))
+
+    plt.clf()
+    if sample_trajs.shape[1] > 1:
+        ax = plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='3d_scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='3d_line', ax=ax)
+    else:
+        plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
+    import pdb; pdb.set_trace()
+
 def test(end_time, cfg, out_trajs, std, extras=None):
     if cfg.example == ExampleType.Gaussian:
         test_gaussian(end_time, cfg, out_trajs, std, extras)
     elif cfg.example == ExampleType.BrownianMotion:
         test_brownian_motion(end_time, cfg, out_trajs, std, extras)
+    elif cfg.example == ExampleType.BrownianMotionDiff:
+        test_brownian_motion_diff(end_time, cfg, out_trajs, std, extras)
     else:
         raise NotImplementedError
 
@@ -439,8 +491,8 @@ def sample(cfg):
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
 
-    sample_out = std.sample_trajectories(extras)
-    # sample_out = std.sample_trajectories_euler_maruyama(extras)
+    # sample_out = std.sample_trajectories(extras)
+    sample_out = std.sample_trajectories_euler_maruyama(extras)
     print('fevals: {}'.format(sample_out.fevals))
     sample_traj_out = sample_out.samples
     trajs = sample_traj_out[-1]
