@@ -304,9 +304,7 @@ class ContinuousEvaluator(ToyEvaluator):
     def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
         extras = {} if extras is None else extras
         # hutchinson's trick
-        # v = torch.randint_like(x, 2) * 2 - 1
-        # v = torch.randint(2, (10,) + x.shape, device=x.device) * 2 - 1
-        v = torch.randn((10,) + x.shape, device=x.device)
+        v = torch.randint_like(x, 2) * 2 - 1
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
@@ -315,11 +313,11 @@ class ContinuousEvaluator(ToyEvaluator):
                 x = x[0].detach().requires_grad_()
                 dx_dt = self.get_dx_dt(t, x, extras)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                d_ll = (v * grad).mean(0).flatten(1).sum(1)
+                d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
@@ -429,8 +427,8 @@ def sample(cfg):
 
 
     # TODO: delete
-    mu_0 = torch.tensor(1., device=device)
-    sigma_0 = torch.tensor(2., device=device)
+    mu_0 = torch.tensor(50., device=device)
+    sigma_0 = torch.tensor(4., device=device)
     extras = {'mu_0': mu_0, 'sigma_0': sigma_0}
 
 
