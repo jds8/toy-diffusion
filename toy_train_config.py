@@ -10,15 +10,44 @@ from omegaconf import OmegaConf
 
 
 @dataclass
+class ExampleConfig:
+    def name(self):
+        return 'ExampleConfig'
+
+
+@dataclass
+class GaussianExampleConfig(ExampleConfig):
+    mu: float = 1.
+    sigma: float = 2.
+
+    def name(self):
+        return 'GaussianExampleConfig'
+
+
+@dataclass
+class BrownianMotionExampleConfig(ExampleConfig):
+    sde_drift: float = 0.
+    sde_diffusion: float = 1.
+    sde_steps: int = 1000
+
+    def name(self):
+        return 'BrownianMotionExampleConfig'
+
+
+@dataclass
+class BrownianMotionDiffExampleConfig(BrownianMotionExampleConfig):
+    def name(self):
+        return 'BrownianMotionDiffExampleConfig'
+
+
+@dataclass
 class BaseConfig:
     sampler: BaseSamplerConfig = BaseSamplerConfig()
     diffusion: ModelConfig = ModelConfig()
     likelihood: LikelihoodConfig = LikelihoodConfig()
-    sde_drift: float = 0.
-    sde_diffusion: float = 1.
-    sde_steps: int = 1000
     model_dir: str = 'diffusion_models/'
     model_name: str = ''
+    example: ExampleConfig = GaussianExampleConfig()
 
 
 @dataclass
@@ -58,17 +87,17 @@ def get_classifier_path(cfg: TrainConfig):
     return get_path(cfg, model_name)
 
 
-class ExampleType(Enum):
-    Gaussian = 'gaussian'
-    BrownianMotion = 'brownian_motion'
-    BrownianMotionDiff = 'brownian_motion_diff'
-
-
 class TestType(Enum):
     Gaussian = 'gaussian'
     BrownianMotion = 'brownian_motion'
     BrownianMotionDiff = 'brownian_motion_diff'
+    Uniform = 'uniform'
     Test = 'test'
+
+
+class IntegratorType(Enum):
+    ProbabilityFlow = 'probability_flow'
+    EulerMaruyama = 'euler_maruyama'
 
 
 @dataclass
@@ -76,5 +105,5 @@ class SampleConfig(BaseConfig):
     num_samples: int = 10
     cond: Optional[float] = None
     guidance: GuidanceType = GuidanceType.Classifier
-    example: ExampleType = ExampleType.BrownianMotion
     test: TestType = TestType.Test
+    integrator_type: IntegratorType = IntegratorType.ProbabilityFlow

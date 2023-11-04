@@ -5,6 +5,7 @@ from collections import namedtuple
 
 import hydra
 from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
 import numpy as np
 import torch
 import torch.distributions as dist
@@ -15,10 +16,11 @@ from torchdiffeq import odeint
 
 from toy_plot import SDE, analytical_log_likelihood
 from toy_configs import register_configs
-from toy_train_config import SampleConfig, get_model_path, get_classifier_path, ExampleType, TestType
+from toy_train_config import SampleConfig, get_model_path, get_classifier_path, ExampleConfig, \
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, TestType, IntegratorType
 from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
-from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalIDK
+from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet
 from models.toy_diffusion_models_config import GuidanceType
 
 
@@ -56,7 +58,7 @@ def compute_diffusion_step(
     Q = sde.diffusion * torch.tensor(1. / sde.sde_steps, device=device).reshape(1, 1)
     C = diffusion.f(diffusion_time).reshape(1, -1)
     R = diffusion.g(diffusion_time).reshape(1, -1) ** 2
-    mu_0 = torch.tensor([[0.]], device=device)
+    mu_0 = torch.tensor([0.], device=device)
     Q_0 = Q
 
     table = create_table(
@@ -78,19 +80,19 @@ def suppresswarning():
 
 
 class ToyEvaluator:
-    def __init__(
-        self,
-        cfg: SampleConfig,
-        sampler: AbstractSampler,
-        diffusion_model: nn.Module,
-        likelihood: Likelihood,
-    ):
+    def __init__(self, cfg: SampleConfig):
         self.cfg = cfg
-        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
-        self.sampler = sampler
-        self.diffusion_model = diffusion_model.to(device)
+
+        d_model = torch.tensor(1)
+        self.sampler = hydra.utils.instantiate(cfg.sampler)
+        self.diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device).to(device)
+        # TODO: Remove
+        self.diffusion_model = TemporalNNet(d_model=1, cond_dim=1).to(device)
         self.diffusion_model.eval()
-        self.likelihood = likelihood
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
+        self.example = OmegaConf.to_object(cfg.example)
+
+        self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
 
         self.load_model()
 
@@ -106,7 +108,7 @@ class ToyEvaluator:
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
-        if isinstance(self.diffusion_model, TemporalTransformerUnet):
+        if type(self.diffusion_model) == TemporalTransformerUnet:
             return self.likelihood.grad_log_lik(cond, xt, x0_hat, cond_traj)
         elif type(self.likelihood) in [ClassifierLikelihood, GeneralDistLikelihood]:
             return self.likelihood.grad_log_lik(cond, xt, x0_hat, t)
@@ -126,14 +128,14 @@ class ToyEvaluator:
 
 class DiscreteEvaluator(ToyEvaluator):
     def sample_trajectories(self, cond_traj=None):
-        x_min = self.get_x_min()
+        x = self.get_x_min()
 
         samples = [x]
         for t in torch.arange(self.sampler.diffusion_timesteps-1, -1, -1, device=device):
             if t % 100 == 0:
                 print(x[0, 0])
             time = t.reshape(-1)
-            if isinstance(self.diffusion_model, TemporalTransformerUnet):
+            if type(self.diffusion_model) == TemporalTransformerUnet:
                 unconditional_output = self.diffusion_model(x, time, None, None)
             else:
                 unconditional_output = self.diffusion_model(x, time, None)
@@ -152,7 +154,7 @@ class DiscreteEvaluator(ToyEvaluator):
                 if self.cond is None or self.cond < 0.:
                     conditional_output = unconditional_output
                 else:
-                    if isinstance(self.diffusion_model, TemporalTransformerUnet):
+                    if type(self.diffusion_model) == TemporalTransformerUnet:
                         conditional_output = self.diffusion_model(x, time, cond_traj, self.cond)
                     else:
                         conditional_output = self.diffusion_model(x, time, self.cond)
@@ -199,32 +201,42 @@ class DiscreteEvaluator(ToyEvaluator):
 
 
 class ContinuousEvaluator(ToyEvaluator):
-    def get_score_function(self, t, x, extras=None):
+    def get_score_function(self, t, x):
         if self.cfg.test == TestType.Gaussian:
-            return self.analytical_gaussian_score(t=t, x=x, mu_0=extras['mu_0'], sigma_0=extras['sigma_0'])
+            return self.analytical_gaussian_score(
+                t=t,
+                x=x,
+                mu_0=self.cfg.example.mu,
+                sigma_0=self.cfg.example.sigma
+            )
         elif self.cfg.test == TestType.BrownianMotion:
             return self.analytical_brownian_motion_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
-            model_output = self.diffusion_model(x, t, None)
+            model_output = self.diffusion_model(x=x, time=t.reshape(-1), cond=None)
             return self.sampler.get_sf_estimator(model_output, xt=x, t=t)
         else:
             raise NotImplementedError
 
-    def get_dx_dt(self, t, x, extras=None):
+    def get_dx_dt(self, t, x):
         time = t.reshape(-1)
-        sf_est = self.get_score_function(t=time, x=x, extras=extras)
+        sf_est = self.get_score_function(t=time, x=x)
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
 
-    def get_gaussian_dx_dt(self, t, x, extras=None):
+    def get_gaussian_dx_dt(self, t, x):
         time = t.reshape(-1)
-        sf_est = self.analytical_gaussian_score(t=t, x=x, mu_0=extras['mu_0'], sigma_0=extras['sigma_0'])
+        sf_est = self.analytical_gaussian_score(
+            t=t,
+            x=x,
+            mu_0=self.cfg.example.mu,
+            sigma_0=self.cfg.example.sigma
+        )
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
 
-    def get_brownian_dx_dt(self, t, x, extras=None):
+    def get_brownian_dx_dt(self, t, x):
         time = t.reshape(-1)
         sf_est = self.analytical_brownian_motion_score(t=t, x=x)
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
@@ -274,24 +286,24 @@ class ContinuousEvaluator(ToyEvaluator):
 
         dt = 1. / (self.cfg.sde_steps-1)
 
-        var = f * dt + g ** 2
+        var = f ** 2 * dt + g ** 2
 
         score = -x / var
 
         return score
 
     def get_x_min(self):
-        if self.cfg.example == ExampleType.Gaussian:
+        if type(self.example) == GaussianExampleConfig:
             return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                     self.cfg.num_samples, 1, 1
             ])
-        elif self.cfg.example == ExampleType.BrownianMotion:
+        elif type(self.example) == BrownianMotionExampleConfig:
             return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
                 1,
             ])
-        elif self.cfg.example == ExampleType.BrownianMotionDiff:
+        elif type(self.example) == BrownianMotionDiffExampleConfig:
             return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
@@ -300,30 +312,39 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
 
-    def sample_trajectories_euler_maruyama(self, extras, steps=torch.tensor(1000)):
+    def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000)):
         x_min = self.get_x_min()
         x = x_min.clone()
 
         steps = steps.to(x.device)
         for time in torch.linspace(1., 0., steps, device=x.device):
-            sf_est = self.get_score_function(t=time, x=x, extras=extras)
+            sf_est = self.get_score_function(t=time, x=x)
             x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
 
         return SampleOutput(samples=[x_min, x], fevals=steps)
 
-    def sample_trajectories(self, extras, atol=1e-4, rtol=1e-4):
+    def sample_trajectories_probability_flow(self, atol=1e-4, rtol=1e-4):
         x_min = self.get_x_min()
 
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
             fevals += 1
-            dx_dt = self.get_dx_dt(t, x, extras)
+            dx_dt = self.get_dx_dt(t, x)
             return dx_dt
 
         times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
+
+    def sample_trajectories(self):
+        if self.cfg.integrator_type == IntegratorType.ProbabilityFlow:
+            sample_out = self.sample_trajectories_probability_flow()
+        elif self.cfg.intergrator_type == IntegratorType.EulerMaruyama:
+            sample_out = self.sample_trajectories_euler_maruyama()
+        else:
+            raise NotImplementedError
+        return sample_out
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
@@ -336,7 +357,7 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, extras)
+                dx_dt = self.get_dx_dt(t, x)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
@@ -384,13 +405,12 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
 
     plt.savefig('figs/scatter.pdf')
 
-def test_gaussian(end_time, cfg, sample_trajs, std, extras=None):
-    dt = end_time / cfg.sde_steps
+def test_gaussian(end_time, cfg, sample_trajs, std):
     analytical_llk = torch.distributions.Normal(
-        extras['mu_0'], extras['sigma_0']
+        cfg.example.mu, cfg.example.sigma
     ).log_prob(sample_trajs)
     print('analytical_llk: {}'.format(analytical_llk.squeeze()))
-    ode_llk = std.ode_log_likelihood(sample_trajs, extras=extras)
+    ode_llk = std.ode_log_likelihood(sample_trajs)
     print('\node_llk: {}'.format(ode_llk))
     mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
     print('\nmse_llk: {}'.format(mse_llk))
@@ -400,7 +420,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std, extras=None):
     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
-def test_brownian_motion(end_time, cfg, sample_trajs, std, extras=None):
+def test_brownian_motion(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.sde_steps-1)
     analytical_trajs = torch.cat([
         torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
@@ -410,7 +430,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std, extras=None):
     analytical_llk = analytical_log_likelihood(analytical_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
     print('analytical_llk: {}'.format(analytical_llk))
 
-    ode_llk = std.ode_log_likelihood(sample_trajs, extras=extras)
+    ode_llk = std.ode_log_likelihood(sample_trajs)
     print('\node_llk: {}'.format(ode_llk))
 
     mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
@@ -425,7 +445,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std, extras=None):
         plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
-def test_brownian_motion_diff(end_time, cfg, sample_trajs, std, extras=None):
+def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.sde_steps-1)
     analytical_trajs = torch.cat([
         torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
@@ -435,7 +455,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std, extras=None):
     analytical_llk = analytical_log_likelihood(analytical_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
     print('analytical_llk: {}'.format(analytical_llk))
 
-    ode_llk = std.ode_log_likelihood(sample_trajs, extras=extras)
+    ode_llk = std.ode_log_likelihood(sample_trajs)
     print('\node_llk: {}'.format(ode_llk))
 
     mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
@@ -450,39 +470,32 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std, extras=None):
         plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
-def test(end_time, cfg, out_trajs, std, extras=None):
-    if cfg.example == ExampleType.Gaussian:
-        test_gaussian(end_time, cfg, out_trajs, std, extras)
-    elif cfg.example == ExampleType.BrownianMotion:
-        test_brownian_motion(end_time, cfg, out_trajs, std, extras)
-    elif cfg.example == ExampleType.BrownianMotionDiff:
-        test_brownian_motion_diff(end_time, cfg, out_trajs, std, extras)
+
+def test(end_time, cfg, out_trajs, std):
+    if type(std.example) == GaussianExampleConfig:
+        test_gaussian(end_time, cfg, out_trajs, std)
+    elif type(std.example) == BrownianMotionExampleConfig:
+        test_brownian_motion(end_time, cfg, out_trajs, std)
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        test_brownian_motion_diff(end_time, cfg, out_trajs, std)
     else:
         raise NotImplementedError
+
+def viz_trajs(cfg, std, out_trajs, end_time):
+    if type(cfg.example) == BrownianMotionDiffExampleConfig:
+        undiffed_trajs = out_trajs.cumsum(dim=-2)
+        out_trajs = torch.cat([
+            torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
+            undiffed_trajs
+        ], dim=1)
+    for idx, out_traj in enumerate(out_trajs):
+        std.viz_trajs(out_traj, end_time, idx, clf=False)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
-    d_model = torch.tensor(1)
-    sampler = hydra.utils.instantiate(cfg.sampler)
-    diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-    diffusion_model = TemporalIDK()
-    likelihood = hydra.utils.instantiate(cfg.likelihood)
-
-    std = ContinuousEvaluator(
-        cfg=cfg,
-        sampler=sampler,
-        diffusion_model=diffusion_model,
-        likelihood=likelihood,
-    )
+    std = ContinuousEvaluator(cfg=cfg)
     end_time = torch.tensor(1., device=device)
-
-
-    # TODO: delete
-    mu_0 = torch.tensor(50., device=device)
-    sigma_0 = torch.tensor(4., device=device)
-    extras = {'mu_0': mu_0, 'sigma_0': sigma_0}
-
 
     # cond_traj = None
     # rare_traj_file = 'rare_traj.pt'
@@ -490,22 +503,16 @@ def sample(cfg):
     # std.viz_trajs(rare_traj, end_time, 100, clf=False, clr='red')
     # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
 
+    sample_traj_out = std.sample_trajectories()
 
-    # sample_out = std.sample_trajectories(extras)
-    sample_out = std.sample_trajectories_euler_maruyama(extras)
-    print('fevals: {}'.format(sample_out.fevals))
-    sample_traj_out = sample_out.samples
-    trajs = sample_traj_out[-1]
+    print('fevals: {}'.format(sample_traj_out.fevals))
+    sample_trajs = sample_traj_out.samples
+    trajs = sample_trajs[-1]
     out_trajs = trajs
-    # undiffed_trajs = trajs.cumsum(dim=-2)
-    # out_trajs = torch.cat([
-    #     torch.zeros(undiffed_trajs.shape[0], 1, 1, device=undiffed_trajs.device),
-    #     undiffed_trajs
-    # ], dim=1)
-    for idx, out_traj in enumerate(out_trajs):
-        std.viz_trajs(out_traj, end_time, idx, clf=False)
 
-    test(end_time, cfg, out_trajs, std, extras)
+    viz_trajs(cfg, std, out_trajs, end_time)
+
+    test(end_time, cfg, out_trajs, std)
 
 
 if __name__ == "__main__":

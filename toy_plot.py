@@ -4,6 +4,7 @@ import warnings
 
 from typing import List
 from collections import namedtuple
+import numpy as np
 import torch
 import torch.distributions as dist
 import matplotlib.pyplot as plt
@@ -108,6 +109,14 @@ def analytical_log_likelihood(x: torch.Tensor, sde: SDE, dt: torch.Tensor):
         llk += llk_prev
         x_prev = x_next
     return llk
+
+def continuous_failure_prob(a: float):
+    '''
+    According to https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
+    the following is the probability that brownian motion ending at time t=1
+    exits [-a, a] at any time from t=0 to t=1
+    '''
+    return 2 * np.sqrt(2)/(a * np.sqrt(np.pi)) * np.exp(-a**2/2)
 
 
 if __name__ == "__main__":

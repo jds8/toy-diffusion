@@ -5,6 +5,7 @@ from models.toy_diffusion_models_config import VPSDEEpsilonSamplerConfig, VPSDEV
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, TemporalUnetConfig, \
     TemporalTransformerUnetConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
+from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig
 
 
 def register_configs() -> None:
@@ -73,4 +74,14 @@ def register_configs() -> None:
         group='likelihood',
         name='classifier_likelihood',
         node=ClassifierLikelihoodConfig,
+    )
+    cs.store(
+        group='example',
+        name='gaussian_example',
+        node=GaussianExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='brownian_motion_diff_example',
+        node=BrownianMotionDiffExampleConfig,
     )

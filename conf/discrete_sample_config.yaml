@@ -3,4 +3,5 @@ defaults:
   - sampler: base_velocity_sampler
   - diffusion: base_temporal_unet
   - likelihood: base_likelihood
+  - example: gaussian_example
   - _self_

@@ -189,7 +189,8 @@ class VPSDESampler(AbstractContinuousSampler):
 
     def log_mean_coeff(self, x_shape: torch.Size, t: torch.Tensor):
         log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
-        return log_mean_coeff.repeat((log_mean_coeff.reshape(-1).shape[0],) + x_shape[1:])
+        # return log_mean_coeff.repeat((log_mean_coeff.reshape(-1).shape[0],) + x_shape[1:])
+        return log_mean_coeff.repeat(x_shape[1:] + (1,)).movedim(2, 0)
 
     def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
         log_mean_coeff = self.log_mean_coeff(x_shape=x.shape, t=t)
