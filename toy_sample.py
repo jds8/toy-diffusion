@@ -206,8 +206,6 @@ class ContinuousEvaluator(ToyEvaluator):
             return self.analytical_gaussian_score(
                 t=t,
                 x=x,
-                mu_0=self.cfg.example.mu,
-                sigma_0=self.cfg.example.sigma
             )
         elif self.cfg.test == TestType.BrownianMotion:
             return self.analytical_brownian_motion_score(t=t, x=x)
@@ -230,8 +228,6 @@ class ContinuousEvaluator(ToyEvaluator):
         sf_est = self.analytical_gaussian_score(
             t=t,
             x=x,
-            mu_0=self.cfg.example.mu,
-            sigma_0=self.cfg.example.sigma
         )
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
@@ -242,7 +238,7 @@ class ContinuousEvaluator(ToyEvaluator):
         dx_dt = self.sampler.probability_flow_ode(x, time, sf_est)
         return dx_dt
 
-    def analytical_gaussian_score(self, t, x, mu_0, sigma_0):
+    def analytical_gaussian_score(self, t, x):
         '''
         Compute the analytical score p_t for t \in (0, 1)
         given the SDE formulation from Song et al. in the case that
@@ -251,8 +247,8 @@ class ContinuousEvaluator(ToyEvaluator):
         lmc = self.sampler.log_mean_coeff(x_shape=x.shape, t=t)
         f = lmc.exp()
         g2 = (1 - (2. * lmc).exp())
-        var = sigma_0 ** 2 * f ** 2 + g2
-        score = (f * mu_0 - x) / var
+        var = self.cfg.example.sigma ** 2 * f ** 2 + g2
+        score = (f * self.cfg.example.mu - x) / var
         return score
 
     def analytical_brownian_motion_score(self, t, x):
@@ -294,23 +290,24 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def get_x_min(self):
         if type(self.example) == GaussianExampleConfig:
-            return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                     self.cfg.num_samples, 1, 1
             ])
         elif type(self.example) == BrownianMotionExampleConfig:
-            return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
                 1,
             ])
         elif type(self.example) == BrownianMotionDiffExampleConfig:
-            return torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
                 1,
             ])
         else:
             raise NotImplementedError
+        return x_min
 
     def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000)):
         x_min = self.get_x_min()
@@ -323,7 +320,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=[x_min, x], fevals=steps)
 
-    def sample_trajectories_probability_flow(self, atol=1e-4, rtol=1e-4):
+    def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5):
         x_min = self.get_x_min()
 
         fevals = 0
@@ -333,21 +330,22 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x)
             return dx_dt
 
-        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        times = torch.arange(1., -0.001, -0.001, device=x_min.device)
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='adaptive_heun')
         return SampleOutput(samples=sol, fevals=fevals)
 
     def sample_trajectories(self):
         if self.cfg.integrator_type == IntegratorType.ProbabilityFlow:
             sample_out = self.sample_trajectories_probability_flow()
-        elif self.cfg.intergrator_type == IntegratorType.EulerMaruyama:
+        elif self.cfg.integrator_type == IntegratorType.EulerMaruyama:
             sample_out = self.sample_trajectories_euler_maruyama()
         else:
             raise NotImplementedError
         return sample_out
 
     @torch.no_grad()
-    def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
+    def ode_log_likelihood(self, x, extras=None, atol=1e-5, rtol=1e-5):
         extras = {} if extras is None else extras
         # hutchinson's trick
         v = torch.randint_like(x, 2) * 2 - 1
@@ -362,8 +360,9 @@ class ContinuousEvaluator(ToyEvaluator):
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
+        # times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='adaptive_heun')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
@@ -411,7 +410,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     ).log_prob(sample_trajs)
     print('analytical_llk: {}'.format(analytical_llk.squeeze()))
     ode_llk = std.ode_log_likelihood(sample_trajs)
-    print('\node_llk: {}'.format(ode_llk))
+    print('\node_llk: {}\node evals: {}'.format(ode_llk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
     print('\nmse_llk: {}'.format(mse_llk))
 
