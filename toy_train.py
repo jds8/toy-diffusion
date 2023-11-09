@@ -36,8 +36,6 @@ class ToyTrainer:
         d_model = torch.tensor(1)
         self.sampler = hydra.utils.instantiate(cfg.sampler)
         diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-        # TODO: remove
-        diffusion_model = TemporalNNet(d_model=1, cond_dim=1)
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 

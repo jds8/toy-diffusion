@@ -86,8 +86,6 @@ class ToyEvaluator:
         d_model = torch.tensor(1)
         self.sampler = hydra.utils.instantiate(cfg.sampler)
         self.diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device).to(device)
-        # TODO: Remove
-        self.diffusion_model = TemporalNNet(d_model=1, cond_dim=1).to(device)
         self.diffusion_model.eval()
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
@@ -330,8 +328,8 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x)
             return dx_dt
 
-        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
-        times = torch.arange(1., -0.001, -0.001, device=x_min.device)
+        times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
+        # times = torch.arange(1., -0.001, -0.001, device=x_min.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
 
