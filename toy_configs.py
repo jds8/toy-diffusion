@@ -3,7 +3,9 @@
 from hydra.core.config_store import ConfigStore
 from models.toy_diffusion_models_config import VPSDEEpsilonSamplerConfig, \
     VPSDEVelocitySamplerConfig, \
-    VPSDEScoreFunctionSamplerConfig, EpsilonSamplerConfig, MuSamplerConfig, \
+    VPSDEScoreFunctionSamplerConfig, \
+    VPSDEGaussianScoreFunctionSamplerConfig, \
+    EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
     TemporalUnetConfig, TemporalTransformerUnetConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
@@ -26,6 +28,11 @@ def register_configs() -> None:
         group='sampler',
         name='vpsde_score_function_sampler',
         node=VPSDEScoreFunctionSamplerConfig,
+    )
+    cs.store(
+        group='sampler',
+        name='vpsde_gaussian_score_function_sampler',
+        node=VPSDEGaussianScoreFunctionSamplerConfig,
     )
     cs.store(
         group='sampler',

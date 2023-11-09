@@ -74,6 +74,14 @@ class VPSDEScoreFunctionSamplerConfig(VPSDESamplerConfig):
 
 
 @dataclass
+class VPSDEGaussianScoreFunctionSamplerConfig(VPSDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VPSDEGaussianScoreFunctionSampler'
+
+    def name(self):
+        return 'VPSDEGaussianScoreFunctionSampler'
+
+
+@dataclass
 class EpsilonSamplerConfig(DiscreteSamplerConfig):
     _target_: str = 'models.toy_sampler.EpsilonSampler'
 

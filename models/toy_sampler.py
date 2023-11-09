@@ -270,6 +270,22 @@ class VPSDEScoreFunctionSampler(VPSDESampler):
         return sf_pred
 
 
+class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        """
+        Note that this returns the *conditional* score function:
+        \nabla \log p_t(x_t|x_0).
+        This assumes that the *ground truth distribution is a standard gaussian*
+        """
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        var = log_mean_coeff.exp() ** 2 + sigma_t ** 2
+        score = -xt / var
+        return score
+
+    def get_sf_estimator(self, sf_pred, xt, t):
+        return sf_pred
+
+
 #####################
 # Discrete Samplers #
 #####################
