@@ -240,7 +240,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def analytical_gaussian_score(self, t, x):
         '''
-        Compute the analytical score p_t for t \in (0, 1)
+        Compute the analytical marginal score of p_t for t \in (0, 1)
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         '''
@@ -332,7 +332,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
         # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
         times = torch.arange(1., -0.001, -0.001, device=x_min.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='adaptive_heun')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
 
     def sample_trajectories(self):
@@ -362,7 +362,7 @@ class ContinuousEvaluator(ToyEvaluator):
         x_min = x, x.new_zeros([x.shape[0]])
         # times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='adaptive_heun')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f

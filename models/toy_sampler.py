@@ -255,6 +255,21 @@ class VPSDEVelocitySampler(VPSDESampler):
         return -eps_pred / sigma_t
 
 
+class VPSDEScoreFunctionSampler(VPSDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        """
+        Note that this returns the *conditional* score function:
+        \nabla \log p_t(x_t|x_0)
+        """
+        mean, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        var = sigma_t ** 2
+        score = (mean - xt) / var
+        return score
+
+    def get_sf_estimator(self, sf_pred, xt, t):
+        return sf_pred
+
+
 #####################
 # Discrete Samplers #
 #####################

@@ -159,7 +159,7 @@ class ConditionTrainer(ToyTrainer):
         return loss
 
     def get_x0(self):
-        if isinstance(self.cfg.example, BrownianMotionExampleConfig):
+        if isinstance(self.example, BrownianMotionExampleConfig):
             sde = SDE(self.cfg.example.sde_drift, self.cfg.example.sde_diffusion)
             trajs = integrate(
                 sde,
@@ -170,7 +170,7 @@ class ConditionTrainer(ToyTrainer):
             x0 = trajs.W
             if type(self.cfg.example) == BrownianMotionDiffExampleConfig:
                 x0 = trajs.W.diff(dim=1).unsqueeze(-1)
-        elif self.cfg.example == GaussianExampleConfig:
+        elif isinstance(self.example, GaussianExampleConfig):
             x0 = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
             ) * self.cfg.example.sigma + self.cfg.example.mu
