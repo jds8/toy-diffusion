@@ -224,7 +224,8 @@ def train(cfg):
     if not cfg.no_wandb:
         wandb.init(
             project="toy-diffusion",
-            config=OmegaConf.to_container(cfg)
+            config=OmegaConf.to_container(cfg),
+            settings=wandb.Settings(_service_wait=300)
         )
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
