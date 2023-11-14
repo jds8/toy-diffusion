@@ -14,11 +14,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from toy_plot import SDE, Trajectories, integrate
-from toy_train_config import TrainConfig, get_model_path
+from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig
 from toy_configs import register_configs
-from toy_likelihoods import traj_dist
-from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalIDK
-from models.toy_sampler import ForwardSample
+from toy_likelihoods import traj_dist, Likelihood
+from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet
+from models.toy_sampler import ForwardSample, AbstractSampler
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -29,18 +30,16 @@ def suppresswarning():
 
 
 class ToyTrainer:
-    def __init__(
-            self,
-            cfg,
-            sampler,
-            diffusion_model,
-            likelihood,
-    ):
+    def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-        self.sde = SDE(self.cfg.sde_drift, self.cfg.sde_diffusion)
-        self.sampler = sampler
+
+        d_model = torch.tensor(1)
+        self.sampler = hydra.utils.instantiate(cfg.sampler)
+        diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
+        self.example = OmegaConf.to_object(cfg.example)
+
         self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
-        self.likelihood = likelihood
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
@@ -80,7 +79,7 @@ class ToyTrainer:
             xt=forward_sample.xt,
             t=forward_sample.t
         )
-        losses = (score + noise / std) ** 2  # score = -eps / std so we have *plus sign*
+        losses = (score + forward_sample.noise / std) ** 2  # score = -eps / std so we have *plus sign*
         g2 = self.sampler.sde(torch.zeros_like(model_output), forward_sample.t)[1] ** 2
         return (losses * g2).mean()
 
@@ -157,21 +156,38 @@ class ConditionTrainer(ToyTrainer):
 
         return loss
 
+    def get_x0(self):
+        if isinstance(self.example, BrownianMotionExampleConfig):
+            sde = SDE(self.cfg.example.sde_drift, self.cfg.example.sde_diffusion)
+            trajs = integrate(
+                sde,
+                timesteps=self.cfg.example.sde_steps,
+                end_time=self.end_time,
+                n_samples=self.n_samples
+            )
+            x0 = trajs.W
+            if type(self.cfg.example) == BrownianMotionDiffExampleConfig:
+                x0 = trajs.W.diff(dim=1).unsqueeze(-1)
+        elif isinstance(self.example, GaussianExampleConfig):
+            x0 = torch.randn(
+                self.cfg.batch_size, 1, 1, device=device
+            ) * self.cfg.example.sigma + self.cfg.example.mu
+        else:
+            raise NotImplementedError
+        return x0
+
     def train_batch(self):
-        trajs = integrate(self.sde, timesteps=self.cfg.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
-        x0 = trajs.W.diff(dim=1).unsqueeze(-1)
-        # TODO: Remove
-        x0 = torch.randn(x0.shape[0], 1, 1, device=device) * 2 + 1
-        l2_loss = self.forward_process(x0)
+        x0 = self.get_x0()
+        loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
-            l2_loss.backward()
+            loss.backward()
             self.clip_gradients()
             self.optimizer.step()
             self.num_steps += 1
             try:
                 if not self.cfg.no_wandb:
-                    wandb.log({"train_loss": l2_loss.detach()})
+                    wandb.log({"train_loss": loss.detach()})
                     grads = []
                     for param in self.diffusion_model.parameters():
                         grads.append(param.grad.view(-1))
@@ -195,20 +211,20 @@ class TrajectoryConditionTrainer(ToyTrainer):
         return loss
 
     def train_batch(self):
-        trajs = integrate(self.sde, timesteps=self.cfg.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
+        trajs = integrate(self.example.sde, timesteps=self.cfg.example.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
         xs = trajs.W.diff(dim=1).unsqueeze(-1)
         x0 = xs[:self.n_samples//2]
         x_cond = xs[self.n_samples//2:]
-        l2_loss = self.forward_transformer_process(x0, x_cond)
+        loss = self.forward_transformer_process(x0, x_cond)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
-            l2_loss.backward()
+            loss.backward()
             self.clip_gradients()
             self.optimizer.step()
             self.num_steps += 1
             try:
                 if not self.cfg.no_wandb:
-                    wandb.log({"train_loss": l2_loss.detach()})
+                    wandb.log({"train_loss": loss.detach()})
                     grads = []
                     for param in self.diffusion_model.parameters():
                         grads.append(param.grad.view(-1))
@@ -231,17 +247,13 @@ def train(cfg):
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 
     d_model = torch.tensor(1)
-    sampler = hydra.utils.instantiate(cfg.sampler)
     diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
-    diffusion_model = TemporalIDK()
-    likelihood = hydra.utils.instantiate(cfg.likelihood)
-
     if isinstance(diffusion_model, TemporalUnet):
-        trainer = ConditionTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model, likelihood=likelihood)
+        trainer = ConditionTrainer(cfg=cfg)
     elif isinstance(diffusion_model, TemporalTransformerUnet):
-        trainer = TrajectoryConditionTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model, likelihood=likelihood)
+        trainer = TrajectoryConditionTrainer(cfg=cfg)
     else:
-        trainer = ConditionTrainer(cfg=cfg, sampler=sampler, diffusion_model=diffusion_model, likelihood=likelihood)
+        trainer = ConditionTrainer(cfg=cfg)
 
     trainer.train()
 
