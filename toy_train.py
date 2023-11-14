@@ -79,7 +79,7 @@ class ToyTrainer:
             xt=forward_sample.xt,
             t=forward_sample.t
         )
-        losses = (score + noise / std) ** 2  # score = -eps / std so we have *plus sign*
+        losses = (score + forward_sample.noise / std) ** 2  # score = -eps / std so we have *plus sign*
         g2 = self.sampler.sde(torch.zeros_like(model_output), forward_sample.t)[1] ** 2
         return (losses * g2).mean()
 

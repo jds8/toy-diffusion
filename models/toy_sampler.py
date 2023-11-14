@@ -140,28 +140,14 @@ class AbstractSampler:
 # Continuous Samplers #
 #######################
 
+
 class AbstractContinuousSampler(AbstractSampler):
+    def __init__(self, diffusion_timesteps: int, guidance_coef: float, t_eps: float):
+        super().__init__(diffusion_timesteps, guidance_coef)
+        self.t_eps = 0.
+
     def continuous_beta_schedule(timesteps: int):
         raise NotImplementedError
-
-
-class VPSDESampler(AbstractContinuousSampler):
-    # heavily inspired by score_sde/sde_lib.py from Song et al. Score-Based Generative Modeling Through SDE
-    def __init__(self, diffusion_timesteps: int, guidance_coef: float, beta0: float, beta1: float, t_eps: float):
-        super().__init__(diffusion_timesteps, guidance_coef)
-        self.beta0 = beta0
-        self.beta1 = beta1
-        self.t_eps = t_eps
-
-    def continuous_beta_schedule(self, timestep: torch.Tensor):
-        return self.beta0 + timestep * (self.beta1 - self.beta0)
-
-    def sde(self, x: torch.Tensor, t: torch.Tensor):
-        beta_t = self.continuous_beta_schedule(t)
-        beta_t = self.continuous_beta_schedule(t).repeat((beta_t.reshape(-1).shape[0],) + x.shape[1:])
-        drift = -0.5 * beta_t * x
-        diffusion = beta_t.sqrt()
-        return drift, diffusion
 
     def reverse_sde(
             self,
@@ -187,6 +173,59 @@ class VPSDESampler(AbstractContinuousSampler):
         dx_dt = drift - 0.5 * diffusion ** 2 * score
         return dx_dt
 
+    # forward diffusion (using the nice property)
+    def forward_sample(self, x_start):
+        lower = torch.tensor(self.t_eps, device=x_start.device)
+        upper = torch.tensor(1., device=x_start.device)
+        t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
+        noise = torch.rand_like(x_start)
+
+        mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
+        xt = mean + std * noise
+        return ForwardSample(
+            xt=xt,
+            t=t,
+            noise=noise,
+            to_predict=self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+        )
+
+    def reverse_sample(self, xt, t, conditional_mean):
+        '''
+        reverse probability flow ODE sampler
+        provenance: score_sde/sampling.py
+        '''
+        noise = torch.randn_like(xt)
+        nonzero_mask = torch.tensor(t != 0, dtype=self.betas.dtype)  # no noise when t == 0
+        posterior_variance = self.posterior_variance[t]
+        var = nonzero_mask * posterior_variance.sqrt() * noise
+        out = conditional_mean + var
+        return out
+
+    def prior_logp(self, z: torch.Tensor, device):
+        return self.prior_sampling(device).log_prob(z)
+
+    ##################
+    # VPSDE Samplers #
+    ##################
+
+
+class VPSDESampler(AbstractContinuousSampler):
+    # heavily inspired by score_sde/sde_lib.py from Song et al. Score-Based Generative Modeling Through SDE
+    def __init__(self, diffusion_timesteps: int, guidance_coef: float, t_eps: float, beta0: float, beta1: float):
+        super().__init__(diffusion_timesteps, guidance_coef, t_eps)
+        self.beta0 = torch.tensor(beta0)
+        self.beta1 = torch.tensor(beta1)
+
+    def continuous_beta_schedule(self, timestep: torch.Tensor):
+        return self.beta0 + timestep * (self.beta1 - self.beta0)
+
+    def sde(self, x: torch.Tensor, t: torch.Tensor):
+        beta_t = self.continuous_beta_schedule(t)
+        beta_t = self.continuous_beta_schedule(t).repeat((beta_t.reshape(-1).shape[0],) + x.shape[1:])
+        drift = -0.5 * beta_t * x
+        diffusion = beta_t.sqrt()
+        return drift, diffusion
+
     def log_mean_coeff(self, x_shape: torch.Size, t: torch.Tensor):
         log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
         # return log_mean_coeff.repeat((log_mean_coeff.reshape(-1).shape[0],) + x_shape[1:])
@@ -198,8 +237,8 @@ class VPSDESampler(AbstractContinuousSampler):
         std = (1 - (2. * log_mean_coeff).exp()).sqrt()
         return mean, log_mean_coeff, std
 
-    def prior_logp(self, z: torch.Tensor):
-        return torch.distributions.Normal(0, 1).log_prob(z)
+    def prior_sampling(self, device):
+        return torch.distributions.Normal(0., torch.tensor(1., device=device))
 
     # forward diffusion (using the nice property)
     def forward_sample(self, x_start):
@@ -285,6 +324,93 @@ class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
     def get_sf_estimator(self, sf_pred, xt, t):
         return sf_pred
 
+    ##################
+    # VESDE Samplers #
+    ##################
+
+
+class VESDESampler(AbstractContinuousSampler):
+    # heavily inspired by score_sde/sde_lib.py from Song et al. Score-Based Generative Modeling Through SDE
+    def __init__(self, diffusion_timesteps: int, guidance_coef: float, t_eps: float, sigma_min: float, sigma_max: float):
+        super().__init__(diffusion_timesteps, guidance_coef, t_eps)
+        self.sigma_min = torch.tensor(sigma_min)
+        self.sigma_max = torch.tensor(sigma_max)
+
+    def sigma(self, t: torch.Tensor):
+        return self.sigma_min * (self.sigma_max / self.sigma_min) ** t
+
+    def sde(self, x: torch.Tensor, t: torch.Tensor):
+        drift = torch.zeros_like(x)
+        sigma = self.sigma(t)
+        diffusion = sigma * torch.sqrt(2 * (torch.log(self.sigma_max) - torch.log(self.sigma_min)))
+        diffusion = diffusion.repeat((t.reshape(-1).shape[0],) + x.shape[1:])
+        return drift, diffusion
+
+    def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
+        # first two arguments correspond to mean and log_mean
+        std = self.sigma(t)
+        mean = x
+        return mean, torch.zeros_like(x), std
+
+    def prior_sampling(self, device):
+        return torch.distributions.Normal(0., torch.tensor(self.sigma_max, device=device))
+
+
+class VESDEEpsilonSampler(VESDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        return eps
+
+    def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
+        eps = self.combine_eps(unconditional_output, conditional_output)
+        return self.get_posterior_mean(xt, eps, t)
+
+    def get_sf_estimator(self, eps_pred, xt, t):
+        _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
+        return -eps_pred / sigma_t
+
+
+class VESDEVelocitySampler(VESDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        return log_mean_coeff.exp() * eps - sigma_t * x0
+
+    def get_sf_estimator(self, v_pred, xt, t):
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        alpha_t = log_mean_coeff.exp()
+        eps_pred = sigma_t * xt + alpha_t * v_pred
+        return -eps_pred / sigma_t
+
+
+class VESDEScoreFunctionSampler(VESDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        """
+        Note that this returns the *conditional* score function:
+        \nabla \log p_t(x_t|x_0)
+        """
+        mean, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        var = sigma_t ** 2
+        score = (mean - xt) / var
+        return score
+
+    def get_sf_estimator(self, sf_pred, xt, t):
+        return sf_pred
+
+
+class VESDEGaussianScoreFunctionSampler(VESDESampler):
+    def get_ground_truth(self, eps, xt, x0, t):
+        """
+        Note that this returns the *conditional* score function:
+        \nabla \log p_t(x_t|x_0).
+        This assumes that the *ground truth distribution is a standard gaussian*
+        """
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        var = log_mean_coeff.exp() ** 2 + sigma_t ** 2
+        score = -xt / var
+        return score
+
+    def get_sf_estimator(self, sf_pred, xt, t):
+        return sf_pred
+
 
 #####################
 # Discrete Samplers #
@@ -294,7 +420,6 @@ class AbstractDiscreteSampler(AbstractSampler):
     def __init__(self, beta_schedule, diffusion_timesteps: int, guidance_coef: float):
         super().__init__(diffusion_timesteps, guidance_coef)
         self.beta_schedule = beta_schedule
-        self.t_eps = 0.
 
         # define beta schedule
         beta_schedule_fn = get_beta_schedule(beta_schedule)

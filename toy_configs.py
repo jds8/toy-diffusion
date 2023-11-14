@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 
 from hydra.core.config_store import ConfigStore
-from models.toy_diffusion_models_config import VPSDEEpsilonSamplerConfig, \
+from models.toy_diffusion_models_config import \
+    VESDEEpsilonSamplerConfig, \
+    VESDEVelocitySamplerConfig, \
+    VESDEScoreFunctionSamplerConfig, \
+    VPSDEEpsilonSamplerConfig, \
     VPSDEVelocitySamplerConfig, \
     VPSDEScoreFunctionSamplerConfig, \
     VPSDEGaussianScoreFunctionSamplerConfig, \
@@ -14,6 +18,21 @@ from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleCon
 
 def register_configs() -> None:
     cs = ConfigStore.instance()
+    cs.store(
+        group='sampler',
+        name='vesde_epsilon_sampler',
+        node=VESDEEpsilonSamplerConfig,
+    )
+    cs.store(
+        group='sampler',
+        name='vesde_velocity_sampler',
+        node=VESDEVelocitySamplerConfig,
+    )
+    cs.store(
+        group='sampler',
+        name='vesde_score_function_sampler',
+        node=VESDEScoreFunctionSamplerConfig,
+    )
     cs.store(
         group='sampler',
         name='vpsde_epsilon_sampler',

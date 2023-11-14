@@ -13,6 +13,8 @@ class BetaSchedule(Enum):
 
 
 class SamplerType(Enum):
+    VESDEEpsilonSamplerType = 'vesde_epsilon'
+    VESDEVelocitySamplerType = 'vesde_velocity'
     VPSDEEpsilonSamplerType = 'vpsde_epsilon'
     VPSDEVelocitySamplerType = 'vpsde_velocity'
     EpsilonSamplerType = 'epsilon'
@@ -40,7 +42,15 @@ class DiscreteSamplerConfig(BaseSamplerConfig):
 
 
 @dataclass
-class VPSDESamplerConfig(BaseSamplerConfig):
+class ContinuousSamplerConfig(BaseSamplerConfig):
+    t_eps: float = 1e-5
+
+    def name(self):
+        return 'ContinuousSampler'
+
+
+@dataclass
+class VPSDESamplerConfig(ContinuousSamplerConfig):
     beta0: float = 0.1
     beta1: float = 20.
     t_eps: float = 1e-5
@@ -79,6 +89,39 @@ class VPSDEGaussianScoreFunctionSamplerConfig(VPSDESamplerConfig):
 
     def name(self):
         return 'VPSDEGaussianScoreFunctionSampler'
+
+
+@dataclass
+class VESDESamplerConfig(ContinuousSamplerConfig):
+    sigma_min: float = 0.02
+    sigma_max: float = 100
+
+    def name(self):
+        return 'VESDESampler'
+
+
+@dataclass
+class VESDEEpsilonSamplerConfig(VESDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VESDEEpsilonSampler'
+
+    def name(self):
+        return 'VESDEEpsilonSampler'
+
+
+@dataclass
+class VESDEVelocitySamplerConfig(VESDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VESDEVelocitySampler'
+
+    def name(self):
+        return 'VESDEVelocitySampler'
+
+
+@dataclass
+class VESDEScoreFunctionSamplerConfig(VESDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VESDEScoreFunctionSampler'
+
+    def name(self):
+        return 'VESDEScoreFunctionSampler'
 
 
 @dataclass

@@ -193,7 +193,7 @@ class DiscreteEvaluator(ToyEvaluator):
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
         latent, delta_ll = sol[0][-1], sol[1][-1]
-        ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
+        ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
         return ll_prior + delta_ll, {'fevals': fevals}
 
@@ -211,7 +211,14 @@ class ContinuousEvaluator(ToyEvaluator):
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
             model_output = self.diffusion_model(x=x, time=t.reshape(-1), cond=None)
-            return self.sampler.get_sf_estimator(model_output, xt=x, t=t)
+            # return self.sampler.get_sf_estimator(model_output, xt=x, t=t)
+            bad_s = self.sampler.get_sf_estimator(model_output, xt=x, t=t)
+            true_s = self.analytical_gaussian_score(
+                t=t,
+                x=x,
+            )
+            import pdb; pdb.set_trace()
+            return bad_s
         else:
             raise NotImplementedError
 
@@ -242,11 +249,11 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         '''
-        lmc = self.sampler.log_mean_coeff(x_shape=x.shape, t=t)
+        _, lmc, std = self.sampler.marginal_prob(x=x, t=t)
         f = lmc.exp()
-        g2 = (1 - (2. * lmc).exp())
-        var = self.cfg.example.sigma ** 2 * f ** 2 + g2
+        var = self.cfg.example.sigma ** 2 * f ** 2 + std ** 2
         score = (f * self.cfg.example.mu - x) / var
+        import pdb; pdb.set_trace()
         return score
 
     def analytical_brownian_motion_score(self, t, x):
@@ -288,17 +295,17 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def get_x_min(self):
         if type(self.example) == GaussianExampleConfig:
-            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = self.sampler.prior_sampling(device).sample([
                     self.cfg.num_samples, 1, 1
             ])
         elif type(self.example) == BrownianMotionExampleConfig:
-            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
                 1,
             ])
         elif type(self.example) == BrownianMotionDiffExampleConfig:
-            x_min = torch.distributions.Normal(0, torch.tensor(1., device=device)).sample([
+            x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
                 self.cfg.sde_steps-1,
                 1,
@@ -362,7 +369,7 @@ class ContinuousEvaluator(ToyEvaluator):
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
-        ll_prior = self.sampler.prior_logp(latent).flatten(1).sum(1)
+        ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
         return ll_prior + delta_ll, {'fevals': fevals}
 
