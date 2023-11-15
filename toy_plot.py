@@ -138,8 +138,8 @@ def score_function_heat_map(
     mesh_x = xs.cpu().numpy()
     mesh_t = ts.cpu().numpy()
     mesh_scores = scores.reshape(100, 100).detach().cpu().numpy()
-    score_min = mesh_scores.min()
-    score_max = mesh_scores.max()
+    score_max = np.max(np.abs([mesh_scores.min(), mesh_scores.max()]))
+    score_min = -score_max
 
     ax.pcolormesh(mesh_x, mesh_t, mesh_scores, cmap='RdBu', vmin=score_min, vmax=score_max)
     fig.savefig('figs/heat_maps/nn_score_v{}.jpg'.format(version))

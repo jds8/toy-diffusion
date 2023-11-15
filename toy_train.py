@@ -123,7 +123,9 @@ class ToyTrainer:
                 if isinstance(self.example, GaussianExampleConfig):
                     score_function_heat_map(
                         lambda x, time: self.diffusion_model(x=x, time=time, cond=None),
-                        self.num_saves
+                        self.num_saves,
+                        mu=self.cfg.example.mu,
+                        sigma=self.cfg.example.sigma,
                     )
                     create_gif('figs/heat_maps', '{}_training_scores'.format(
                         OmegaConf.to_object(self.cfg.sampler).name()
