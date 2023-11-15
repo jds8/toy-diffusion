@@ -217,7 +217,6 @@ class ContinuousEvaluator(ToyEvaluator):
                 t=t,
                 x=x,
             )
-            import pdb; pdb.set_trace()
             return bad_s
         else:
             raise NotImplementedError
@@ -253,7 +252,6 @@ class ContinuousEvaluator(ToyEvaluator):
         f = lmc.exp()
         var = self.cfg.example.sigma ** 2 * f ** 2 + std ** 2
         score = (f * self.cfg.example.mu - x) / var
-        import pdb; pdb.set_trace()
         return score
 
     def analytical_brownian_motion_score(self, t, x):

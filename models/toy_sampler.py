@@ -299,6 +299,8 @@ class VPSDEScoreFunctionSampler(VPSDESampler):
         """
         Note that this returns the *conditional* score function:
         \nabla \log p_t(x_t|x_0)
+        where x_t = lmc.exp()x_0 + sigma_t\epsilon so
+        E[x_t|x_0] = lmc.exp()x_0 and Var[x_t|x_0] = sigma_t^2(t)
         """
         mean, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         var = sigma_t ** 2
@@ -312,7 +314,7 @@ class VPSDEScoreFunctionSampler(VPSDESampler):
 class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t):
         """
-        Note that this returns the *conditional* score function:
+        Note that this returns the *marginal* score function:
         \nabla \log p_t(x_t|x_0).
         This assumes that the *ground truth distribution is a standard gaussian*
         """

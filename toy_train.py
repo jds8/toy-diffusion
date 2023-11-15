@@ -13,7 +13,7 @@ import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from toy_plot import SDE, Trajectories, integrate
+from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig
 from toy_configs import register_configs
@@ -120,6 +120,14 @@ class ToyTrainer:
             self.train_batch()
             if self.num_steps % self.iterations_before_save == 0:
                 saved_model_path = self._save_model()
+                if isinstance(self.example, GaussianExampleConfig):
+                    score_function_heat_map(
+                        lambda x, time: self.diffusion_model(x=x, time=time, cond=None),
+                        self.num_saves
+                    )
+                    create_gif('figs/heat_maps', '{}_training_scores'.format(
+                        OmegaConf.to_object(self.cfg.sampler).name()
+                    ))
                 if not self.cfg.no_wandb:
                     self.log_artifact(saved_model_path, 'diffusion_model')
                     self.delete_model(saved_model_path)
@@ -153,8 +161,33 @@ class ConditionTrainer(ToyTrainer):
         )
 
         loss = self.loss_fn(model_output, forward_sample_output)
+        self.compare_score(
+            x=forward_sample_output.xt,
+            time=forward_sample_output.t,
+            model_output=model_output,
+        )
 
         return loss
+
+    def analytical_gaussian_score(self, t, x):
+        '''
+        Compute the analytical marginal score of p_t for t \in (0, 1)
+        given the SDE formulation from Song et al. in the case that
+        p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
+        '''
+        _, lmc, std = self.sampler.marginal_prob(x=x, t=t)
+        f = lmc.exp()
+        var = self.cfg.example.sigma ** 2 * f ** 2 + std ** 2
+        score = (f * self.cfg.example.mu - x) / var
+        return score
+
+    def compare_score(self, x, time, model_output):
+        if isinstance(self.example, GaussianExampleConfig):
+            true_sf = self.analytical_gaussian_score(t=time, x=x)
+            sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
+            error = (true_sf - sf_estimate.detach()).norm()
+            wandb.log({"score error": error})
+        return
 
     def get_x0(self):
         if isinstance(self.example, BrownianMotionExampleConfig):
