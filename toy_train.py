@@ -152,7 +152,13 @@ class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0):
         cond = self.likelihood.get_condition(x0) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
-        forward_sample_output = self.sampler.forward_sample(x_start=x0)
+
+        extras = {}
+        if isinstance(self.example, GaussianExampleConfig):
+            extras['mu'] = self.cfg.example.mu
+            extras['sigma'] = self.cfg.example.sigma
+
+        forward_sample_output = self.sampler.forward_sample(x_start=x0, extras=extras)
 
         model_output = self.diffusion_model(
             x=forward_sample_output.xt,
