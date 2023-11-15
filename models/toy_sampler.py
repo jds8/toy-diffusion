@@ -114,7 +114,7 @@ class AbstractSampler:
     def prior_logp(self, z):
         raise NotImplementedError
 
-    def forward_sample(self, x_start):
+    def forward_sample(self, x_start, extras=None):
         raise NotImplementedError
 
     def reverse_sample(self, xt, t, conditional_mean):
@@ -174,7 +174,7 @@ class AbstractContinuousSampler(AbstractSampler):
         return dx_dt
 
     # forward diffusion (using the nice property)
-    def forward_sample(self, x_start):
+    def forward_sample(self, x_start, extras=None):
         lower = torch.tensor(self.t_eps, device=x_start.device)
         upper = torch.tensor(1., device=x_start.device)
         t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
@@ -186,7 +186,13 @@ class AbstractContinuousSampler(AbstractSampler):
             xt=xt,
             t=t,
             noise=noise,
-            to_predict=self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
+            to_predict=self.get_ground_truth(
+                eps=noise,
+                xt=xt,
+                x0=x_start,
+                t=t,
+                extras=extras
+            )
         )
 
     def reverse_sample(self, xt, t, conditional_mean):
@@ -240,22 +246,6 @@ class VPSDESampler(AbstractContinuousSampler):
     def prior_sampling(self, device):
         return torch.distributions.Normal(0., torch.tensor(1., device=device))
 
-    # forward diffusion (using the nice property)
-    def forward_sample(self, x_start):
-        lower = torch.tensor(self.t_eps, device=x_start.device)
-        upper = torch.tensor(1., device=x_start.device)
-        t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
-        noise = torch.rand_like(x_start)
-
-        mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
-        xt = mean + std * noise
-        return ForwardSample(
-            xt=xt,
-            t=t,
-            noise=noise,
-            to_predict=self.get_ground_truth(eps=noise, xt=xt, x0=x_start, t=t)
-        )
-
     def reverse_sample(self, xt, t, conditional_mean):
         '''
         reverse probability flow ODE sampler
@@ -270,7 +260,7 @@ class VPSDESampler(AbstractContinuousSampler):
 
 
 class VPSDEEpsilonSampler(VPSDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         return eps
 
     def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
@@ -283,7 +273,7 @@ class VPSDEEpsilonSampler(VPSDESampler):
 
 
 class VPSDEVelocitySampler(VPSDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
@@ -295,10 +285,12 @@ class VPSDEVelocitySampler(VPSDESampler):
 
 
 class VPSDEScoreFunctionSampler(VPSDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
         \nabla \log p_t(x_t|x_0)
+        where x_t = lmc.exp()x_0 + sigma_t\epsilon so
+        E[x_t|x_0] = lmc.exp()x_0 and Var[x_t|x_0] = sigma_t^2(t)
         """
         mean, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         var = sigma_t ** 2
@@ -310,15 +302,16 @@ class VPSDEScoreFunctionSampler(VPSDESampler):
 
 
 class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         """
-        Note that this returns the *conditional* score function:
+        Note that this returns the *marginal* score function:
         \nabla \log p_t(x_t|x_0).
         This assumes that the *ground truth distribution is a standard gaussian*
         """
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
-        var = log_mean_coeff.exp() ** 2 + sigma_t ** 2
-        score = -xt / var
+        f = log_mean_coeff.exp()
+        var = extras['sigma'] ** 2 * f ** 2 + sigma_t ** 2
+        score = (f * extras['mu'] - xt) / var
         return score
 
     def get_sf_estimator(self, sf_pred, xt, t):
@@ -357,7 +350,7 @@ class VESDESampler(AbstractContinuousSampler):
 
 
 class VESDEEpsilonSampler(VESDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         return eps
 
     def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
@@ -370,7 +363,7 @@ class VESDEEpsilonSampler(VESDESampler):
 
 
 class VESDEVelocitySampler(VESDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
@@ -382,7 +375,7 @@ class VESDEVelocitySampler(VESDESampler):
 
 
 class VESDEScoreFunctionSampler(VESDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
         \nabla \log p_t(x_t|x_0)
@@ -397,7 +390,7 @@ class VESDEScoreFunctionSampler(VESDESampler):
 
 
 class VESDEGaussianScoreFunctionSampler(VESDESampler):
-    def get_ground_truth(self, eps, xt, x0, t):
+    def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
         \nabla \log p_t(x_t|x_0).

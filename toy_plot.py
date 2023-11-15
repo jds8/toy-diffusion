@@ -2,7 +2,8 @@
 
 import warnings
 
-from typing import List
+import re
+from typing import List, Callable
 from collections import namedtuple
 import numpy as np
 import torch
@@ -117,6 +118,55 @@ def continuous_failure_prob(a: float):
     exits [-a, a] at any time from t=0 to t=1
     '''
     return 2 * np.sqrt(2)/(a * np.sqrt(np.pi)) * np.exp(-a**2/2)
+
+def score_function_heat_map(
+        score_function: Callable,
+        version: int,
+        mu: float = 0.,
+        sigma: float = 1.
+):
+    lwr = -5 * sigma + mu
+    upr = 5 * sigma + mu
+    xs = torch.linspace(lwr, upr, 100, device=device)
+    ts = torch.linspace(0, 1, 100, device=device)
+    grid_t, grid_x = torch.meshgrid(ts, xs, indexing='ij')
+    input_x = grid_x.reshape(-1, 1, 1)
+    input_t = grid_t.reshape(-1)
+    scores = score_function(x=input_x, time=input_t)
+
+    fig, ax = plt.subplots()
+    mesh_x = xs.cpu().numpy()
+    mesh_t = ts.cpu().numpy()
+    mesh_scores = scores.reshape(100, 100).detach().cpu().numpy()
+    score_min = mesh_scores.min()
+    score_max = mesh_scores.max()
+
+    ax.pcolormesh(mesh_x, mesh_t, mesh_scores, cmap='RdBu', vmin=score_min, vmax=score_max)
+    fig.savefig('figs/heat_maps/nn_score_v{}.jpg'.format(version))
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+
+def create_gif(file_dir, gif_name=None):
+    import imageio
+    import os
+    filenames = os.listdir(file_dir)
+    filenames.sort(key=natural_keys)
+    gif_name = gif_name if gif_name is not None else filenames[0]
+    images = []
+    for filename in filenames:
+        jpg = os.path.join(file_dir, filename)
+        if jpg.endswith('.jpg'):
+            images.append(imageio.imread(jpg))
+    imageio.mimsave('{}/{}.gif'.format(file_dir, gif_name), images)
 
 
 if __name__ == "__main__":
