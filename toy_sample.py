@@ -132,7 +132,6 @@ class ToyEvaluator:
     def get_x_min(self):
         if type(self.example) == GaussianExampleConfig:
             mean, _, std = self.sampler.analytical_marginal_prob(
-                x=torch.tensor([[[self.cfg.example.mu]]]),
                 t=torch.tensor(1.),
                 example=self.cfg.example
             )
@@ -273,14 +272,12 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        _, lmc, std = self.sampler.analytical_marginal_prob(
-            x=x,
+        mean, _, std = self.sampler.analytical_marginal_prob(
             t=t,
             example=self.cfg.example
         )
-        f = lmc.exp()
         var = std ** 2
-        score = (f * self.cfg.example.mu - x) / var
+        score = (mean - x) / var
         return score
 
     def analytical_brownian_motion_score(self, t, x):
@@ -523,12 +520,6 @@ def sample(cfg):
 
     end_time = torch.tensor(1., device=device)
 
-    # cond_traj = None
-    # rare_traj_file = 'rare_traj.pt'
-    # rare_traj = torch.load(rare_traj_file).to(device)
-    # std.viz_trajs(rare_traj, end_time, 100, clf=False, clr='red')
-    # cond_traj = rare_traj.diff(dim=-1).reshape(1, -1, 1)
-
     sample_traj_out = std.sample_trajectories()
 
     # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
@@ -540,17 +531,6 @@ def sample(cfg):
     out_trajs = trajs
 
     # viz_trajs(cfg, std, out_trajs, end_time)
-
-    # lst = [
-    #     cfg.example.mu - 3*cfg.example.sigma,
-    #     cfg.example.mu - 2*cfg.example.sigma,
-    #     cfg.example.mu - 1*cfg.example.sigma,
-    #     cfg.example.mu,
-    #     cfg.example.mu + 1*cfg.example.sigma,
-    #     cfg.example.mu + 2*cfg.example.sigma,
-    #     cfg.example.mu + 3*cfg.example.sigma,
-    # ]
-    # out_trajs = torch.tensor(lst, device=device).reshape(-1, 1, 1)
 
     test(end_time, cfg, out_trajs, std)
 
