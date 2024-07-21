@@ -2,7 +2,7 @@
 
 from enum import Enum
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
 
@@ -42,12 +42,12 @@ class BrownianMotionDiffExampleConfig(BrownianMotionExampleConfig):
 
 @dataclass
 class BaseConfig:
-    sampler: BaseSamplerConfig = BaseSamplerConfig()
-    diffusion: ModelConfig = ModelConfig()
-    likelihood: LikelihoodConfig = LikelihoodConfig()
+    sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
+    diffusion: ModelConfig = field(default_factory=ModelConfig)
+    likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
     model_dir: str = 'diffusion_models/'
     model_name: str = ''
-    example: ExampleConfig = GaussianExampleConfig()
+    example: ExampleConfig = field(default_factory=GaussianExampleConfig)
 
 
 @dataclass
@@ -74,7 +74,17 @@ def get_model_path(cfg: TrainConfig):
     else:
         sampler_name = OmegaConf.to_object(cfg.sampler).name()
         diffusion_name = OmegaConf.to_object(cfg.diffusion).name()
-        model_name = "{}_{}".format(sampler_name, diffusion_name)
+        example_cfg = OmegaConf.to_object(cfg.example)
+        example_name = example_cfg.name()
+        parameter_name = ''
+        if isinstance(example_cfg, GaussianExampleConfig):
+            parameter_name = '_{}_{}'.format(cfg.example.mu, cfg.example.sigma)
+        model_name = "{}_{}_{}{}".format(
+            sampler_name,
+            diffusion_name,
+            example_name,
+            parameter_name
+        )
     return get_path(cfg, model_name)
 
 def get_classifier_path(cfg: TrainConfig):
@@ -102,7 +112,7 @@ class IntegratorType(Enum):
 
 @dataclass
 class SampleConfig(BaseConfig):
-    num_samples: int = 10
+    num_samples: int = 100
     cond: Optional[float] = None
     guidance: GuidanceType = GuidanceType.Classifier
     test: TestType = TestType.Test

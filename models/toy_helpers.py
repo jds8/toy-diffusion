@@ -9,7 +9,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
-from driving_models.trainers.utils import device
+
+
+device = 'cuda'
 
 
 def to_np(x):
