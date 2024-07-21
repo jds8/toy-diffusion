@@ -279,7 +279,6 @@ class ContinuousEvaluator(ToyEvaluator):
             example=self.cfg.example
         )
         f = lmc.exp()
-        # var = self.cfg.example.sigma ** 2 * f ** 2 + std ** 2
         var = std ** 2
         score = (f * self.cfg.example.mu - x) / var
         return score
