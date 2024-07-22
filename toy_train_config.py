@@ -60,6 +60,7 @@ class TrainConfig(BaseConfig):
     max_gradient: float = 1.
     loss_fn: str = 'l2'
     p_uncond: float = 1.
+    iterations_before_save: int = 10
 
 
 def get_path(cfg: TrainConfig, model_name):

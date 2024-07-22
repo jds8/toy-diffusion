@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import warnings
+import logging
 
 from collections import namedtuple
 
@@ -89,7 +90,7 @@ class ToyEvaluator:
 
 
         # TODO: Remove
-        self.diffusion_model = DiffusionModel(nfeatures=1, nblocks=4).to(device)
+        # self.diffusion_model = DiffusionModel(nfeatures=1, nblocks=4).to(device)
 
 
         self.diffusion_model.eval()
@@ -135,7 +136,11 @@ class ToyEvaluator:
                 t=torch.tensor(1.),
                 example=self.cfg.example
             )
-            x_min = dist.Normal(mean, std, device).sample([
+            x_min = dist.Normal(
+                mean.item(),
+                std.item(),
+                device
+            ).sample([
                 self.cfg.num_samples,
                 1,
                 1
@@ -249,8 +254,10 @@ class ContinuousEvaluator(ToyEvaluator):
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
             model_output = self.diffusion_model(
-                x=x.reshape(-1, 1),
-                time=t.repeat(x.shape[0], 1),
+                # x=x.reshape(-1, 1),
+                # time=t.repeat(x.shape[0], 1),
+                x=x,
+                time=t,
             )
             return self.sampler.get_sf_estimator(model_output, xt=x, t=t)
         else:
@@ -339,8 +346,15 @@ class ContinuousEvaluator(ToyEvaluator):
             return dx_dt
 
         # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
-        times = torch.linspace(1., 0., 1000, device=x_min.device)
+        # times = torch.linspace(1., 0., 100, device=x_min.device)
+        times = torch.linspace(
+            1.,
+            self.sampler.t_eps,
+            self.sampler.diffusion_timesteps,
+            device=x_min.device
+        )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        import pdb; pdb.set_trace()
         return SampleOutput(samples=sol, fevals=fevals)
 
     def sample_trajectories(self):
@@ -370,8 +384,18 @@ class ContinuousEvaluator(ToyEvaluator):
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
-        # times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        times = torch.linspace(0., 1., 100, device=x.device)
+        times = torch.linspace(
+            self.sampler.t_eps,
+            1.,
+            self.sampler.diffusion_timesteps,
+            device=x.device
+        )
+        # times = torch.linspace(
+        #     0.,
+        #     1.,
+        #     self.sampler.diffusion_timesteps,
+        #     device=x.device
+        # )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         if self.cfg.test == TestType.Gaussian:
@@ -510,6 +534,9 @@ def viz_trajs(cfg, std, out_trajs, end_time):
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
+    logger = logging.getLogger("main")
+    logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
+
     omega_sampler = OmegaConf.to_object(cfg.sampler)
     if isinstance(omega_sampler, DiscreteSamplerConfig):
         std = DiscreteEvaluator(cfg=cfg)
