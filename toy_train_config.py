@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
 
+import torch
 from omegaconf import OmegaConf
 
 
@@ -17,6 +18,8 @@ class ExampleConfig:
 
 @dataclass
 class GaussianExampleConfig(ExampleConfig):
+    # mu: list = field(default_factory=lambda: [0., 0.])
+    # sigma: list = field(default_factory=lambda: [[1., 0.], [0., 1.]])
     mu: float = 1.
     sigma: float = 2.
 
@@ -47,7 +50,7 @@ class BaseConfig:
     likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
     model_dir: str = 'diffusion_models/'
     model_name: str = ''
-    example: ExampleConfig = field(default_factory=GaussianExampleConfig)
+    example: ExampleConfig = field(default_factory=ExampleConfig)
 
 
 @dataclass

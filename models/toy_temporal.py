@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import einops
 from einops.layers.torch import Rearrange
-import pdb
 
 from models.toy_helpers import (
     SinusoidalPosEmb,
@@ -87,11 +86,7 @@ class ResidualTemporalBlock(nn.Module):
             returns:
             out : [ batch_size x out_channels x traj_length ]
         '''
-        try:
-            out = self.blocks[0](x) + self.time_mlp(t) + self.cond_mlp(cemb) + self.bool_mlp(bool_emb)
-        except:
-            import pdb; pdb.set_trace()
-            out = self.blocks[0](x) + self.time_mlp(t) + self.cond_mlp(cemb) + self.bool_mlp(bool_emb)
+        out = self.blocks[0](x) + self.time_mlp(t) + self.cond_mlp(cemb) + self.bool_mlp(bool_emb)
         out = self.blocks[1](out)
         return out + self.residual_conv(x)
 
@@ -149,6 +144,7 @@ class TemporalUnet(nn.Module):
 
         dims = [d_model, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
+        self.in_out = in_out
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
         self.d_model = d_model
@@ -187,6 +183,8 @@ class TemporalUnet(nn.Module):
             self.downs.append(nn.ModuleList([
                 ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
                 ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+                # ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
+                # ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
@@ -200,6 +198,8 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
+                # ResidualBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                # ResidualBlock(dim_in, dim_in, embed_dim=time_dim),
                 ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
                 ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
@@ -211,10 +211,12 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, d_model, 1),
         )
 
-    def forward(self, x, time, cond):
-        '''
-            x : [ batch x traj_length x transition ]
-        '''
+    def forward(self, x, time, cond=None):
+        """
+            x : [ batch x traj_length x input_channels ]
+            Note that traj_length needs to be an even number
+            for upsampling to work properly.
+        """
 
         b_dim, h_dim, t_dim = x.shape
         x = einops.rearrange(x, 'b h t -> b t h')
@@ -230,6 +232,8 @@ class TemporalUnet(nn.Module):
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
             x = resnet(x, t, cemb, bool_emb)
             x = resnet2(x, t, cemb, bool_emb)
+            # x = resnet(x, t)
+            # x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
@@ -240,13 +244,11 @@ class TemporalUnet(nn.Module):
 
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
             hpop = h.pop()
-            try:
-                x = torch.cat((x, hpop), dim=1)
-            except:
-                import pdb; pdb.set_trace()
-                x = torch.cat((x, hpop), dim=1)
+            x = torch.cat((x, hpop), dim=1)
             x = resnet(x, t, cemb, bool_emb)
             x = resnet2(x, t, cemb, bool_emb)
+            # x = resnet(x, t)
+            # x = resnet2(x, t)
             x = attn(x)
             x = upsample(x)
 
@@ -306,23 +308,23 @@ class TemporalNNet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+                ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Upsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block1 = ResidualBlock(mid_dim, mid_dim, embed_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block2 = ResidualBlock(mid_dim, mid_dim, embed_dim=time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
+                ResidualBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Downsample1d(dim_in) if not is_last else nn.Identity()
             ]))
@@ -332,44 +334,64 @@ class TemporalNNet(nn.Module):
             nn.Conv1d(dim, d_model, 1),
         )
 
-    def forward(self, x, time, cond):
+    def forward(self, x, time):
         b_dim, h_dim, t_dim = x.shape
         x = einops.rearrange(x, 'b h t -> b t h')
 
         t = self.time_mlp(time)
-        cond = cond if cond is not None else torch.ones(t.shape[0], 1, device=x.device) * -1
-        cemb = self.cond_mlp(cond).reshape(cond.shape[0], -1)
 
-        use_cond = (cond > 0.).to(torch.float).reshape(cond.shape)
-        bool_emb = self.bool_mlp(use_cond).reshape(cemb.shape)
         h = []
 
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
-            x = resnet(x, t, cemb, bool_emb)
-            x = resnet2(x, t, cemb, bool_emb)
+            x = resnet(x, t)
+            x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = upsample(x)
 
-        x = self.mid_block1(x, t, cemb, bool_emb)
+        x = self.mid_block1(x, t)
         x = self.mid_attn(x)
-        x = self.mid_block2(x, t, cemb, bool_emb)
+        x = self.mid_block2(x, t)
 
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
             hpop = h.pop()
-            try:
-                x = torch.cat((x, hpop), dim=1)
-            except:
-                import pdb; pdb.set_trace()
-                x = torch.cat((x, hpop), dim=1)
-            x = resnet(x, t, cemb, bool_emb)
-            x = resnet2(x, t, cemb, bool_emb)
+            x = torch.cat((x, hpop), dim=1)
+            x = resnet(x, t)
+            x = resnet2(x, t)
             x = attn(x)
             x = downsample(x)
         x = self.final_conv(x)
 
         x = einops.rearrange(x, 'b t h -> b h t')
         return x[:b_dim, :h_dim, :t_dim]
+
+
+class DiffusionBlock(nn.Module):
+    def __init__(self, nunits):
+        super(DiffusionBlock, self).__init__()
+        self.linear = nn.Linear(nunits, nunits)
+
+    def forward(self, x: torch.Tensor):
+        x = self.linear(x)
+        x = nn.functional.relu(x)
+        return x
+
+
+class DiffusionModel(nn.Module):
+    def __init__(self, nfeatures: int, nblocks: int = 2, nunits: int = 64):
+        super(DiffusionModel, self).__init__()
+
+        self.inblock = nn.Linear(nfeatures+1, nunits)
+        self.midblocks = nn.ModuleList([DiffusionBlock(nunits) for _ in range(nblocks)])
+        self.outblock = nn.Linear(nunits, nfeatures)
+
+    def forward(self, x: torch.Tensor, time: torch.Tensor) -> torch.Tensor:
+        val = torch.hstack([x, time])
+        val = self.inblock(val)
+        for midblock in self.midblocks:
+            val = midblock(val)
+        val = self.outblock(val)
+        return val
 
 
 class TemporalClassifier(nn.Module):

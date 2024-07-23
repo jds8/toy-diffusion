@@ -302,15 +302,15 @@ class VPSDEVelocitySampler(VPSDESampler):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
         alpha_t = log_mean_coeff.exp()
         eps_pred = sigma_t * xt + alpha_t * v_pred
-        return -eps_pred / sigma_t.reshape((-1,) + (1,) * (len(eps_pred.shape) - 1))
+        return -eps_pred / sigma_t
 
 
 class VPSDEScoreFunctionSampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
-        \nabla \log p_t(x_t|x_0)
-        where x_t = lmc.exp()x_0 + sigma_t\epsilon so
+        \nabla log p_t(x_t|x_0)
+        where x_t = lmc.exp()x_0 + sigma_t * epsilon so
         E[x_t|x_0] = lmc.exp()x_0 and Var[x_t|x_0] = sigma_t^2(t)
         """
         mean, _, sigma_t = self.marginal_prob(x=x0, t=t)
@@ -326,7 +326,7 @@ class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *marginal* score function:
-        \nabla \log p_t(x_t|x_0).
+        \nabla log p_t(x_t|x_0).
         This assumes that the *ground truth distribution is a standard gaussian*
         """
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
@@ -404,7 +404,7 @@ class VESDEScoreFunctionSampler(VESDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
-        \nabla \log p_t(x_t|x_0)
+        \nabla log p_t(x_t|x_0)
         """
         mean, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         var = sigma_t ** 2
@@ -419,7 +419,7 @@ class VESDEGaussianScoreFunctionSampler(VESDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *conditional* score function:
-        \nabla \log p_t(x_t|x_0).
+        \nabla log p_t(x_t|x_0).
         This assumes that the *ground truth distribution is a standard gaussian*
         """
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)

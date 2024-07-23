@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 import warnings
 import wandb
 import os
@@ -18,8 +19,8 @@ from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
-from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet
-from models.toy_sampler import ForwardSample, AbstractSampler
+from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet, DiffusionModel
+from models.toy_sampler import ForwardSample, AbstractSampler, AbstractContinuousSampler
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -35,7 +36,12 @@ class ToyTrainer:
 
         d_model = torch.tensor(1)
         self.sampler = hydra.utils.instantiate(cfg.sampler)
-        diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
+        diffusion_model = hydra.utils.instantiate(
+            cfg.diffusion,
+            d_model=d_model,
+            device=device
+        )
+
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 
@@ -44,7 +50,6 @@ class ToyTrainer:
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
 
-        self.iterations_before_save = 100
         self.num_saves = 0
 
         self.initialize_optimizer()
@@ -84,11 +89,17 @@ class ToyTrainer:
         return (losses * g2).mean()
 
     def get_loss_fn(self):
-        return {
-            'l1': lambda model_output, forward_sample : torch.nn.L1Loss()(model_output, forward_sample.to_predict),
-            'l2': lambda model_output, forward_sample : torch.nn.MSELoss()(model_output, forward_sample.to_predict),
-            'likelihood_weighting': self.likelihood_weighting,
-        }[self.cfg.loss_fn]
+        if self.cfg.loss_fn == 'likelihood_weighting':
+            return self.likelihood_weighting
+        else:
+            if self.cfg.loss_fn == 'l1':
+                loss_fn = torch.nn.L1Loss()
+            elif self.cfg.loss_fn == 'l2':
+                loss_fn = torch.nn.MSELoss()
+            return lambda model_output, forward_sample: loss_fn(
+                model_output,
+                forward_sample.to_predict,
+            )
 
     def log_artifact(self, saved_model_path, artifact_type):
         artifact = wandb.Artifact(artifact_type, type='model')
@@ -118,21 +129,44 @@ class ToyTrainer:
     def train(self):
         while True:
             self.train_batch()
-            if self.num_steps % self.iterations_before_save == 0:
+            if self.num_steps % self.cfg.iterations_before_save == 0:
                 saved_model_path = self._save_model()
                 if isinstance(self.example, GaussianExampleConfig):
-                    score_function_heat_map(
-                        lambda x, time: self.diffusion_model(x=x, time=time, cond=None),
-                        self.num_saves,
-                        mu=self.cfg.example.mu,
-                        sigma=self.cfg.example.sigma,
-                    )
-                    create_gif('figs/heat_maps', '{}_training_scores'.format(
-                        OmegaConf.to_object(self.cfg.sampler).name()
-                    ))
+                    # score_function_heat_map(
+                    #     lambda x, time: self.diffusion_model(
+                    #         x=x.reshape(-1, 1),
+                    #         time=time.reshape(-1, 1),
+                    #     ),
+                    #     self.num_saves,
+                    #     t_eps=1e-5,
+                    #     mu=self.cfg.example.mu,
+                    #     sigma=self.cfg.example.sigma,
+                    # )
+                    try:
+                        score_function_heat_map(
+                            lambda x, time: self.sampler.get_sf_estimator(
+                                self.diffusion_model(
+                                    x=x,
+                                    time=time,
+                                ),
+                                xt=x.reshape(-1, 1, 1),
+                                t=time.reshape(-1)
+                            ),
+                            self.num_saves,
+                            t_eps=1e-5,
+                            mu=self.cfg.example.mu,
+                            sigma=self.cfg.example.sigma,
+                        )
+                        create_gif('figs/heat_maps', '{}_training_scores'.format(
+                            OmegaConf.to_object(self.cfg.sampler).name()
+                        ))
+                    except Exception as e:
+                        print(e)
+                        pass
                 if not self.cfg.no_wandb:
                     self.log_artifact(saved_model_path, 'diffusion_model')
                     self.delete_model(saved_model_path)
+
 
     def viz_trajs(self, traj, end_time, idx, clf=True):
         import matplotlib.pyplot as plt
@@ -165,36 +199,42 @@ class ConditionTrainer(ToyTrainer):
         model_output = self.diffusion_model(
             x=forward_sample_output.xt,
             time=forward_sample_output.t,
-            cond=cond
         )
 
         loss = self.loss_fn(model_output, forward_sample_output)
-        self.compare_score(
-            x=forward_sample_output.xt,
-            time=forward_sample_output.t,
-            model_output=model_output,
-        )
 
         return loss
 
     def analytical_gaussian_score(self, t, x):
         '''
-        Compute the analytical marginal score of p_t for t \in (0, 1)
+        Compute the analytical marginal score of p_t for t in (0, 1)
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         '''
-        _, lmc, std = self.sampler.marginal_prob(x=x, t=t)
-        f = lmc.exp()
-        var = self.cfg.example.sigma ** 2 * f ** 2 + std ** 2
-        score = (f * self.cfg.example.mu - x) / var
+        mean, _, std = self.sampler.analytical_marginal_prob(
+            t=t,
+            example=self.cfg.example
+        )
+        var = std ** 2
+        score = (mean - x) / var
         return score
 
     def compare_score(self, x, time, model_output):
-        if isinstance(self.example, GaussianExampleConfig):
+        if isinstance(self.example, GaussianExampleConfig) and \
+           isinstance(self.sampler, AbstractContinuousSampler):
             true_sf = self.analytical_gaussian_score(t=time, x=x)
-            sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
-            error = (true_sf - sf_estimate.detach()).norm()
-            wandb.log({"score error": error})
+            # sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
+            # TODO: Remove
+            _, _, sigma_t = self.sampler.marginal_prob(
+                torch.zeros_like(x),
+                time,
+            )
+            sf_estimate = -model_output * sigma_t
+            error = (true_sf.squeeze() - sf_estimate.detach().squeeze()).norm()
+            if not self.cfg.no_wandb:
+                wandb.log({"score error": error})
+            else:
+                print('score error: {}'.format(error))
         return
 
     def get_x0(self):
@@ -206,9 +246,9 @@ class ConditionTrainer(ToyTrainer):
                 end_time=self.end_time,
                 n_samples=self.n_samples
             )
-            x0 = trajs.W
-            if type(self.cfg.example) == BrownianMotionDiffExampleConfig:
-                x0 = trajs.W.diff(dim=1).unsqueeze(-1)
+            x0 = trajs.W.unsqueeze(-1)
+            if type(self.example) == BrownianMotionDiffExampleConfig:
+                x0 = x0.diff(dim=1)
         elif isinstance(self.example, GaussianExampleConfig):
             x0 = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
@@ -218,7 +258,8 @@ class ConditionTrainer(ToyTrainer):
         return x0
 
     def train_batch(self):
-        x0 = self.get_x0()
+        x0_raw = self.get_x0()
+        x0 = (x0_raw - x0_raw.mean(axis=0)) / x0_raw.std(axis=0)
         loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
@@ -235,6 +276,8 @@ class ConditionTrainer(ToyTrainer):
                     grads = torch.cat(grads)
                     grad_norm = grads.norm()
                     wandb.log({"train_grad_norm": grad_norm})
+                else:
+                    print("train_loss: {}".format(loss.detach()))
             except Exception as e:
                 print(e)
 
@@ -278,6 +321,9 @@ class TrajectoryConditionTrainer(ToyTrainer):
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_train_config")
 def train(cfg):
+    logger = logging.getLogger("main")
+    logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
+
     if not cfg.no_wandb:
         wandb.init(
             project="toy-diffusion",

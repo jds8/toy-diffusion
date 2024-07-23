@@ -148,13 +148,13 @@ class ToyEvaluator:
         elif type(self.example) == BrownianMotionExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
-                self.cfg.sde_steps-1,
+                self.cfg.example.sde_steps,
                 1,
             ])
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
-                self.cfg.sde_steps-1,
+                self.cfg.example.sde_steps,
                 1,
             ])
         else:
@@ -244,10 +244,7 @@ class DiscreteEvaluator(ToyEvaluator):
 class ContinuousEvaluator(ToyEvaluator):
     def get_score_function(self, t, x):
         if self.cfg.test == TestType.Gaussian:
-            return self.analytical_gaussian_score(
-                t=t,
-                x=x,
-            )
+            return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotion:
             return self.analytical_brownian_motion_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
@@ -293,7 +290,12 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0(x, s) = N(0, d(s)sqrt(s)) and p_1(x, s) = N(0, 1)
         """
-        sde = SDEConfig(self.cfg.sde_drift, self.cfg.sde_diffusion, self.cfg.sde_steps-1, 1.)
+        sde = SDEConfig(
+            self.cfg.example.sde_drift,
+            self.cfg.example.sde_diffusion,
+            self.cfg.example.sde_steps-1,
+            1.
+        )
 
         f = lambda t : self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
         g = lambda t : self.sampler.marginal_prob(x, t)[2][:, 0, :]
@@ -316,7 +318,7 @@ class ContinuousEvaluator(ToyEvaluator):
         f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
         g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
 
-        dt = 1. / (self.cfg.sde_steps-1)
+        dt = 1. / (self.cfg.example.sde_steps-1)
 
         var = f ** 2 * dt + g ** 2
 
@@ -345,8 +347,6 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x)
             return dx_dt
 
-        # times = torch.tensor([1., self.sampler.t_eps], device=x_min.device)
-        # times = torch.linspace(1., 0., 100, device=x_min.device)
         times = torch.linspace(
             1.,
             self.sampler.t_eps,
@@ -354,7 +354,6 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x_min.device
         )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
-        import pdb; pdb.set_trace()
         return SampleOutput(samples=sol, fevals=fevals)
 
     def sample_trajectories(self):
@@ -390,12 +389,6 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x.device
         )
-        # times = torch.linspace(
-        #     0.,
-        #     1.,
-        #     self.sampler.diffusion_timesteps,
-        #     device=x.device
-        # )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         if self.cfg.test == TestType.Gaussian:
@@ -446,28 +439,38 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
     plt.savefig('figs/scatter.pdf')
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
+    traj = sample_trajs * cfg.example.sigma + cfg.example.mu
     analytical_llk = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
-    ).log_prob(sample_trajs)
-    print('analytical_llk: {}'.format(analytical_llk.squeeze()))
+    ).log_prob(traj)
+    a_lk = analytical_llk.exp().squeeze()
+    print('analytical_llk: {}'.format(a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs)
-    print('\node_llk: {}\node evals: {}'.format(ode_llk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    ode_lk = ode_llk[0].exp() / cfg.example.sigma
+    print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
+    mse_llk = torch.nn.MSELoss()(
+        a_lk,
+        ode_lk,
+    )
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
-    plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
+    plt_llk(traj, ode_lk, plot_type='scatter')
+    plt_llk(traj, a_lk, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
-    dt = end_time / (cfg.sde_steps-1)
+    dt = end_time / (cfg.example.sde_steps-1)
     analytical_trajs = torch.cat([
         torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
         sample_trajs
     ], dim=1)
 
-    analytical_llk = analytical_log_likelihood(analytical_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
+    analytical_llk = analytical_log_likelihood(
+        analytical_trajs,
+        SDE(cfg.example.sde_drift, cfg.example.sde_diffusion),
+        dt
+    )
     print('analytical_llk: {}'.format(analytical_llk))
 
     ode_llk = std.ode_log_likelihood(sample_trajs)
@@ -486,13 +489,21 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
     import pdb; pdb.set_trace()
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
-    dt = end_time / (cfg.sde_steps-1)
+    dt = end_time / (cfg.example.sde_steps-1)
+    sample_trajs *= dt.sqrt()  # de-standardize data
     analytical_trajs = torch.cat([
         torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
         sample_trajs.cumsum(dim=-2)
     ], dim=1)
 
-    analytical_llk = analytical_log_likelihood(analytical_trajs, SDE(cfg.sde_drift, cfg.sde_diffusion), dt)
+    analytical_llk = analytical_log_likelihood(
+        analytical_trajs,
+        SDE(
+            cfg.example.sde_drift,
+            cfg.example.sde_diffusion
+        ),
+        dt
+    )
     print('analytical_llk: {}'.format(analytical_llk))
 
     ode_llk = std.ode_log_likelihood(sample_trajs)
@@ -502,12 +513,17 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    if sample_trajs.shape[1] > 1:
-        ax = plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='3d_scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='3d_line', ax=ax)
-    else:
-        plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
+    times = torch.linspace(0., 1., analytical_trajs.shape[1])
+    plt.plot(times.numpy(), analytical_trajs[..., 0].numpy().T)
+    plt.savefig('figs/brownian_motion_diff_samples.pdf')
+
+    # plt.clf()
+    # if sample_trajs.shape[1] > 1:
+    #     ax = plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='3d_scatter')
+    #     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='3d_line', ax=ax)
+    # else:
+    #     plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
+    #     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
 
