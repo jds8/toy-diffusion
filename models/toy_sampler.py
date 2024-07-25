@@ -106,12 +106,75 @@ def interpolate_schedule(diffusion_time, schedule, decreasing=False):
         beta = floor_beta + (diffusion_time - floor) * (ceil_beta - floor_beta)
     return beta
 
+def cosine_beta_schedule(timesteps):
+    """
+    Get a pre-defined beta schedule for the given name.
+    The beta schedule library consists of beta schedules which remain similar
+    in the limit of num_diffusion_timesteps.
+    Beta schedules may be added, but should not be removed or changed once
+    they are committed to maintain backwards compatibility.
+    """
+    return betas_for_alpha_bar(
+        timesteps,
+        lambda t: torch.cos(torch.tensor(t + 0.008) / 1.008 * torch.pi / 2) ** 2,
+    )
+
+def linear_beta_schedule(timesteps):
+    beta_start = 0.0001
+    beta_end = 0.02
+    return torch.linspace(beta_start, beta_end, timesteps)
+
+def quadratic_beta_schedule(timesteps):
+    beta_start = 0.0001
+    beta_end = 0.02
+    return torch.linspace(beta_start**0.5, beta_end**0.5, timesteps) ** 2
+
+def sigmoid_beta_schedule(timesteps):
+    beta_start = 0.0001
+    beta_end = 0.02
+    betas = torch.linspace(-6, 6, timesteps)
+    return torch.sigmoid(betas) * (beta_end - beta_start) + beta_start
+
+def continuous_linear_integral(t, beta0, beta1):
+    return beta0 * t + (1/2) * t**2 * (beta1 - beta0)
+def continuous_quadratic_integral(t, beta0, beta1):
+    return beta0 * t + (1/3) * t**3 * (beta1 - beta0)
+def continuous_cosine_integral(t, beta0, beta1):
+    # return beta0 + (1 - torch.cos(torch.pi * t / 2)) * (beta1 - beta0)
+    return beta0 * t + (t - (2/torch.pi) * torch.sin(torch.pi * t / 2)) * (beta1 - beta0)
+def continuous_sigmoid_integral(t, beta0, beta1, k, t0):
+    """ k defines steepness, t0 defines midpoint """
+    # return beta0 * t + (beta1 - beta0) / (1 + torch.exp(-k * (t - t0)))
+    return beta0 * t + (beta1 - beta0) * torch.exp(-k * t0) * torch.log(torch.exp(k * t) + 1) / k
+
+def get_continuous_beta_integral(beta_schedule: BetaSchedule):
+    if beta_schedule == BetaSchedule.LinearSchedule:
+        return continuous_linear_integral
+    elif beta_schedule == BetaSchedule.CosineSchedule:
+        return continuous_cosine_integral
+    elif beta_schedule == BetaSchedule.QuadraticSchedule:
+        return continuous_quadratic_integral
+    elif beta_schedule == BetaSchedule.SigmoidSchedule:
+        return lambda t, beta0, beta1: continuous_sigmoid_integral(
+            t,
+            beta0,
+            beta1,
+            torch.tensor(10.),
+            torch.tensor(0.5)
+        )
+    else:
+        raise NotImplementedError
+
 
 ForwardSample = namedtuple('ForwardSample', 'xt t noise to_predict')
 
 
 class AbstractSampler:
-    def __init__(self, diffusion_timesteps: int, guidance_coef: float):
+    def __init__(
+        self,
+        diffusion_timesteps: int,
+        guidance_coef: float,
+    ):
         self.diffusion_timesteps = diffusion_timesteps
         self.guidance_coef = guidance_coef
 
@@ -146,12 +209,14 @@ class AbstractSampler:
 
 
 class AbstractContinuousSampler(AbstractSampler):
-    def __init__(self, diffusion_timesteps: int, guidance_coef: float, t_eps: float):
+    def __init__(
+        self,
+        diffusion_timesteps: int,
+        guidance_coef: float,
+        t_eps: float,
+    ):
         super().__init__(diffusion_timesteps, guidance_coef)
         self.t_eps = t_eps
-
-    def continuous_beta_schedule(timesteps: int):
-        raise NotImplementedError
 
     def reverse_sde(
             self,
@@ -221,23 +286,42 @@ class AbstractContinuousSampler(AbstractSampler):
 
 class VPSDESampler(AbstractContinuousSampler):
     # heavily inspired by score_sde/sde_lib.py from Song et al. Score-Based Generative Modeling Through SDE
-    def __init__(self, diffusion_timesteps: int, guidance_coef: float, t_eps: float, beta0: float, beta1: float):
+    def __init__(
+        self,
+        diffusion_timesteps: int,
+        guidance_coef: float,
+        t_eps: float,
+        beta_schedule: BetaSchedule,
+        beta0: float,
+        beta1: float
+    ):
         super().__init__(diffusion_timesteps, guidance_coef, t_eps)
+        self.beta_schedule = beta_schedule
+        continuous_beta_integral = get_continuous_beta_integral(beta_schedule)
         self.beta0 = torch.tensor(beta0)
         self.beta1 = torch.tensor(beta1)
-
-    def continuous_beta_schedule(self, timestep: torch.Tensor):
-        return self.beta0 + timestep * (self.beta1 - self.beta0)
+        self.continuous_beta_integral = lambda t: continuous_beta_integral(
+            t,
+            self.beta0,
+            self.beta1,
+        )
 
     def sde(self, x: torch.Tensor, t: torch.Tensor):
-        beta_t = self.continuous_beta_schedule(t)
-        beta_t = self.continuous_beta_schedule(t).repeat((beta_t.reshape(-1).shape[0],) + x.shape[1:])
+        # dx_t = -0.5*beta(t)*x*dt + g(t)*dw
+        is_grad = torch.is_grad_enabled()
+        torch.set_grad_enabled(True)
+        t_ = t.requires_grad_()
+        int_beta_t = self.continuous_beta_integral(t_)  # int_0^t beta(s) ds
+        beta_t = torch.autograd.grad(int_beta_t.sum(), t_)[0]  # beta(t)
+        torch.set_grad_enabled(is_grad)
+
         drift = -0.5 * beta_t * x
         diffusion = beta_t.sqrt()
         return drift, diffusion
 
     def log_mean_coeff(self, x_shape: torch.Size, t: torch.Tensor):
-        log_mean_coeff = -0.25 * t ** 2 * (self.beta1 - self.beta0) - 0.5 * t * self.beta0
+        beta = self.continuous_beta_integral(t)  # int_0^t beta(s) ds
+        log_mean_coeff = -0.5 * beta
         return log_mean_coeff.repeat(x_shape[1:] + (1,)).movedim(2, 0)
 
     def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
@@ -287,7 +371,11 @@ class VPSDEEpsilonSampler(VPSDESampler):
         return self.get_posterior_mean(xt, eps, t)
 
     def get_sf_estimator(self, eps_pred, xt, t):
-        _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
+        example = lambda: ()
+        example.mu = 0.
+        example.sigma = 1.
+        # _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
+        _, _, sigma_t = self.analytical_marginal_prob(t, example)
         if (sigma_t == 0.).any():
             import pdb; pdb.set_trace()
         return -eps_pred / sigma_t.reshape((-1,) + (1,) * (len(eps_pred.shape) - 1))
@@ -295,11 +383,19 @@ class VPSDEEpsilonSampler(VPSDESampler):
 
 class VPSDEVelocitySampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
-        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        example = lambda: ()
+        example.mu = 0.
+        example.sigma = 1.
+        # _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+        _, log_mean_coeff, sigma_t = self.analytical_marginal_prob(t=t, example=example)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
     def get_sf_estimator(self, v_pred, xt, t):
-        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        example = lambda: ()
+        example.mu = 0.
+        example.sigma = 1.
+        # _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        _, log_mean_coeff, sigma_t = self.analytical_marginal_prob(t=t, example=example)
         alpha_t = log_mean_coeff.exp()
         eps_pred = sigma_t * xt + alpha_t * v_pred
         return -eps_pred / sigma_t
@@ -436,10 +532,13 @@ class VESDEGaussianScoreFunctionSampler(VESDESampler):
 #####################
 
 class AbstractDiscreteSampler(AbstractSampler):
-    def __init__(self, beta_schedule, diffusion_timesteps: int, guidance_coef: float):
-        super().__init__(diffusion_timesteps, guidance_coef)
-        self.beta_schedule = beta_schedule
-
+    def __init__(
+        self,
+        diffusion_timesteps: int,
+        guidance_coef: float,
+        beta_schedule: BetaSchedule,
+    ):
+        super().__init__(beta_schedule, diffusion_timesteps, guidance_coef)
         # define beta schedule
         beta_schedule_fn = get_beta_schedule(beta_schedule)
         self.betas = beta_schedule_fn(diffusion_timesteps)

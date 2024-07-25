@@ -51,9 +51,9 @@ class ContinuousSamplerConfig(BaseSamplerConfig):
 
 @dataclass
 class VPSDESamplerConfig(ContinuousSamplerConfig):
+    beta_schedule: BetaSchedule = BetaSchedule.CosineSchedule
     beta0: float = 0.1
     beta1: float = 20.
-    t_eps: float = 1e-5
 
     def name(self):
         return 'VPSDESampler'
@@ -171,7 +171,6 @@ class GuidanceType(Enum):
 
 @dataclass
 class ModelConfig:
-
     def name(self):
         return 'ModelConfig'
 
@@ -201,3 +200,11 @@ class TemporalTransformerUnetConfig(ModelConfig):
 
     def name(self):
         return 'TemporalTransformerUnet'
+
+
+@dataclass
+class TemporalIDKConfig(ModelConfig):
+    _target_: str = 'models.toy_temporal.TemporalIDK'
+
+    def name(self):
+        return 'TemporalIDK'

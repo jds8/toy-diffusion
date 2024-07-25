@@ -154,8 +154,8 @@ class ToyTrainer:
                             ),
                             self.num_saves,
                             t_eps=1e-5,
-                            mu=self.cfg.example.mu,
-                            sigma=self.cfg.example.sigma,
+                            # mu=self.cfg.example.mu,  # not including mu and sigma due to standardization
+                            # sigma=self.cfg.example.sigma,
                         )
                         create_gif('figs/heat_maps', '{}_training_scores'.format(
                             OmegaConf.to_object(self.cfg.sampler).name()
@@ -182,6 +182,26 @@ class ToyTrainer:
 
     def train_batch(self):
         raise NotImplementedError
+
+    def get_x0(self):
+        if isinstance(self.example, BrownianMotionExampleConfig):
+            sde = SDE(self.cfg.example.sde_drift, self.cfg.example.sde_diffusion)
+            trajs = integrate(
+                sde,
+                timesteps=self.cfg.example.sde_steps,
+                end_time=self.end_time,
+                n_samples=self.n_samples
+            )
+            x0 = trajs.W.unsqueeze(-1)
+            if type(self.example) == BrownianMotionDiffExampleConfig:
+                x0 = x0.diff(dim=1)
+        elif isinstance(self.example, GaussianExampleConfig):
+            x0 = torch.randn(
+                self.cfg.batch_size, 1, 1, device=device
+            ) * self.cfg.example.sigma + self.cfg.example.mu
+        else:
+            raise NotImplementedError
+        return x0
 
 
 class ConditionTrainer(ToyTrainer):
@@ -223,13 +243,7 @@ class ConditionTrainer(ToyTrainer):
         if isinstance(self.example, GaussianExampleConfig) and \
            isinstance(self.sampler, AbstractContinuousSampler):
             true_sf = self.analytical_gaussian_score(t=time, x=x)
-            # sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
-            # TODO: Remove
-            _, _, sigma_t = self.sampler.marginal_prob(
-                torch.zeros_like(x),
-                time,
-            )
-            sf_estimate = -model_output * sigma_t
+            sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
             error = (true_sf.squeeze() - sf_estimate.detach().squeeze()).norm()
             if not self.cfg.no_wandb:
                 wandb.log({"score error": error})
@@ -237,29 +251,10 @@ class ConditionTrainer(ToyTrainer):
                 print('score error: {}'.format(error))
         return
 
-    def get_x0(self):
-        if isinstance(self.example, BrownianMotionExampleConfig):
-            sde = SDE(self.cfg.example.sde_drift, self.cfg.example.sde_diffusion)
-            trajs = integrate(
-                sde,
-                timesteps=self.cfg.example.sde_steps,
-                end_time=self.end_time,
-                n_samples=self.n_samples
-            )
-            x0 = trajs.W.unsqueeze(-1)
-            if type(self.example) == BrownianMotionDiffExampleConfig:
-                x0 = x0.diff(dim=1)
-        elif isinstance(self.example, GaussianExampleConfig):
-            x0 = torch.randn(
-                self.cfg.batch_size, 1, 1, device=device
-            ) * self.cfg.example.sigma + self.cfg.example.mu
-        else:
-            raise NotImplementedError
-        return x0
-
     def train_batch(self):
         x0_raw = self.get_x0()
-        x0 = (x0_raw - x0_raw.mean(axis=0)) / x0_raw.std(axis=0)
+        # x0 = (x0_raw - x0_raw.mean(axis=0)) / x0_raw.std(axis=0)
+        x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
         loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
@@ -285,7 +280,7 @@ class ConditionTrainer(ToyTrainer):
 class TrajectoryConditionTrainer(ToyTrainer):
     def forward_transformer_process(self, x0, x_cond):
         cond_traj = x_cond if torch.rand(1) > self.cfg.p_uncond else None
-        cond = traj_dist(x0, cond_traj).reshape(-1, 1) if cond_traj is not None else None
+        cond = self.traj_dist(x0, cond_traj).reshape(-1, 1) if cond_traj is not None else None
         xt, t, noise, to_predict = self.sampler.forward_sample(x_start=x0)
 
         model_output = self.diffusion_model(xt, t, cond_traj, cond)
@@ -295,8 +290,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
         return loss
 
     def train_batch(self):
-        trajs = integrate(self.example.sde, timesteps=self.cfg.example.sde_steps, end_time=self.end_time, n_samples=self.n_samples)
-        xs = trajs.W.diff(dim=1).unsqueeze(-1)
+        xs = self.get_x0()
         x0 = xs[:self.n_samples//2]
         x_cond = xs[self.n_samples//2:]
         loss = self.forward_transformer_process(x0, x_cond)

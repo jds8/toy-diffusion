@@ -132,9 +132,12 @@ class ToyEvaluator:
 
     def get_x_min(self):
         if type(self.example) == GaussianExampleConfig:
+            pseudo_example = self.cfg.example.copy()
+            pseudo_example['mu'] = 0.
+            pseudo_example['sigma'] = 1.
             mean, _, std = self.sampler.analytical_marginal_prob(
                 t=torch.tensor(1.),
-                example=self.cfg.example
+                example=pseudo_example,
             )
             x_min = dist.Normal(
                 mean.item(),
@@ -276,9 +279,12 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mean, _, std = self.sampler.analytical_marginal_prob(
+        pseudo_example = self.cfg.example.copy()
+        pseudo_example['mu'] = 0.
+        pseudo_example['sigma'] = 1.
+        mean, lmc, std = self.sampler.analytical_marginal_prob(
             t=t,
-            example=self.cfg.example
+            example=pseudo_example
         )
         var = std ** 2
         score = (mean - x) / var
@@ -328,10 +334,11 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000)):
         x_min = self.get_x_min()
-        x = x_min.clone().reshape(-1, 1)
+        x = x_min.clone()
 
         steps = steps.to(x.device)
-        for time in torch.linspace(1., 0., steps, device=x.device):
+        for time in torch.linspace(1., self.sampler.t_eps, steps, device=x.device):
+            time = time.reshape(-1)
             sf_est = self.get_score_function(t=time, x=x)
             x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
 
@@ -385,20 +392,25 @@ class ContinuousEvaluator(ToyEvaluator):
         x_min = x, x.new_zeros([x.shape[0]])
         times = torch.linspace(
             self.sampler.t_eps,
-            1.,
+            1.-self.sampler.t_eps,
             self.sampler.diffusion_timesteps,
             device=x.device
         )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
-        if self.cfg.test == TestType.Gaussian:
+        if self.cfg.test == TestType.Gaussian or True:
+            pseudo_example = self.cfg.example.copy()
+            pseudo_example['mu'] = 0.
+            pseudo_example['sigma'] = 1.
             ll_prior = self.sampler.prior_analytic_logp(
-                self.cfg.example,
+                # self.cfg.example,
+                pseudo_example,
                 device,
                 latent,
             ).flatten(1).sum(1)
         else:
             ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
+        # ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + \int_0^T Tr(df(x,t)/dx)dt where dx/dt = f
         return ll_prior + delta_ll, {'fevals': fevals}
 
@@ -509,7 +521,8 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ode_llk = std.ode_log_likelihood(sample_trajs)
     print('\node_llk: {}'.format(ode_llk))
 
-    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), ode_llk[0])
+    scaled_ode_llk = (ode_llk[0].exp() / dt.sqrt()).log()
+    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), scaled_ode_llk)
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
