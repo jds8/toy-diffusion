@@ -247,7 +247,7 @@ class AbstractContinuousSampler(AbstractSampler):
         lower = torch.tensor(self.t_eps, device=x_start.device)
         upper = torch.tensor(1., device=x_start.device)
         t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
-        noise = torch.rand_like(x_start)
+        noise = torch.randn_like(x_start)
 
         mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
         xt = mean + std * noise
@@ -371,31 +371,17 @@ class VPSDEEpsilonSampler(VPSDESampler):
         return self.get_posterior_mean(xt, eps, t)
 
     def get_sf_estimator(self, eps_pred, xt, t):
-        example = lambda: ()
-        example.mu = 0.
-        example.sigma = 1.
-        # _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
-        _, _, sigma_t = self.analytical_marginal_prob(t, example)
-        if (sigma_t == 0.).any():
-            import pdb; pdb.set_trace()
+        _, _, sigma_t = self.marginal_prob(torch.zeros_like(xt), t)
         return -eps_pred / sigma_t.reshape((-1,) + (1,) * (len(eps_pred.shape) - 1))
 
 
 class VPSDEVelocitySampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
-        example = lambda: ()
-        example.mu = 0.
-        example.sigma = 1.
-        # _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
-        _, log_mean_coeff, sigma_t = self.analytical_marginal_prob(t=t, example=example)
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
     def get_sf_estimator(self, v_pred, xt, t):
-        example = lambda: ()
-        example.mu = 0.
-        example.sigma = 1.
-        # _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
-        _, log_mean_coeff, sigma_t = self.analytical_marginal_prob(t=t, example=example)
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
         alpha_t = log_mean_coeff.exp()
         eps_pred = sigma_t * xt + alpha_t * v_pred
         return -eps_pred / sigma_t

@@ -157,9 +157,9 @@ class ToyTrainer:
                             # mu=self.cfg.example.mu,  # not including mu and sigma due to standardization
                             # sigma=self.cfg.example.sigma,
                         )
-                        create_gif('figs/heat_maps', '{}_training_scores'.format(
-                            OmegaConf.to_object(self.cfg.sampler).name()
-                        ))
+                        # create_gif('figs/heat_maps', '{}_training_scores'.format(
+                        #     OmegaConf.to_object(self.cfg.sampler).name()
+                        # ))
                     except Exception as e:
                         print(e)
                         pass
@@ -214,6 +214,13 @@ class ConditionTrainer(ToyTrainer):
             extras['mu'] = self.cfg.example.mu
             extras['sigma'] = self.cfg.example.sigma
 
+        # # TODO: Remove
+        # ts = torch.linspace(self.sampler.t_eps, 1, 1024)
+        # mean, lmc, sigma = self.sampler.marginal_prob(
+        #     torch.zeros_like(x0),
+        #     ts,
+        # )
+
         forward_sample_output = self.sampler.forward_sample(x_start=x0, extras=extras)
 
         model_output = self.diffusion_model(
@@ -223,6 +230,18 @@ class ConditionTrainer(ToyTrainer):
 
         loss = self.loss_fn(model_output, forward_sample_output)
 
+        # TODO: The following computes the loss against the marginal score function
+        # true_score=self.analytical_gaussian_score(
+        #     forward_sample_output.t,
+        #     forward_sample_output.xt
+        # )
+        # sf_estimator = self.sampler.get_sf_estimator(
+        #     model_output,
+        #     forward_sample_output.xt,
+        #     forward_sample_output.t
+        # )
+        # loss = torch.nn.MSELoss()(sf_estimator, true_score)
+
         return loss
 
     def analytical_gaussian_score(self, t, x):
@@ -231,9 +250,12 @@ class ConditionTrainer(ToyTrainer):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         '''
+        pseudo_example = self.cfg.example.copy()
+        pseudo_example['mu'] = 0.
+        pseudo_example['sigma'] = 1.
         mean, _, std = self.sampler.analytical_marginal_prob(
             t=t,
-            example=self.cfg.example
+            example=pseudo_example,
         )
         var = std ** 2
         score = (mean - x) / var
