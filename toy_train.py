@@ -16,7 +16,8 @@ import torch.nn.functional as F
 
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
-    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
+    UniformExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet, DiffusionModel
@@ -185,7 +186,10 @@ class ToyTrainer:
 
     def get_x0(self):
         if isinstance(self.example, BrownianMotionExampleConfig):
-            sde = SDE(self.cfg.example.sde_drift, self.cfg.example.sde_diffusion)
+            sde = SDE(
+                self.cfg.example.sde_drift,
+                self.cfg.example.sde_diffusion
+            )
             trajs = integrate(
                 sde,
                 timesteps=self.cfg.example.sde_steps,
@@ -198,7 +202,13 @@ class ToyTrainer:
         elif isinstance(self.example, GaussianExampleConfig):
             x0 = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
-            ) * self.cfg.example.sigma + self.cfg.example.mu
+            )
+        elif isinstance(self.example, UniformExampleConfig):
+            x0_raw = torch.rand(
+                self.cfg.batch_size, 1, 1, device=device
+            )
+            x0 = torch.logit(x0_raw)  # E[logit(X)] = 0 if X is uniform(0, 1)
+            x0 /= (torch.pi / torch.tensor(3.).sqrt())  # Var[logit(X)] = pi^2/3 if X is uniform
         else:
             raise NotImplementedError
         return x0
@@ -274,9 +284,7 @@ class ConditionTrainer(ToyTrainer):
         return
 
     def train_batch(self):
-        x0_raw = self.get_x0()
-        # x0 = (x0_raw - x0_raw.mean(axis=0)) / x0_raw.std(axis=0)
-        x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
+        x0 = self.get_x0()
         loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()

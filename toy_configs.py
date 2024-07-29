@@ -13,7 +13,9 @@ from models.toy_diffusion_models_config import \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
     TemporalUnetConfig, TemporalNnetConfig, TemporalTransformerUnetConfig, TemporalIDKConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
-from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig
+from toy_train_config import GaussianExampleConfig, \
+    BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
+    UniformExampleConfig
 
 
 def register_configs() -> None:
@@ -132,4 +134,9 @@ def register_configs() -> None:
         group='example',
         name='brownian_motion_example',
         node=BrownianMotionExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='uniform_example',
+        node=UniformExampleConfig,
     )

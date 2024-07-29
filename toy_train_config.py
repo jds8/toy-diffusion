@@ -44,6 +44,15 @@ class BrownianMotionDiffExampleConfig(BrownianMotionExampleConfig):
 
 
 @dataclass
+class UniformExampleConfig(ExampleConfig):
+    lower: float = -1.
+    upper: float = 1.
+
+    def name(self):
+        return 'UniformExampleConfig'
+
+
+@dataclass
 class BaseConfig:
     sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
     diffusion: ModelConfig = field(default_factory=ModelConfig)

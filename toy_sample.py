@@ -18,7 +18,8 @@ from torchdiffeq import odeint
 from toy_plot import SDE, analytical_log_likelihood, plot_ode_trajectories
 from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path, get_classifier_path, ExampleConfig, \
-    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, TestType, IntegratorType
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
+    UniformExampleConfig, TestType, IntegratorType
 from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
@@ -159,6 +160,10 @@ class ToyEvaluator:
                 self.cfg.num_samples,
                 self.cfg.example.sde_steps,
                 1,
+            ])
+        elif type(self.example) == UniformExampleConfig:
+            x_min = dist.Normal(0, 1, device).sample([
+                self.cfg.num_samples, 1, 1
             ])
         else:
             raise NotImplementedError
@@ -398,19 +403,19 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
-        if self.cfg.test == TestType.Gaussian or True:
-            pseudo_example = self.cfg.example.copy()
-            pseudo_example['mu'] = 0.
-            pseudo_example['sigma'] = 1.
-            ll_prior = self.sampler.prior_analytic_logp(
-                # self.cfg.example,
-                pseudo_example,
-                device,
-                latent,
-            ).flatten(1).sum(1)
-        else:
-            ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
-        # ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
+        # if self.cfg.test == TestType.Gaussian:
+        #     pseudo_example = self.cfg.example.copy()
+        #     pseudo_example['mu'] = 0.
+        #     pseudo_example['sigma'] = 1.
+        #     ll_prior = self.sampler.prior_analytic_logp(
+        #         # self.cfg.example,
+        #         pseudo_example,
+        #         device,
+        #         latent,
+        #     ).flatten(1).sum(1)
+        # else:
+        #     ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
+        ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + \int_0^T Tr(df(x,t)/dx)dt where dx/dt = f
         return ll_prior + delta_ll, {'fevals': fevals}
 
@@ -539,6 +544,31 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     #     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
+def test_uniform(end_time, cfg, sample_trajs, std):
+    scale = torch.pi / torch.tensor(3).sqrt()
+    traj = sample_trajs * scale
+    traj = traj.sigmoid() * (cfg.example.upper - cfg.example.lower) + cfg.example.lower
+    analytical_llk = torch.distributions.Uniform(
+        cfg.example.lower, cfg.example.upper
+    ).log_prob(traj)
+    a_lk = analytical_llk.exp().squeeze()
+    print('analytical_llk: {}'.format(a_lk))
+    ode_llk = std.ode_log_likelihood(sample_trajs)
+    # derivative of sigmoid inverse is derivative of logit
+    std_unif_traj = (traj - cfg.example.lower) / (cfg.example.upper - cfg.example.lower)
+    logit_derivative = 1 / (std_unif_traj * (1 - std_unif_traj))
+    ode_lk = ode_llk[0].exp() * logit_derivative.squeeze() / (scale * (cfg.example.upper - cfg.example.lower))
+    print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
+    mse_llk = torch.nn.MSELoss()(
+        a_lk,
+        ode_lk,
+    )
+    print('\nmse_llk: {}'.format(mse_llk))
+
+    plt.clf()
+    plt_llk(traj, ode_lk, plot_type='scatter')
+    plt_llk(traj, a_lk, plot_type='line')
+    import pdb; pdb.set_trace()
 
 def test(end_time, cfg, out_trajs, std):
     if type(std.example) == GaussianExampleConfig:
@@ -547,6 +577,8 @@ def test(end_time, cfg, out_trajs, std):
         test_brownian_motion(end_time, cfg, out_trajs, std)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         test_brownian_motion_diff(end_time, cfg, out_trajs, std)
+    elif type(std.example) == UniformExampleConfig:
+        test_uniform(end_time, cfg, out_trajs, std)
     else:
         raise NotImplementedError
 
