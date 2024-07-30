@@ -216,7 +216,7 @@ class ToyTrainer:
 
 class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0):
-        cond = self.likelihood.get_condition(x0).abs() if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        cond = self.likelihood.get_condition(x0) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
 
         extras = {}

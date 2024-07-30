@@ -250,7 +250,7 @@ class DiscreteEvaluator(ToyEvaluator):
 
 
 class ContinuousEvaluator(ToyEvaluator):
-    def get_score_function(self, t, x, cond=None):
+    def get_score_function(self, t, x):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotion:
@@ -266,7 +266,7 @@ class ContinuousEvaluator(ToyEvaluator):
                 conditional_output = self.diffusion_model(
                     x=x,
                     time=t,
-                    cond=cond,
+                    cond=self.cond,
                 )
                 return self.sampler.get_classifier_free_sf_estimator(
                     xt=x,
@@ -283,9 +283,9 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
 
-    def get_dx_dt(self, t, x, cond=None):
+    def get_dx_dt(self, t, x):
         time = t.reshape(-1)
-        sf_est = self.get_score_function(t=time, x=x, cond=cond)
+        sf_est = self.get_score_function(t=time, x=x)
         dx_dt = self.sampler.probability_flow_ode(
             x.squeeze(),
             time.squeeze(),
@@ -371,7 +371,7 @@ class ContinuousEvaluator(ToyEvaluator):
         def ode_fn(t, x):
             nonlocal fevals
             fevals += 1
-            dx_dt = self.get_dx_dt(t, x, cond=cond)
+            dx_dt = self.get_dx_dt(t, x)
             return dx_dt
 
         times = torch.linspace(
@@ -383,10 +383,10 @@ class ContinuousEvaluator(ToyEvaluator):
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
 
-    def sample_trajectories(self, cond=None):
+    def sample_trajectories(self):
         print('sampling trajectories...')
         if self.cfg.integrator_type == IntegratorType.ProbabilityFlow:
-            sample_out = self.sample_trajectories_probability_flow(cond=cond)
+            sample_out = self.sample_trajectories_probability_flow()
         elif self.cfg.integrator_type == IntegratorType.EulerMaruyama:
             sample_out = self.sample_trajectories_euler_maruyama()
         else:
@@ -404,7 +404,7 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, cond=cond)
+                dx_dt = self.get_dx_dt(t, x)
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 d_ll = (v * grad).flatten(1).sum(1)
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
@@ -471,6 +471,14 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
+    datapoints = torch.linspace(
+        cfg.example.mu-3*cfg.example.sigma,
+        cfg.example.mu+3*cfg.example.sigma,
+        1000
+    )
+    datapoint_llk = torch.distributions.Normal(
+        cfg.example.mu, cfg.example.sigma
+    ).log_prob(datapoints)
     analytical_llk = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
     ).log_prob(traj)
@@ -487,7 +495,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     plt_llk(traj, ode_lk, plot_type='scatter')
-    plt_llk(traj, a_lk, plot_type='line')
+    plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):

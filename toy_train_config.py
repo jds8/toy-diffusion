@@ -85,18 +85,20 @@ def get_model_path(cfg: TrainConfig):
     if cfg.model_name:
         model_name = cfg.model_name
     else:
-        sampler_name = OmegaConf.to_object(cfg.sampler).name()
-        diffusion_name = OmegaConf.to_object(cfg.diffusion).name()
-        example_cfg = OmegaConf.to_object(cfg.example)
-        example_name = example_cfg.name()
+        cfg_obj = OmegaConf.to_object(cfg)
+        sampler_name = cfg_obj.sampler.name()
+        diffusion_name = cfg_obj.diffusion.name()
+        example_name = cfg_obj.example.name()
+        p_uncond = cfg_obj.p_uncond
         parameter_name = ''
-        if isinstance(example_cfg, GaussianExampleConfig):
+        if isinstance(cfg_obj.example, GaussianExampleConfig):
             parameter_name = '_{}_{}'.format(cfg.example.mu, cfg.example.sigma)
-        model_name = "{}_{}_{}{}".format(
+        model_name = "{}_{}_{}{}_puncond_{}".format(
             sampler_name,
             diffusion_name,
             example_name,
-            parameter_name
+            parameter_name,
+            p_uncond,
         )
     return get_path(cfg, model_name)
 

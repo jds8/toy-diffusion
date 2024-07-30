@@ -19,6 +19,12 @@ class LikelihoodConfig:
 
 
 @dataclass
+class TailsLikelihoodConfig(LikelihoodConfig):
+    max_deviation: float = 3.
+    _target_: str = 'toy_likelihoods.TailsLikelihood'
+
+
+@dataclass
 class DistLikelihoodConfig(LikelihoodConfig):
     dist_fun_type: DistanceFunction = DistanceFunction.FinalState
     sigma: float = 0.3

@@ -12,7 +12,8 @@ from models.toy_diffusion_models_config import \
     EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
     TemporalUnetConfig, TemporalNnetConfig, TemporalTransformerUnetConfig, TemporalIDKConfig
-from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
+from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
+    RLAILikelihoodConfig, ClassifierLikelihoodConfig, TailsLikelihoodConfig
 from toy_train_config import GaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
     UniformExampleConfig
@@ -104,6 +105,11 @@ def register_configs() -> None:
         group="likelihood",
         name="base_likelihood",
         node=DistLikelihoodConfig,
+    )
+    cs.store(
+        group="likelihood",
+        name="tails_likelihood",
+        node=TailsLikelihoodConfig,
     )
     cs.store(
         group='likelihood',
