@@ -122,7 +122,7 @@ class ToyTrainer:
         try:
             pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
             torch.save(self.diffusion_model.module.state_dict(), saved_model_path)
-            print('saved model')
+            print('saved model {}'.format(self.num_saves))
         except Exception as e:
             print('could not save model because {}'.format(e))
         return saved_model_path
