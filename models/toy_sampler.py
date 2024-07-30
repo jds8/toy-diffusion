@@ -383,14 +383,14 @@ class VPSDEVelocitySampler(VPSDESampler):
     def get_classifier_free_sf_estimator(
         self,
         xt,
-        unconditional_vt,
+        unconditional_output,
         t,
-        conditional_vt
+        conditional_output
     ):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
         alpha_t = log_mean_coeff.exp()
-        unconditional_eps = sigma_t * xt + alpha_t * unconditional_vt
-        conditional_eps = sigma_t * xt + alpha_t * conditional_vt
+        unconditional_eps = sigma_t * xt + alpha_t * unconditional_output
+        conditional_eps = sigma_t * xt + alpha_t * conditional_output
         eps_pred = self.combine_eps(unconditional_eps, conditional_eps)
         return -eps_pred / sigma_t
 
@@ -706,8 +706,8 @@ class VelocitySampler(AbstractDiscreteSampler):
         )
         return sqrt_alphas_cumprod_t * eps - sqrt_one_minus_alphas_cumprod_t * x0
 
-    def get_classifier_free_mean(self, xt, unconditional_vt, t, conditional_vt):
-        unconditional_eps = self.sqrt_one_minus_alphas_cumprod[t] * xt + self.sqrt_alphas_cumprod[t] * unconditional_vt
+    def get_classifier_free_mean(self, xt, unconditional_output, t, conditional_output):
+        unconditional_eps = self.sqrt_one_minus_alphas_cumprod[t] * xt + self.sqrt_alphas_cumprod[t] * unconditional_output
         conditional_eps = self.sqrt_one_minus_alphas_cumprod[t] * xt + self.sqrt_alphas_cumprod[t] * conditional_vt
         eps = self.combine_eps(unconditional_eps, conditional_eps)
         classifier_free_vt = (eps - self.sqrt_one_minus_alphas_cumprod[t] * xt) / self.sqrt_alphas_cumprod[t]
