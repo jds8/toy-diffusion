@@ -380,6 +380,20 @@ class VPSDEVelocitySampler(VPSDESampler):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
+    def get_classifier_free_sf_estimator(
+        self,
+        xt,
+        unconditional_vt,
+        t,
+        conditional_vt
+    ):
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        alpha_t = log_mean_coeff.exp()
+        unconditional_eps = sigma_t * xt + alpha_t * unconditional_vt
+        conditional_eps = sigma_t * xt + alpha_t * conditional_vt
+        eps_pred = self.combine_eps(unconditional_eps, conditional_eps)
+        return -eps_pred / sigma_t
+
     def get_sf_estimator(self, v_pred, xt, t):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
         alpha_t = log_mean_coeff.exp()

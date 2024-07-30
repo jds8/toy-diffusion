@@ -216,7 +216,7 @@ class ToyTrainer:
 
 class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0):
-        cond = self.likelihood.get_condition(x0) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        cond = self.likelihood.get_condition(x0).abs() if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
 
         extras = {}
@@ -236,11 +236,12 @@ class ConditionTrainer(ToyTrainer):
         model_output = self.diffusion_model(
             x=forward_sample_output.xt,
             time=forward_sample_output.t,
+            cond=cond,
         )
 
         loss = self.loss_fn(model_output, forward_sample_output)
 
-        # TODO: The following computes the loss against the marginal score function
+        # # TODO: The following computes the loss against the marginal score function
         # true_score=self.analytical_gaussian_score(
         #     forward_sample_output.t,
         #     forward_sample_output.xt
