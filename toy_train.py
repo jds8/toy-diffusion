@@ -209,6 +209,12 @@ class ToyTrainer:
             )
             x0 = torch.logit(x0_raw)  # E[logit(X)] = 0 if X is uniform(0, 1)
             x0 /= (torch.pi / torch.tensor(3.).sqrt())  # Var[logit(X)] = pi^2/3 if X is uniform
+            if x0.isnan().any() or (x0 == torch.inf).any():
+                nans = x0_raw[torch.where(x0.isnan())[0]]
+                print(nans)
+                infs = x0_raw[torch.where(x0 == torch.inf)[0]]
+                print(infs)
+                raise NotImplementedError
         else:
             raise NotImplementedError
         return x0
