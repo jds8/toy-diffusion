@@ -36,7 +36,8 @@ def importance_sample(cfg):
         proposal=proposal,
         target=target
     )
-    test_fn = lambda x: (x.abs() > std.cond).to(torch.float)
+    z_score = lambda x: (x - cfg.example.mu) / cfg.example.sigma
+    test_fn = lambda x: (z_score(x).abs() < std.cond).to(torch.float)
     estimate = importance_sampler.estimate(test_fn)
     logger.info(f'IS estimate: {estimate}')
     import pdb; pdb.set_trace()

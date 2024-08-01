@@ -370,15 +370,16 @@ class Proposal:
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
         sample_trajs = sample_traj_out.samples
-        trajs = sample_trajs[-1]
-        return trajs
+        self.trajs = sample_trajs[-1]
+        return self.trajs
 
 
 class GaussianProposal(Proposal):
     def log_prob(self, samples):
-        ode_llk = self.std.ode_log_likelihood(samples)[0]
+        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
-        return ode_llk - scale_factor
+        self.ode_llk = raw_ode_llk - scale_factor
+        return self.ode_llk
 
 
 def plt_llk(traj, lik, plot_type='scatter', ax=None):
