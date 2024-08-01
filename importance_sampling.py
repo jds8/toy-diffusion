@@ -10,8 +10,8 @@ class ImportanceSampler:
 
     def estimate(self, test_fn: Callable):
         saps = self.proposal.sample()
-        log_qrobs = self.proposal.log_prob(saps)
-        log_probs = self.target.log_prob(saps)
+        log_qrobs = self.proposal.log_prob(saps).squeeze()
+        log_probs = self.target.log_prob(saps).squeeze()
         log_ws = log_probs - log_qrobs
         max_log_w = log_ws.max()
         w_bars = (log_ws - max_log_w).exp()
