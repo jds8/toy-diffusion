@@ -18,7 +18,7 @@ from torchdiffeq import odeint
 from toy_plot import SDE, analytical_log_likelihood, plot_ode_trajectories
 from toy_configs import register_configs
 from toy_train_config import SampleConfig, get_model_path, get_classifier_path, ExampleConfig, \
-    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
+    GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
     UniformExampleConfig, TestType, IntegratorType
 from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
@@ -31,49 +31,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 SampleOutput = namedtuple('SampleOutput', 'samples fevals')
 
-# TODO: FIX THIS UP
-from generative_model import generate_trajectory
-from linear_gaussian_prob_prog import get_linear_gaussian_variables, JointVariables
-
-
 SDEConfig = namedtuple('SDEConfig', 'drift diffusion sde_steps end_time')
 DiffusionConfig = namedtuple('DiffusionConfig', 'f g')
 
-
-def create_table(A, Q, C, R, mu_0, Q_0, dim):
-    table = {}
-    table[dim] = {}
-    table[dim]['A'] = A
-    table[dim]['Q'] = Q
-    table[dim]['C'] = C
-    table[dim]['R'] = R
-    table[dim]['mu_0'] = mu_0
-    table[dim]['Q_0'] = Q_0
-    return table
-
-def compute_diffusion_step(
-        sde: SDEConfig,
-        diffusion: DiffusionConfig,
-        diffusion_time: torch.tensor
-):
-    A = torch.tensor([[1.]], device=device)
-    Q = sde.diffusion * torch.tensor(1. / sde.sde_steps, device=device).reshape(1, 1)
-    C = diffusion.f(diffusion_time).reshape(1, -1)
-    R = diffusion.g(diffusion_time).reshape(1, -1) ** 2
-    mu_0 = torch.tensor([0.], device=device)
-    Q_0 = Q
-
-    table = create_table(
-        A=A, Q=Q, C=C, R=R, mu_0=mu_0, Q_0=Q_0, dim=1
-    )
-
-    ys, _, _, _ = generate_trajectory(
-        num_steps=sde.sde_steps, A=A, Q=Q, C=C, R=R, mu_0=mu_0, Q_0=Q_0
-    )
-
-    lgv = get_linear_gaussian_variables(dim=1, num_obs=sde.sde_steps, table=table)
-    jvs = JointVariables(lgv.ys)
-    return jvs
 
 #########################
 #########################
@@ -148,12 +108,6 @@ class ToyEvaluator:
                 self.cfg.num_samples,
                 1,
                 1
-            ])
-        elif type(self.example) == BrownianMotionExampleConfig:
-            x_min = self.sampler.prior_sampling(device).sample([
-                self.cfg.num_samples,
-                self.cfg.example.sde_steps,
-                1,
             ])
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
@@ -253,8 +207,6 @@ class ContinuousEvaluator(ToyEvaluator):
     def get_score_function(self, t, x):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
-        elif self.cfg.test == TestType.BrownianMotion:
-            return self.analytical_brownian_motion_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
@@ -308,29 +260,6 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         var = std ** 2
         score = (mean - x) / var
-        return score
-
-    def analytical_brownian_motion_score(self, t, x):
-        """
-        Compute the analytical score p_t for t in (0, 1)
-        given the SDE formulation from Song et al. in the case that
-        p_0(x, s) = N(0, d(s)sqrt(s)) and p_1(x, s) = N(0, 1)
-        """
-        sde = SDEConfig(
-            self.cfg.example.sde_drift,
-            self.cfg.example.sde_diffusion,
-            self.cfg.example.sde_steps-1,
-            1.
-        )
-
-        f = lambda t : self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
-        g = lambda t : self.sampler.marginal_prob(x, t)[2][:, 0, :]
-        diffusion = DiffusionConfig(f, g)
-
-        jvs = compute_diffusion_step(sde, diffusion, diffusion_time=t)
-        y_dist = jvs.dist.dist
-        score = torch.linalg.solve(y_dist.covariance_matrix, (y_dist.loc.reshape(-1, 1) - x))
-
         return score
 
     def analytical_brownian_motion_diff_score(self, t, x):
@@ -434,6 +363,24 @@ class ContinuousEvaluator(ToyEvaluator):
         return ll_prior + delta_ll, {'fevals': fevals}
 
 
+class Proposal:
+    def __init__(self, std: ToyEvaluator):
+        self.std = std
+
+    def sample(self):
+        sample_traj_out = self.std.sample_trajectories()
+        sample_trajs = sample_traj_out.samples
+        trajs = sample_trajs[-1]
+        return trajs
+
+
+class GaussianProposal(Proposal):
+    def log_prob(self, samples):
+        ode_llk = self.std.ode_log_likelihood(samples)[0]
+        scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
+        return ode_llk - scale_factor
+
+
 def plt_llk(traj, lik, plot_type='scatter', ax=None):
     full_state_pred = traj.detach().squeeze().cpu().numpy()
     full_state_lik = lik.detach().squeeze().cpu().numpy()
@@ -470,18 +417,25 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
     plt.savefig('figs/scatter.pdf')
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
+    cond = std.cond if std.cond else torch.tensor([0.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
-    datapoints = torch.linspace(
-        cfg.example.mu-3*cfg.example.sigma,
-        cfg.example.mu+3*cfg.example.sigma,
-        1000
+    datapoints_left = torch.linspace(
+        cfg.example.mu-6*cfg.example.sigma,
+        cfg.example.mu-cond.item()*cfg.example.sigma,
+        500
     )
-    datapoint_llk = torch.distributions.Normal(
+    datapoints_right = torch.linspace(
+        cfg.example.mu+cond.item()*cfg.example.sigma,
+        cfg.example.mu+6*cfg.example.sigma,
+        500
+    )
+    datapoints = torch.hstack([datapoints_left, datapoints_right])
+    datapoint_dist = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
-    ).log_prob(datapoints)
-    analytical_llk = torch.distributions.Normal(
-        cfg.example.mu, cfg.example.sigma
-    ).log_prob(traj)
+    )
+    tail = 2 * datapoint_dist.cdf(cfg.example.mu-cond*cfg.example.sigma)
+    datapoint_llk = datapoint_dist.log_prob(datapoints) - tail.log()
+    analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs)
@@ -595,8 +549,6 @@ def test_uniform(end_time, cfg, sample_trajs, std):
 def test(end_time, cfg, out_trajs, std):
     if type(std.example) == GaussianExampleConfig:
         test_gaussian(end_time, cfg, out_trajs, std)
-    elif type(std.example) == BrownianMotionExampleConfig:
-        test_brownian_motion(end_time, cfg, out_trajs, std)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         test_brownian_motion_diff(end_time, cfg, out_trajs, std)
     elif type(std.example) == UniformExampleConfig:
