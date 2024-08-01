@@ -367,16 +367,16 @@ class Proposal:
     def __init__(self, std: ToyEvaluator):
         self.std = std
 
+class GaussianProposal(Proposal):
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
         sample_trajs = sample_traj_out.samples
-        self.trajs = sample_trajs[-1]
+        self.trajs = sample_trajs[-1] * self.std.cfg.example.sigma + self.std.cfg.example.mu
         return self.trajs
 
-
-class GaussianProposal(Proposal):
     def log_prob(self, samples):
-        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
+        sample_trajs = (samples - self.std.cfg.example.mu) / self.std.cfg.example.sigma
+        raw_ode_llk = self.std.ode_log_likelihood(sample_trajs)[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
@@ -596,6 +596,7 @@ def sample(cfg):
     # viz_trajs(cfg, std, out_trajs, end_time)
 
     test(end_time, cfg, out_trajs, std)
+    import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
