@@ -482,9 +482,9 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
-def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
+def test_brownian_motion_diff(end_time, cfg, trajs, std):
     dt = end_time / (cfg.example.sde_steps-1)
-    sample_trajs *= dt.sqrt()  # de-standardize data
+    sample_trajs = trajs * dt.sqrt()  # de-standardize data
     analytical_trajs = torch.cat([
         torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
         sample_trajs.cumsum(dim=-2)

@@ -199,6 +199,8 @@ class ToyTrainer:
             x0 = trajs.W.unsqueeze(-1)
             if type(self.example) == BrownianMotionDiffExampleConfig:
                 x0 = x0.diff(dim=1)
+            dt = self.end_time / self.cfg.example.sde_steps
+            x0 /= dt.sqrt()  # standardize data
         elif isinstance(self.example, GaussianExampleConfig):
             x0 = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
