@@ -33,12 +33,20 @@ class Likelihood:
         raise NotImplementedError
 
 
-class TailsLikelihood(Likelihood):
+class GaussianTailsLikelihood(Likelihood):
     def __init__(self, max_deviation: float):
         self.max_deviation = torch.tensor(max_deviation)
 
     def get_condition(self, x):
         return torch.minimum(x.abs().floor(), self.max_deviation)
+
+
+class BrownianMotionTailsLikelihood(Likelihood):
+    def __init__(self, alpha: float):
+        self.alpha = torch.tensor(alpha)
+
+    def get_condition(self, x):
+        return (x.abs() > self.alpha).any()
 
 
 class DistLikelihood(Likelihood):
