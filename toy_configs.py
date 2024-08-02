@@ -13,7 +13,7 @@ from models.toy_diffusion_models_config import \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
     TemporalUnetConfig, TemporalNnetConfig, TemporalTransformerUnetConfig, TemporalIDKConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
-    RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig \
+    RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
     BrownianMotionLikelihoodConfig
 from toy_train_config import GaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
