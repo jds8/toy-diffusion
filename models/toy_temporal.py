@@ -280,7 +280,7 @@ class TemporalUnet(nn.Module):
             x = resnet(x, t)
             x = resnet2(x, t)
             x = attn(x)
-            # x = upsample(x)
+            x = upsample(x)
 
         x = self.final_conv(x)
 
