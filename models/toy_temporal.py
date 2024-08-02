@@ -211,10 +211,10 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                # ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
-                # ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
-                ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
-                ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+                # ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
+                # ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
@@ -228,10 +228,10 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualBlock(dim_out * 2, dim_in, embed_dim=time_dim),
-                ResidualBlock(dim_in, dim_in, embed_dim=time_dim),
-                # ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
-                # ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
+                # ResidualBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                # ResidualBlock(dim_in, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
@@ -260,10 +260,10 @@ class TemporalUnet(nn.Module):
         h = []
 
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
-            # x = resnet(x, t, cemb, bool_emb)
-            # x = resnet2(x, t, cemb, bool_emb)
-            x = resnet(x, t)
-            x = resnet2(x, t)
+            x = resnet(x, t, cemb, bool_emb)
+            x = resnet2(x, t, cemb, bool_emb)
+            # x = resnet(x, t)
+            # x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
@@ -275,10 +275,10 @@ class TemporalUnet(nn.Module):
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
             hpop = h.pop()
             x = torch.cat((x, hpop), dim=1)
-            # x = resnet(x, t, cemb, bool_emb)
-            # x = resnet2(x, t, cemb, bool_emb)
-            x = resnet(x, t)
-            x = resnet2(x, t)
+            x = resnet(x, t, cemb, bool_emb)
+            x = resnet2(x, t, cemb, bool_emb)
+            # x = resnet(x, t)
+            # x = resnet2(x, t)
             x = attn(x)
             x = upsample(x)
 

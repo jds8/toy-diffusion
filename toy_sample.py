@@ -235,6 +235,9 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
 
+    def set_no_guidance(self):
+        self.cfg.guidance = GuidanceType.Classifier
+
     def get_dx_dt(self, t, x):
         time = t.reshape(-1)
         sf_est = self.get_score_function(t=time, x=x)
@@ -363,25 +366,6 @@ class ContinuousEvaluator(ToyEvaluator):
         return ll_prior + delta_ll, {'fevals': fevals}
 
 
-class Proposal:
-    def __init__(self, std: ToyEvaluator):
-        self.std = std
-
-class GaussianProposal(Proposal):
-    def sample(self):
-        sample_traj_out = self.std.sample_trajectories()
-        sample_trajs = sample_traj_out.samples
-        self.trajs = sample_trajs[-1] * self.std.cfg.example.sigma + self.std.cfg.example.mu
-        return self.trajs
-
-    def log_prob(self, samples):
-        sample_trajs = (samples - self.std.cfg.example.mu) / self.std.cfg.example.sigma
-        raw_ode_llk = self.std.ode_log_likelihood(sample_trajs)[0]
-        scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
-        self.ode_llk = raw_ode_llk - scale_factor
-        return self.ode_llk
-
-
 def plt_llk(traj, lik, plot_type='scatter', ax=None):
     full_state_pred = traj.detach().squeeze().cpu().numpy()
     full_state_lik = lik.detach().squeeze().cpu().numpy()
@@ -482,16 +466,16 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
-def test_brownian_motion_diff(end_time, cfg, trajs, std):
+def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.example.sde_steps-1)
-    sample_trajs = trajs * dt.sqrt()  # de-standardize data
-    analytical_trajs = torch.cat([
-        torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
-        sample_trajs.cumsum(dim=-2)
+    trajs = sample_trajs * dt.sqrt()  # de-standardize data
+    bm_trajs = torch.cat([
+        torch.zeros(trajs.shape[0], 1, 1, device=trajs.device),
+        trajs.cumsum(dim=-2)
     ], dim=1)
 
     analytical_llk = analytical_log_likelihood(
-        analytical_trajs,
+        bm_trajs,
         SDE(
             cfg.example.sde_drift,
             cfg.example.sde_diffusion
@@ -508,17 +492,10 @@ def test_brownian_motion_diff(end_time, cfg, trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    times = torch.linspace(0., 1., analytical_trajs.shape[1])
-    plt.plot(times.numpy(), analytical_trajs[..., 0].numpy().T)
+    times = torch.linspace(0., 1., bm_trajs.shape[1])
+    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
     plt.savefig('figs/brownian_motion_diff_samples.pdf')
 
-    # plt.clf()
-    # if sample_trajs.shape[1] > 1:
-    #     ax = plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='3d_scatter')
-    #     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='3d_line', ax=ax)
-    # else:
-    #     plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
-    #     plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_uniform(end_time, cfg, sample_trajs, std):

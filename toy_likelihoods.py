@@ -46,7 +46,7 @@ class BrownianMotionTailsLikelihood(Likelihood):
         self.alpha = torch.tensor(alpha)
 
     def get_condition(self, x):
-        return (x.abs() > self.alpha).any()
+        return (x.abs() > self.alpha).any().float()
 
 
 class DistLikelihood(Likelihood):
