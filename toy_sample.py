@@ -204,7 +204,7 @@ class DiscreteEvaluator(ToyEvaluator):
 
 
 class ContinuousEvaluator(ToyEvaluator):
-    def get_score_function(self, t, x):
+    def get_score_function(self, t, x, evaluate_likelihood):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
@@ -214,18 +214,26 @@ class ContinuousEvaluator(ToyEvaluator):
                 x=x,
                 time=t,
             )
+            # uncond_sf_est = self.sampler.get_sf_estimator(
+            #     unconditional_output,
+            #     xt=x,
+            #     t=t
+            # )
             if self.cfg.guidance == GuidanceType.ClassifierFree:
                 conditional_output = self.diffusion_model(
                     x=x,
                     time=t,
                     cond=self.cond,
                 )
-                return self.sampler.get_classifier_free_sf_estimator(
+                cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x,
                     unconditional_output=unconditional_output,
                     t=t,
                     conditional_output=conditional_output,
                 )
+                # if evaluate_likelihood:
+                #     return torch.stack([uncond_sf_est, cond_sf_est], dim=0)
+                return cond_sf_est
             else:
                 return self.sampler.get_sf_estimator(
                     unconditional_output,
@@ -238,15 +246,19 @@ class ContinuousEvaluator(ToyEvaluator):
     def set_no_guidance(self):
         self.cfg.guidance = GuidanceType.Classifier
 
-    def get_dx_dt(self, t, x):
+    def get_dx_dt(self, t, x, evaluate_likelihood):
         time = t.reshape(-1)
-        sf_est = self.get_score_function(t=time, x=x)
-        dx_dt = self.sampler.probability_flow_ode(
-            x.squeeze(),
-            time.squeeze(),
-            sf_est.squeeze()
+        sf_est = self.get_score_function(
+            t=time,
+            x=x,
+            evaluate_likelihood=evaluate_likelihood
         )
-        return dx_dt.reshape(x.shape)
+        dx_dt = self.sampler.probability_flow_ode(
+            x,
+            time,
+            sf_est,
+        )
+        return dx_dt
 
     def analytical_gaussian_score(self, t, x):
         """
@@ -303,7 +315,7 @@ class ContinuousEvaluator(ToyEvaluator):
         def ode_fn(t, x):
             nonlocal fevals
             fevals += 1
-            dx_dt = self.get_dx_dt(t, x)
+            dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=False)
             return dx_dt
 
         times = torch.linspace(
@@ -329,6 +341,10 @@ class ContinuousEvaluator(ToyEvaluator):
     def ode_log_likelihood(self, x, cond=None, atol=1e-5, rtol=1e-5):
         print('evaluating likelihood...')
         # hutchinson's trick
+        # if self.cfg.guidance == GuidanceType.ClassifierFree:
+        #     v = torch.randint_like(x.tile(2, 1, 1, 1), 2) * 2 - 1
+        # else:
+        #     v = torch.randint_like(x, 2) * 2 - 1
         v = torch.randint_like(x, 2) * 2 - 1
         fevals = 0
         def ode_fn(t, x):
@@ -336,11 +352,30 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x)
+                dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True)
+                # if self.cfg.guidance == GuidanceType.ClassifierFree:
+                #     grad_uncond = torch.autograd.grad(
+                #         (dx_dt[0] * v[0]).sum(),
+                #         x,
+                #         retain_graph=True
+                #     )[0]
+                #     grad_cond = torch.autograd.grad(
+                #         (dx_dt[1] * v[1]).sum(),
+                #         x
+                #     )[0]
+                #     grad = torch.stack([grad_uncond, grad_cond])
+                #     dx_dt = dx_dt[1]  # update x according to conditional gradient
+                # else:
+                #     grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                d_ll = (v * grad).flatten(1).sum(1)
+                d_ll = (v * grad).sum([-1, -2])
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
-        x_min = x, x.new_zeros([x.shape[0]])
+        # if self.cfg.guidance == GuidanceType.ClassifierFree:
+        #     ll = x.new_zeros([2*x.shape[0]])
+        # else:
+        #     ll = x.new_zeros([x.shape[0]])
+        ll = x.new_zeros([x.shape[0]])
+        x_min = x, ll
         times = torch.linspace(
             self.sampler.t_eps,
             1.-self.sampler.t_eps,
@@ -363,7 +398,12 @@ class ContinuousEvaluator(ToyEvaluator):
         #     ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + \int_0^T Tr(df(x,t)/dx)dt where dx/dt = f
-        return ll_prior + delta_ll, {'fevals': fevals}
+        # if self.cfg.guidance == GuidanceType.ClassifierFree:
+        #     ll_output = ll_prior.repeat(2) + delta_ll
+        # else:
+        #     ll_output = ll_prior + delta_ll
+        ll_output = ll_prior + delta_ll
+        return ll_output, {'fevals': fevals}
 
 
 def plt_llk(traj, lik, plot_type='scatter', ax=None):
@@ -468,34 +508,40 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.example.sde_steps-1)
-    trajs = sample_trajs * dt.sqrt()  # de-standardize data
+    # de-standardize data
+    trajs = sample_trajs * dt.sqrt()
+
+    # make histogram
+    data = sample_trajs.reshape(-1).numpy()
+    plt.clf()
+    plt.hist(data, bins=30, edgecolor='black')
+    plt.title('Histogram of brownian motion states')
+    plt.savefig('figs/brownian_motion_diff_hist.pdf')
+
+    # turn state diffs into Brownian motion
     bm_trajs = torch.cat([
         torch.zeros(trajs.shape[0], 1, 1, device=trajs.device),
         trajs.cumsum(dim=-2)
     ], dim=1)
 
-    analytical_llk = analytical_log_likelihood(
-        bm_trajs,
-        SDE(
-            cfg.example.sde_drift,
-            cfg.example.sde_diffusion
-        ),
-        dt
-    )
-    print('analytical_llk: {}'.format(analytical_llk))
-
-    ode_llk = std.ode_log_likelihood(sample_trajs)
-    print('\node_llk: {}'.format(ode_llk))
-
-    scaled_ode_llk = (ode_llk[0].exp() / dt.sqrt()).log()
-    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), scaled_ode_llk)
-    print('\nmse_llk: {}'.format(mse_llk))
-
+    # plot trajectories
     plt.clf()
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
     plt.savefig('figs/brownian_motion_diff_samples.pdf')
 
+    # compute (discretized) "analytical" log likelihood
+    analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1)
+    print('analytical_llk: {}'.format(analytical_llk))
+
+    # compute log likelihood under diffusion model
+    ode_llk = std.ode_log_likelihood(sample_trajs)
+    print('\node_llk: {}'.format(ode_llk))
+
+    # compare log likelihoods by MSE
+    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * cfg.example.sde_steps
+    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), scaled_ode_llk)
+    print('\nmse_llk: {}'.format(mse_llk))
     import pdb; pdb.set_trace()
 
 def test_uniform(end_time, cfg, sample_trajs, std):
