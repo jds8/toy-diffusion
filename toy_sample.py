@@ -531,16 +531,16 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.savefig('figs/brownian_motion_diff_samples.pdf')
 
     # compute (discretized) "analytical" log likelihood
-    analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1)
+    analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs)
-    print('\node_llk: {}'.format(ode_llk))
+    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * cfg.example.sde_steps
+    print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * cfg.example.sde_steps
-    mse_llk = torch.nn.MSELoss()(analytical_llk.squeeze(), scaled_ode_llk)
+    mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
     print('\nmse_llk: {}'.format(mse_llk))
     import pdb; pdb.set_trace()
 
