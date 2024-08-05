@@ -27,7 +27,7 @@ class SamplerType(Enum):
 @dataclass
 class BaseSamplerConfig:
     diffusion_timesteps: int = 1000
-    guidance_coef: float = 1.
+    guidance_coef: float = 0.
 
     def name(self):
         return 'BaseSampler'
