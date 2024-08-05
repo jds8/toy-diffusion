@@ -114,7 +114,7 @@ def register_configs() -> None:
     )
     cs.store(
         group="likelihood",
-        name="brownian_motion_tails_likelihood",
+        name="brownian_motion_diff_tails_likelihood",
         node=BrownianMotionDiffTailsLikelihoodConfig,
     )
     cs.store(
