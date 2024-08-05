@@ -34,11 +34,11 @@ class Likelihood:
 
 
 class GaussianTailsLikelihood(Likelihood):
-    def __init__(self, max_deviation: float):
-        self.max_deviation = torch.tensor(max_deviation)
+    def __init__(self, alpha: float):
+        self.alpha = torch.tensor(alpha)
 
     def get_condition(self, x):
-        return torch.minimum(x.abs().floor(), self.max_deviation)
+        return (x.abs() > self.alpha).to(torch.float)
 
 
 class BrownianMotionTailsLikelihood(Likelihood):

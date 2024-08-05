@@ -132,3 +132,14 @@ class SampleConfig(BaseConfig):
     guidance: GuidanceType = GuidanceType.Classifier
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+
+
+@dataclass
+class ISConfig(BaseConfig):
+    num_samples: int = 100
+    cond: Optional[float] = None
+    guidance: GuidanceType = GuidanceType.Classifier
+    test: TestType = TestType.Test
+    integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+    # target:
+    # proposal_class:

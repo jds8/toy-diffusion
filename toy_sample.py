@@ -112,7 +112,7 @@ class ToyEvaluator:
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
-                self.cfg.example.sde_steps,
+                self.cfg.example.sde_steps-1,
                 1,
             ])
         elif type(self.example) == UniformExampleConfig:

@@ -185,46 +185,41 @@ class ToyTrainer:
         raise NotImplementedError
 
     def get_x0(self):
-        if isinstance(self.example, BrownianMotionExampleConfig):
-            sde = SDE(
-                self.cfg.example.sde_drift,
-                self.cfg.example.sde_diffusion
-            )
-            trajs = integrate(
-                sde,
-                timesteps=self.cfg.example.sde_steps,
-                end_time=self.end_time,
-                n_samples=self.n_samples
-            )
-            x0 = trajs.W.unsqueeze(-1)
-            if type(self.example) == BrownianMotionDiffExampleConfig:
-                x0 = x0.diff(dim=1)
-            dt = self.end_time / self.cfg.example.sde_steps
-            x0 /= dt.sqrt()  # standardize data
-        elif isinstance(self.example, GaussianExampleConfig):
+        if type(self.example) == BrownianMotionDiffExampleConfig:
             x0 = torch.randn(
+                self.cfg.batch_size,
+                self.cfg.example.sde_steps-1,
+                1,
+                device=device
+            )
+            dt = self.end_time / (self.cfg.example.sde_steps-1)
+            scaled_x0 = x0 * dt.sqrt()  # standardize data
+            x0_raw = torch.cat([
+                torch.zeros(self.cfg.batch_size, 1, 1, device=device),
+                scaled_x0.cumsum(dim=1)
+            ], dim=1)
+        elif isinstance(self.example, GaussianExampleConfig):
+            x0_raw = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
             )
+            x0 = x0_raw
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
             )
-            x0 = torch.logit(x0_raw)  # E[logit(X)] = 0 if X is uniform(0, 1)
-            x0 /= (torch.pi / torch.tensor(3.).sqrt())  # Var[logit(X)] = pi^2/3 if X is uniform
-            if x0.isnan().any() or (x0 == torch.inf).any():
-                nans = x0_raw[torch.where(x0.isnan())[0]]
-                print(nans)
-                infs = x0_raw[torch.where(x0 == torch.inf)[0]]
-                print(infs)
-                raise NotImplementedError
+            # E[logit(X)] = 0 if X is uniform(0, 1)
+            logit_x0 = torch.logit(x0_raw)
+            # Var[logit(X)] = pi^2/3 if X is uniform
+            x0 = logit_x0 / (torch.pi / torch.tensor(3.).sqrt())
         else:
             raise NotImplementedError
-        return x0
+        return x0_raw, x0
 
 
 class ConditionTrainer(ToyTrainer):
-    def forward_process(self, x0):
-        cond = self.likelihood.get_condition(x0) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+    def forward_process(self, x0_in):
+        x0_raw, x0 = x0_in
+        cond = self.likelihood.get_condition(x0_raw) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
 
         extras = {}
