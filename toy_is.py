@@ -11,7 +11,7 @@ import torch
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
-from toy_train_config import ISConfig
+from toy_train_config import ISConfig, get_target, get_proposal
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -33,7 +33,7 @@ def importance_estimate(
     return ((phis * w_bars).mean().log() + max_log_w).exp()
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
@@ -45,8 +45,8 @@ def importance_sample(cfg):
     ##################################################
     # true tail probability under target
     ##################################################
-    import pdb; pdb.set_trace()
-    tail_prob = cfg_obj.target.analytical_prob(cfg_obj.likelihood.alpha)
+    target = get_target(cfg_obj)
+    tail_prob = target.analytical_prob(torch.tensor(cfg_obj.likelihood.alpha))
     logger.info(f'true tail probability: {tail_prob}')
     ##################################################
 
@@ -56,15 +56,15 @@ def importance_sample(cfg):
     ##################################################
     # IS estimate using target
     ##################################################
-    proposal = cfg_obj.proposal_class(std)
+    proposal = get_proposal(cfg_obj.example, std)
     saps = proposal.sample()
     log_proposal = proposal.log_prob(saps).squeeze()
     log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
-    log_probs = cfg_obj.target.log_prob(saps).squeeze()
+    log_probs = target.log_prob(saps).squeeze()
 
     # z_score = lambda x: (x - cfg.example.mu) / cfg.example.sigma
     # test_fn = lambda x: (z_score(x).abs() < std.cond).to(torch.float)
-    test_fn = cfg_obj.likelihood.get_condition
+    test_fn = std.likelihood.get_condition
 
     target_estimate = importance_estimate(
         test_fn=test_fn,
@@ -82,7 +82,7 @@ def importance_sample(cfg):
     # IS estimate using unconditional diffusion model
     ##################################################
     std.set_no_guidance()
-    diffusion_target = cfg_obj.proposal_class(std)
+    diffusion_target = get_proposal(cfg_obj.example, std)
     log_drobs = diffusion_target.log_prob(saps).squeeze()
     diffusion_estimate = importance_estimate(
         test_fn=test_fn,
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         suppresswarning()
 
     cs = ConfigStore.instance()
-    cs.store(name="is_config", node=ISConfig)
+    cs.store(name="vpsde_is_config", node=ISConfig)
     register_configs()
 
     with torch.no_grad():

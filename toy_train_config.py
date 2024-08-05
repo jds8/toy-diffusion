@@ -5,6 +5,8 @@ from typing import Optional
 from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
+from importance_sampling import GaussianTarget, BrownianMotionDiffTarget, \
+    GaussianProposal, BrownianMotionDiffProposal
 
 import torch
 from omegaconf import OmegaConf
@@ -129,17 +131,29 @@ class IntegratorType(Enum):
 class SampleConfig(BaseConfig):
     num_samples: int = 100
     cond: Optional[float] = None
-    guidance: GuidanceType = GuidanceType.Classifier
+    guidance: GuidanceType = GuidanceType.ClassifierFree
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
 
 
 @dataclass
-class ISConfig(BaseConfig):
-    num_samples: int = 100
-    cond: Optional[float] = None
-    guidance: GuidanceType = GuidanceType.Classifier
-    test: TestType = TestType.Test
-    integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
-    # target:
-    # proposal_class:
+class ISConfig(SampleConfig):
+    likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
+    example: ExampleConfig = field(default_factory=ExampleConfig)
+
+
+def get_target(cfg):
+    if isinstance(cfg.example, GaussianExampleConfig):
+        return GaussianTarget(cfg)
+    elif isinstance(cfg.example, BrownianMotionDiffExampleConfig):
+        return BrownianMotionDiffTarget(cfg)
+    else:
+        raise NotImplementedError
+
+def get_proposal(example, std):
+    if isinstance(example, GaussianExampleConfig):
+        return GaussianProposal(std)
+    elif isinstance(example, BrownianMotionDiffExampleConfig):
+        return BrownianMotionDiffProposal(std)
+    else:
+        raise NotImplementedError

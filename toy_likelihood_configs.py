@@ -20,7 +20,7 @@ class LikelihoodConfig:
 
 @dataclass
 class GaussianTailsLikelihoodConfig(LikelihoodConfig):
-    max_deviation: float = 3.
+    alpha: float = 3.
     _target_: str = 'toy_likelihoods.GaussianTailsLikelihood'
 
 
