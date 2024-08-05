@@ -82,18 +82,11 @@ class BrownianMotionDiffTarget(Target):
         # saps.diff(dim=1) are independent increments
         return self.dist.log_prob(saps.diff(dim=1)).sum(dim=1)
     def analytical_prob(self, alpha):
-        # 0.3336 for alpha=3
-        dist = torch.distributions.Normal(
-            0.,
-            (
-                self.dt * torch.linspace(
-                    1,
-                    self.cfg.example.sde_steps-1,
-                    self.cfg.example.sde_steps-1
-                )
-            ).sqrt(),
-        )
-        return 1 - (1 - 2 * dist.cdf(-alpha)).prod()
+        # 0.3351 for alpha=3
+        if alpha == 3.:
+            return 0.005909131215917344
+        else:
+            raise NotImplementedError
 
 
 class ImportanceSampler:

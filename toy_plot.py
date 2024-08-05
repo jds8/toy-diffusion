@@ -109,9 +109,9 @@ def plot_rarities(trajs, savefig=False):
 
 def analytical_log_likelihood(x: torch.Tensor, sde: SDE, dt: torch.Tensor):
     '''
-    Computes log p(x_2,x_3,\dots, x_n) using consecutive conditionals.
+    Computes log p(x_2,x_3,dots, x_n) using consecutive conditionals.
     Note that this code makes no assumption about the distribution of x_1.
-    It only assumes that the process is Markovian with $x_t | x_{t-1} \sim Normal(x_{t-1}, dt.sqrt())$
+    It only assumes that the process is Markovian with $x_t | x_{t-1} sim Normal(x_{t-1}, dt.sqrt())$
     transitions
     '''
     llk = torch.zeros((x.shape[0],) + x.shape[2:], device=device)
@@ -147,10 +147,8 @@ def prob_above_3sigma(
     idx: int,
 ):
     """
-    This function computes p(X_i > gamma) for any step i
-    gamma > 0 is the threshold
+    This function computes p(X_i > 3sigma) for any step i
     """
-    assert gamma > 0
     if idx == length:
         return 0.
     # x_t = x_{t-1} + N(x_{t-1}, dt.sqrt())
@@ -251,6 +249,7 @@ if __name__ == "__main__":
     gamma = torch.tensor(3.0)
     print(analytical_log_likelihood(trajs.W, sde, trajs.dt))
     # print(prob_above_threshold(timesteps, trajs.dt, gamma, idx=1))
+    import pdb; pdb.set_trace()
     print('p(|x|>3\u03c3)={}'.format(2*prob_above_3sigma(timesteps, trajs.dt, idx=1)))
     plot_motions(trajs)
     plt.show()
