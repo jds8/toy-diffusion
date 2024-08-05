@@ -523,7 +523,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     data = sample_trajs.reshape(-1).numpy()
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
-    plt.title('Histogram of brownian motion states')
+    plt.title('Histogram of brownian motion state diffs')
     plt.savefig('figs/brownian_motion_diff_hist.pdf')
 
     # turn state diffs into Brownian motion

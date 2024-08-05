@@ -32,16 +32,11 @@ def suppresswarning():
 
 
 class ToyTrainer:
-    def __init__(self, cfg: TrainConfig):
+    def __init__(self, cfg: TrainConfig, diffusion_model):
         self.cfg = cfg
+        self.diffusion_model = diffusion_model
 
-        d_model = torch.tensor(1)
         self.sampler = hydra.utils.instantiate(cfg.sampler)
-        diffusion_model = hydra.utils.instantiate(
-            cfg.diffusion,
-            d_model=d_model,
-            device=device
-        )
 
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
@@ -362,13 +357,18 @@ def train(cfg):
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 
     d_model = torch.tensor(1)
-    diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device)
+    diffusion_model = hydra.utils.instantiate(
+        cfg.diffusion,
+        d_model=d_model,
+        dim_mults=(1, 2, 4),
+        device=device
+    )
     if isinstance(diffusion_model, TemporalUnet):
-        trainer = ConditionTrainer(cfg=cfg)
+        trainer = ConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     elif isinstance(diffusion_model, TemporalTransformerUnet):
-        trainer = TrajectoryConditionTrainer(cfg=cfg)
+        trainer = TrajectoryConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     else:
-        trainer = ConditionTrainer(cfg=cfg)
+        trainer = ConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
 
     trainer.train()
 
