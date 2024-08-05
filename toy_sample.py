@@ -444,6 +444,7 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
 def test_gaussian(end_time, cfg, sample_trajs, std):
     cond = std.cond if std.cond else torch.tensor([0.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
+    cond = std.likelihood.alpha if cond else 0.
     datapoints_left = torch.linspace(
         cfg.example.mu-6*cfg.example.sigma,
         cfg.example.mu-cond.item()*cfg.example.sigma,
@@ -454,12 +455,19 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
         cfg.example.mu+6*cfg.example.sigma,
         500
     )
-    datapoints = torch.hstack([datapoints_left, datapoints_right])
+    datapoints_center = torch.tensor([
+        cfg.example.mu-cond.item()*cfg.example.sigma + 1/500,
+        cfg.example.mu+cond.item()*cfg.example.sigma - 1/500,
+    ])
+    datapoints = torch.hstack([datapoints_left, datapoints_center, datapoints_right])
     datapoint_dist = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
     )
     tail = 2 * datapoint_dist.cdf(cfg.example.mu-cond*cfg.example.sigma)
-    datapoint_llk = datapoint_dist.log_prob(datapoints) - tail.log()
+    datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail.log()
+    datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
+    datapoint_center_llk = -torch.ones(2) * torch.inf
+    datapoint_llk = torch.hstack([datapoint_left_llk, datapoint_center_llk, datapoint_right_llk])
     analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
