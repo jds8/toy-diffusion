@@ -14,7 +14,7 @@ from models.toy_diffusion_models_config import \
     TemporalUnetConfig, TemporalNnetConfig, TemporalTransformerUnetConfig, TemporalIDKConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
     RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
-    BrownianMotionTailsLikelihoodConfig
+    BrownianMotionDiffTailsLikelihoodConfig
 from toy_train_config import GaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
     UniformExampleConfig
@@ -115,7 +115,7 @@ def register_configs() -> None:
     cs.store(
         group="likelihood",
         name="brownian_motion_tails_likelihood",
-        node=BrownianMotionTailsLikelihoodConfig,
+        node=BrownianMotionDiffTailsLikelihoodConfig,
     )
     cs.store(
         group='likelihood',

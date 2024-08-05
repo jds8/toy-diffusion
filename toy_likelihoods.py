@@ -41,7 +41,7 @@ class GaussianTailsLikelihood(Likelihood):
         return (x.abs() > self.alpha).to(torch.float)
 
 
-class BrownianMotionTailsLikelihood(Likelihood):
+class BrownianMotionDiffTailsLikelihood(Likelihood):
     def __init__(self, alpha: float):
         self.alpha = torch.tensor(alpha)
 
