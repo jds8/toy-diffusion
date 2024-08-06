@@ -223,6 +223,7 @@ class ContinuousEvaluator(ToyEvaluator):
                     x=x,
                     time=t,
                     cond=self.cond,
+                    # alpha=self.likelihood.alpha.reshape(-1, 1)
                 )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x,

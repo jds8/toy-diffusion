@@ -185,6 +185,15 @@ class TemporalUnetConfig(ModelConfig):
 
 
 @dataclass
+class TemporalUnetAlphaConfig(ModelConfig):
+    cond_dim: int = 1
+    _target_: str = 'models.toy_temporal.TemporalUnetAlpha'
+
+    def name(self):
+        return 'TemporalUnetAlpha'
+
+
+@dataclass
 class TemporalNnetConfig(ModelConfig):
     cond_dim: int = 1
     _target_: str = 'models.toy_temporal.TemporalNNet'
