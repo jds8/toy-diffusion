@@ -214,8 +214,17 @@ class ToyTrainer:
 class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0_in):
         x0_raw, x0 = x0_in
-        cond = self.likelihood.get_condition(x0_raw) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        # cond = self.likelihood.get_condition(x0_raw) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        if torch.rand(1) > self.cfg.p_uncond:
+            alphas = (torch.rand(self.cfg.batch_size) * 3).tile(self.cfg.example.sde_steps, 1).T
+            self.likelihood.alpha = alphas
+            cond = self.likelihood.get_condition(x0_raw.squeeze(-1))
+            alpha = alphas[:, 0]
+        else:
+            cond = torch.tensor(-1.)
+            alpha = torch.tensor(-1.)
         cond = cond.reshape(-1, 1)
+        alpha = alpha.reshape(-1, 1)
 
         extras = {}
         if isinstance(self.example, GaussianExampleConfig):
@@ -235,6 +244,7 @@ class ConditionTrainer(ToyTrainer):
             x=forward_sample_output.xt,
             time=forward_sample_output.t,
             cond=cond,
+            alpha=alpha,
         )
 
         loss = self.loss_fn(model_output, forward_sample_output)
@@ -310,6 +320,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
     def forward_transformer_process(self, x0, x_cond):
         cond_traj = x_cond if torch.rand(1) > self.cfg.p_uncond else None
         cond = self.traj_dist(x0, cond_traj).reshape(-1, 1) if cond_traj is not None else None
+
         xt, t, noise, to_predict = self.sampler.forward_sample(x_start=x0)
 
         model_output = self.diffusion_model(xt, t, cond_traj, cond)
@@ -360,7 +371,6 @@ def train(cfg):
     diffusion_model = hydra.utils.instantiate(
         cfg.diffusion,
         d_model=d_model,
-        # dim_mults=(1, 2, 4),
         device=device
     )
     if isinstance(diffusion_model, TemporalUnet):

@@ -47,12 +47,11 @@ class ToyEvaluator:
 
         d_model = torch.tensor(1)
         self.sampler = hydra.utils.instantiate(cfg.sampler)
-        self.diffusion_model = hydra.utils.instantiate(cfg.diffusion, d_model=d_model, device=device).to(device)
-
-
-        # TODO: Remove
-        # self.diffusion_model = DiffusionModel(nfeatures=1, nblocks=4).to(device)
-
+        self.diffusion_model = hydra.utils.instantiate(
+            cfg.diffusion,
+            d_model=d_model,
+            device=device
+        ).to(device)
 
         self.diffusion_model.eval()
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)

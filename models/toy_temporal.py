@@ -76,17 +76,27 @@ class ResidualTemporalBlock(nn.Module):
             Rearrange('batch t -> batch t 1'),
         )
 
+        self.alpha_mlp = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(embed_dim, out_channels),
+            Rearrange('batch t -> batch t 1'),
+        )
+
         self.residual_conv = nn.Conv1d(inp_channels, out_channels, 1) \
             if inp_channels != out_channels else nn.Identity()
 
-    def forward(self, x, t, cemb, bool_emb):
+    def forward(self, x, t, cemb, bool_emb, alpha_emb):
         '''
             x : [ batch_size x inp_channels x traj_length ]
             t : [ batch_size x embed_dim ]
             returns:
             out : [ batch_size x out_channels x traj_length ]
         '''
-        out = self.blocks[0](x) + self.time_mlp(t) + self.cond_mlp(cemb) + self.bool_mlp(bool_emb)
+        out = self.blocks[0](x)
+        out += self.time_mlp(t)
+        out += self.cond_mlp(cemb)
+        out += self.bool_mlp(bool_emb)
+        out += self.alpha_mlp(alpha_emb)
         out = self.blocks[1](out)
         return out + self.residual_conv(x)
 
@@ -195,6 +205,12 @@ class TemporalUnet(nn.Module):
             nn.Linear(dim, dim),
         )
 
+        self.alpha_mlp = nn.Sequential(
+            nn.Linear(1, dim),
+            nn.Mish(),
+            nn.Linear(dim, dim),
+        )
+
         self.bool_mlp = nn.Sequential(
             SinusoidalPosEmb(dim),
             nn.Linear(dim, dim),
@@ -241,7 +257,7 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, d_model, 1),
         )
 
-    def forward(self, x, time, cond=None):
+    def forward(self, x, time, cond=None, alpha=None):
         """
             x : [ batch x traj_length x input_channels ]
             Note that traj_length needs to be an even number
@@ -257,26 +273,30 @@ class TemporalUnet(nn.Module):
 
         use_cond = (cond > 0.).to(torch.float).reshape(cond.shape)
         bool_emb = self.bool_mlp(use_cond).reshape(cemb.shape)
+
+        alpha = alpha if alpha is not None else torch.ones(t.shape[0], 1, device=x.device) * -1
+        aemb = self.alpha_mlp(alpha).reshape(cond.shape[0], -1)
+
         h = []
 
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
-            x = resnet(x, t, cemb, bool_emb)
-            x = resnet2(x, t, cemb, bool_emb)
+            x = resnet(x, t, cemb, bool_emb, aemb)
+            x = resnet2(x, t, cemb, bool_emb, aemb)
             # x = resnet(x, t)
             # x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
 
-        x = self.mid_block1(x, t, cemb, bool_emb)
+        x = self.mid_block1(x, t, cemb, bool_emb, aemb)
         x = self.mid_attn(x)
-        x = self.mid_block2(x, t, cemb, bool_emb)
+        x = self.mid_block2(x, t, cemb, bool_emb, aemb)
 
         for idx, (resnet, resnet2, attn, upsample) in enumerate(self.ups):
             hpop = h.pop()
             x = torch.cat((x, hpop), dim=1)
-            x = resnet(x, t, cemb, bool_emb)
-            x = resnet2(x, t, cemb, bool_emb)
+            x = resnet(x, t, cemb, bool_emb, aemb)
+            x = resnet2(x, t, cemb, bool_emb, aemb)
             # x = resnet(x, t)
             # x = resnet2(x, t)
             x = attn(x)
