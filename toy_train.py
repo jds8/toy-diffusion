@@ -360,7 +360,7 @@ def train(cfg):
     diffusion_model = hydra.utils.instantiate(
         cfg.diffusion,
         d_model=d_model,
-        dim_mults=(1, 2, 4),
+        # dim_mults=(1, 2, 4),
         device=device
     )
     if isinstance(diffusion_model, TemporalUnet):
