@@ -405,8 +405,8 @@ class TemporalUnetAlpha(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_out, dim_out, embed_dim=time_dim),
                 # ResidualBlock(dim_in, dim_out, embed_dim=time_dim),
                 # ResidualBlock(dim_out, dim_out, embed_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
@@ -424,8 +424,8 @@ class TemporalUnetAlpha(nn.Module):
             self.ups.append(nn.ModuleList([
                 # ResidualBlock(dim_out * 2, dim_in, embed_dim=time_dim),
                 # ResidualBlock(dim_in, dim_in, embed_dim=time_dim),
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_in, dim_in, embed_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
