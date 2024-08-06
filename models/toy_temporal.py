@@ -297,7 +297,7 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, d_model, 1),
         )
 
-    def forward(self, x, time, cond=None):
+    def forward(self, x, time, cond=None, *args, **kwargs):
         """
             x : [ batch x traj_length x input_channels ]
             Note that traj_length needs to be an even number
