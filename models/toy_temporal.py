@@ -459,7 +459,6 @@ class TemporalUnetAlpha(nn.Module):
             alpha_in = torch.ones(t.shape[0], 1, device=x.device) * -1
         aemb = self.alpha_mlp(alpha_in).reshape(cond_in.shape[0], -1)
 
-        import pdb; pdb.set_trace()
         h = []
 
         for idx, (resnet, resnet2, attn, downsample) in enumerate(self.downs):
