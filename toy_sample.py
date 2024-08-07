@@ -223,7 +223,7 @@ class ContinuousEvaluator(ToyEvaluator):
                     x=x,
                     time=t,
                     cond=self.cond,
-                    # alpha=self.likelihood.alpha.reshape(-1, 1)
+                    alpha=self.likelihood.alpha.reshape(-1, 1)
                 )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x,
@@ -537,6 +537,16 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
     plt.savefig('figs/brownian_motion_diff_samples.pdf')
+
+    # plot cut off trajectories
+    exit_idx = (bm_trajs.abs() > std.likelihood.alpha).to(float).argmax(dim=1)
+    plt.clf()
+    times = torch.linspace(0., 1., bm_trajs.shape[1])
+    dtimes = (exit_idx * dt).sqrt()
+    states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
+    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
+    plt.scatter(dtimes.numpy(), states, marker='o', color='red')
+    plt.savefig('figs/exit_brownian_motion_diff_samples.pdf')
 
     # compute (discretized) "analytical" log likelihood
     analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
