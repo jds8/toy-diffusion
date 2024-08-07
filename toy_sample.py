@@ -547,7 +547,17 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.numpy(), states, marker='o', color='red')
     plt.savefig('figs/exit_brownian_motion_diff_samples.pdf')
+    exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
+    prop_exited = exited.mean() * 100
+    num_exited = exited.mean()
+    print('{}% of {} trajectories exited [-{}, {}]'.format(
+        prop_exited,
+        num_exited,
+        std.likelihood.alpha,
+        std.likelihood.alpha,
+    ))
 
+    import pdb; pdb.set_trace()
     # compute (discretized) "analytical" log likelihood
     analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
     print('analytical_llk: {}'.format(analytical_llk))

@@ -195,7 +195,7 @@ class TemporalIDK(nn.Module):
             nn.Conv1d(dim, 1, 1),
         )
 
-    def forward(self, x, time, cond=None):
+    def forward(self, x, time, cond=None, *args, **kwargs):
         cond = cond if cond is not None else torch.ones(
             time.shape[0],
             1,
