@@ -224,8 +224,8 @@ class ConditionTrainer(ToyTrainer):
         # else:
         #     cond = torch.tensor(-1.)
         #     alpha = torch.tensor(-1.)
-        # cond = cond.reshape(-1, 1)
         # alpha = alpha.reshape(-1, 1)
+        cond = cond.reshape(-1, 1)
 
         extras = {}
         if isinstance(self.example, GaussianExampleConfig):
