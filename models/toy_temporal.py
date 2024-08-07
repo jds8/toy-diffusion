@@ -414,9 +414,9 @@ class TemporalUnetAlpha(nn.Module):
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block1 = ResidualTemporalAlphaBlock(mid_dim, mid_dim, embed_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_block2 = ResidualTemporalAlphaBlock(mid_dim, mid_dim, embed_dim=time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
