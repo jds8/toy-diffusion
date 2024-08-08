@@ -14,7 +14,7 @@ class Proposal:
 class GaussianProposal(Proposal):
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
-        self.sample_trajs = (sample_traj_out.samples)[-1]
+        self.sample_trajs = sample_traj_out.samples[-1]
         self.trajs = self.sample_trajs * self.std.cfg.example.sigma + self.std.cfg.example.mu
         return self.trajs, self.sample_trajs
 
@@ -32,7 +32,7 @@ class BrownianMotionDiffProposal(Proposal):
 
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
-        self.sample_trajs = sample_traj_out.samples
+        self.sample_trajs = sample_traj_out.samples[-1]
         scaled_trajs = self.sample_trajs * self.dt.sqrt()
         self.trajs = torch.cat([
             torch.zeros(
