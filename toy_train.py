@@ -214,7 +214,10 @@ class ToyTrainer:
 class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0_in):
         x0_raw, x0 = x0_in
-        cond = self.likelihood.get_condition(x0_raw) if torch.rand(1) > self.cfg.p_uncond else torch.tensor(-1.)
+        if torch.rand(1) > self.cfg.p_uncond:
+            cond = self.likelihood.get_condition(x0_raw, x0)
+        else:
+            cond = torch.tensor(-1.)
         alpha = None
         # if torch.rand(1) > self.cfg.p_uncond:
         #     alphas = (torch.rand(self.cfg.batch_size) * 3).tile(self.cfg.example.sde_steps, 1).T
