@@ -2,6 +2,7 @@
 
 from typing import Callable
 import torch
+import numpy as np
 
 
 class Proposal:
@@ -88,10 +89,7 @@ class BrownianMotionDiffTarget(Target):
         return self.dist.log_prob(saps.diff(dim=1)).sum(dim=1)
     def analytical_prob(self, alpha):
         # 0.3351 for alpha=3
-        if alpha == 3.:
-            return 0.005909131215917344
-        else:
-            raise NotImplementedError
+        return 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
 
 
 class ImportanceSampler:
