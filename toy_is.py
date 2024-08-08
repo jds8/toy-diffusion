@@ -77,7 +77,6 @@ def importance_sample(cfg):
     logger.info(f'IS estimate with target: {target_estimate}')
     ##################################################
 
-    import pdb; pdb.set_trace()
     finish = time.time()
     logger.info(f'total time: {finish-start}')
 
