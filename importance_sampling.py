@@ -14,13 +14,12 @@ class Proposal:
 class GaussianProposal(Proposal):
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
-        sample_trajs = sample_traj_out.samples
-        self.trajs = sample_trajs[-1] * self.std.cfg.example.sigma + self.std.cfg.example.mu
-        return self.trajs
+        self.sample_trajs = (sample_traj_out.samples)[-1]
+        self.trajs = self.sample_trajs * self.std.cfg.example.sigma + self.std.cfg.example.mu
+        return self.trajs, self.sample_trajs
 
     def log_prob(self, samples):
-        sample_trajs = (samples - self.std.cfg.example.mu) / self.std.cfg.example.sigma
-        raw_ode_llk = self.std.ode_log_likelihood(sample_trajs)[0]
+        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
@@ -33,13 +32,19 @@ class BrownianMotionDiffProposal(Proposal):
 
     def sample(self):
         sample_traj_out = self.std.sample_trajectories()
-        sample_trajs = sample_traj_out.samples
-        self.trajs = sample_trajs[-1] * self.dt.sqrt()
-        return self.trajs
+        self.sample_trajs = sample_traj_out.samples
+        scaled_trajs = self.sample_trajs * self.dt.sqrt()
+        self.trajs = torch.cat([
+            torch.zeros(
+                scaled_trajs.shape[0], 1, 1,
+                device=scaled_trajs.device
+            ),
+            scaled_trajs.cumsum(dim=-2)
+        ], dim=1)
+        return self.trajs, self.sample_trajs
 
     def log_prob(self, samples):
-        sample_trajs = samples / self.dt.sqrt()
-        raw_ode_llk = self.std.ode_log_likelihood(sample_trajs)[0]
+        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
         scale_factor = self.dt.sqrt().log() * self.std.cfg.example.sde_steps
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk

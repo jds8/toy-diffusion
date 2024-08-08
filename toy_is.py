@@ -22,6 +22,7 @@ def suppresswarning():
 
 def importance_estimate(
         test_fn: Callable,
+        saps_raw: torch.Tensor,
         saps: torch.Tensor,
         log_probs: torch.Tensor,
         log_qrobs: torch.Tensor
@@ -29,7 +30,7 @@ def importance_estimate(
     log_ws = log_probs - log_qrobs
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
-    phis = test_fn(saps)
+    phis = test_fn(saps_raw, saps).squeeze()
     return ((phis * w_bars).mean().log() + max_log_w).exp()
 
 
@@ -57,10 +58,10 @@ def importance_sample(cfg):
     # IS estimate using target
     ##################################################
     proposal = get_proposal(cfg_obj.example, std)
-    saps = proposal.sample()
+    saps_raw, saps = proposal.sample()
     log_proposal = proposal.log_prob(saps).squeeze()
     log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
-    log_probs = target.log_prob(saps).squeeze()
+    log_probs = target.log_prob(saps_raw).squeeze()
 
     # z_score = lambda x: (x - cfg.example.mu) / cfg.example.sigma
     # test_fn = lambda x: (z_score(x).abs() < std.cond).to(torch.float)
@@ -68,6 +69,7 @@ def importance_sample(cfg):
 
     target_estimate = importance_estimate(
         test_fn=test_fn,
+        saps_raw=saps_raw,
         saps=saps,
         log_probs=log_probs,
         log_qrobs=log_qrobs
@@ -75,6 +77,7 @@ def importance_sample(cfg):
     logger.info(f'IS estimate with target: {target_estimate}')
     ##################################################
 
+    import pdb; pdb.set_trace()
     finish = time.time()
     logger.info(f'total time: {finish-start}')
 
@@ -86,6 +89,7 @@ def importance_sample(cfg):
     log_drobs = diffusion_target.log_prob(saps).squeeze()
     diffusion_estimate = importance_estimate(
         test_fn=test_fn,
+        saps_raw=saps_raw,
         saps=saps,
         log_probs=log_drobs,
         log_qrobs=log_qrobs
