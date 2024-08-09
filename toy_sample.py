@@ -557,7 +557,6 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         std.likelihood.alpha,
     ))
 
-    import pdb; pdb.set_trace()
     # compute (discretized) "analytical" log likelihood
     analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
     print('analytical_llk: {}'.format(analytical_llk))

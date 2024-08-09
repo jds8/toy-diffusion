@@ -75,6 +75,7 @@ class TrainConfig(BaseConfig):
     loss_fn: str = 'l2'
     p_uncond: float = 1.
     iterations_before_save: int = 10
+    upsample: bool = False
 
 
 def get_path(cfg: TrainConfig, model_name):

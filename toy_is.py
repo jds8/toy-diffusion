@@ -58,8 +58,13 @@ def importance_sample(cfg):
     # IS estimate using target
     ##################################################
     proposal = get_proposal(cfg_obj.example, std)
+    start_sample = time.time()
     saps_raw, saps = proposal.sample()
+    finish_sample = time.time()
     log_proposal = proposal.log_prob(saps).squeeze()
+    finish_evaluate = time.time()
+    logger.info(f'total sample time: {finish_sample-start_sample}')
+    logger.info(f'total time: {finish_evaluate-finish_sample}')
     log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
     log_probs = target.log_prob(saps_raw).squeeze()
 

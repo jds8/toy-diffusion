@@ -14,6 +14,8 @@ import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
+from dataclasses import dataclass
+
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
@@ -21,7 +23,8 @@ from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet, DiffusionModel
-from models.toy_sampler import ForwardSample, AbstractSampler, AbstractContinuousSampler
+from models.toy_sampler import ForwardSample, AbstractSampler, \
+    AbstractContinuousSampler, ForwardSample
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -29,6 +32,16 @@ SAVED_MODEL_DIR = 'diffusion_models'
 
 def suppresswarning():
     warnings.warn("user", UserWarning)
+
+
+@dataclass
+class ModelInput:
+    cond = None
+
+
+@dataclass
+class AlphaModelInput(ModelInput):
+    alpha = None
 
 
 class ToyTrainer:
@@ -210,60 +223,46 @@ class ToyTrainer:
             raise NotImplementedError
         return x0_raw, x0
 
+    def upsample(self, x0_in, cond, factor=3):
+        x0_raw, x0 = x0_in
+        num_rare = torch.maximum(cond.sum(), torch.tensor(1.))
+        nonrare_idx = cond.squeeze().logical_not().to(float).nonzero()
+        rare_idx = cond.squeeze().to(float).nonzero()
+        kept_nonrare_idx = nonrare_idx[:(num_rare * factor).to(int)]
+        kept_idx = torch.cat([rare_idx, kept_nonrare_idx]).squeeze()
+        kept_raw = x0_raw[kept_idx]
+        kept_x0 = x0[kept_idx]
+        kept_cond = cond[kept_idx]
+        return kept_raw, kept_x0, kept_cond
+
+    def get_cond_model_input(self, x0_in) -> ModelInput:
+        raise NotImplementedError
+
+    def get_uncond_model_input(self, x0_in) -> ModelInput:
+        raise NotImplementedError
+
 
 class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0_in):
-        x0_raw, x0 = x0_in
-        if torch.rand(1) > self.cfg.p_uncond:
-            cond = self.likelihood.get_condition(x0_raw, x0)
+        use_cond = torch.rand(1) > self.cfg.p_uncond
+        if use_cond:
+            model_in = self.get_cond_model_input(x0_in)
         else:
-            cond = torch.tensor(-1.)
-        alpha = None
-        # if torch.rand(1) > self.cfg.p_uncond:
-        #     alphas = (torch.rand(self.cfg.batch_size) * 3).tile(self.cfg.example.sde_steps, 1).T
-        #     self.likelihood.alpha = alphas
-        #     cond = self.likelihood.get_condition(x0_raw.squeeze(-1))
-        #     alpha = alphas[:, 0]
-        # else:
-        #     cond = torch.tensor(-1.)
-        #     alpha = torch.tensor(-1.)
-        # alpha = alpha.reshape(-1, 1)
-        cond = cond.reshape(-1, 1)
+            model_in = self.get_uncond_model_input(x0_in)
+
+        if self.cfg.upsample:
+            x0_raw, x0, cond = self.upsample(x0_in, model_in.cond)
 
         extras = {}
         if isinstance(self.example, GaussianExampleConfig):
             extras['mu'] = self.cfg.example.mu
             extras['sigma'] = self.cfg.example.sigma
 
-        # # TODO: Remove
-        # ts = torch.linspace(self.sampler.t_eps, 1, 1024)
-        # mean, lmc, sigma = self.sampler.marginal_prob(
-        #     torch.zeros_like(x0),
-        #     ts,
-        # )
-
         forward_sample_output = self.sampler.forward_sample(x_start=x0, extras=extras)
 
-        model_output = self.diffusion_model(
-            x=forward_sample_output.xt,
-            time=forward_sample_output.t,
-            cond=cond,
-            alpha=alpha,
-        )
+        model_output = self.get_model_output(forward_sample_output, model_in)
 
         loss = self.loss_fn(model_output, forward_sample_output)
-
-        # # TODO: The following computes the loss against the marginal score function
-        # true_score=self.analytical_gaussian_score(
-        #     forward_sample_output.t,
-        #     forward_sample_output.xt
-        # )
-        # sf_estimator = self.sampler.get_sf_estimator(
-        #     model_output,
-        #     forward_sample_output.xt,
-        #     forward_sample_output.t
-        # )
-        # loss = torch.nn.MSELoss()(sf_estimator, true_score)
 
         return loss
 
@@ -318,6 +317,52 @@ class ConditionTrainer(ToyTrainer):
                     print("train_loss: {}".format(loss.detach()))
             except Exception as e:
                 print(e)
+
+
+class ThresholdConditionTrainer(ConditionTrainer):
+    def get_cond_model_input(self, x0_in) -> ModelInput:
+        x0_raw, x0 = x0_in
+        cond = self.likelihood.get_condition(x0_raw, x0).reshape(-1, 1)
+        return ModelInput(cond)
+
+    def get_uncond_model_input(self, x0_in) -> ModelInput:
+        return ModelInput()
+
+    def get_model_output(
+            self,
+            forward_sample_output: ForwardSample,
+            model_in: ModelInput,
+    ) -> torch.Tensor:
+        return self.diffusion_model(
+            x=forward_sample_output.xt,
+            time=forward_sample_output.t,
+            cond=model_in.cond,
+        )
+
+
+class AlphaConditionTrainer(ConditionTrainer):
+    def get_cond_model_input(self, x0_in) -> AlphaModelInput:
+        x0_raw, _ = x0_in
+        alphas = (torch.rand(self.cfg.batch_size) * 5).tile(self.cfg.example.sde_steps, 1).T
+        self.likelihood.alpha = alphas
+        cond = self.likelihood.get_condition(x0_raw.squeeze(-1)).reshape(-1, 1)
+        alpha = alphas[:, 0].reshape(-1, 1)
+        return AlphaModelInput(cond, alpha)
+
+    def get_uncond_model_input(self, x0_in) -> AlphaModelInput:
+        return AlphaModelInput()
+
+    def get_model_output(
+            self,
+            forward_sample_output: ForwardSample,
+            alpha_model_input: AlphaModelInput,
+    ) -> torch.Tensor:
+        return self.diffusion_model(
+            x=forward_sample_output.xt,
+            time=forward_sample_output.t,
+            cond=alpha_model_in.cond,
+            alpha=alpha_model_in.alpha,
+        )
 
 
 class TrajectoryConditionTrainer(ToyTrainer):
