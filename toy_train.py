@@ -356,7 +356,7 @@ class AlphaConditionTrainer(ConditionTrainer):
     def get_model_output(
             self,
             forward_sample_output: ForwardSample,
-            alpha_model_input: AlphaModelInput,
+            alpha_model_in: AlphaModelInput,
     ) -> torch.Tensor:
         return self.diffusion_model(
             x=forward_sample_output.xt,
