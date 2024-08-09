@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import warnings
 import logging
 
@@ -524,7 +525,11 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
-    plt.savefig('figs/brownian_motion_diff_hist.pdf')
+    save_dir = 'figs/{}'.format(cfg.model_name)
+    plt.savefig('{}/cond={}_brownian_motion_diff_hist.pdf'.format(
+        save_dir,
+        std.cond
+    ))
 
     # turn state diffs into Brownian motion
     bm_trajs = torch.cat([
@@ -536,7 +541,11 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
-    plt.savefig('figs/brownian_motion_diff_samples.pdf')
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig('{}/cond={}_brownian_motion_diff_samples.pdf'.format(
+        save_dir,
+        std.cond
+    ))
 
     # plot cut off trajectories
     exit_idx = (bm_trajs.abs() > std.likelihood.alpha).to(float).argmax(dim=1)
@@ -546,7 +555,10 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.numpy(), states, marker='o', color='red')
-    plt.savefig('figs/exit_brownian_motion_diff_samples.pdf')
+    plt.savefig('{}/cond={}_exit_brownian_motion_diff_samples.pdf'.format(
+        save_dir,
+        std.cond
+    ))
     exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
     num_exited = exited.mean()
@@ -568,7 +580,14 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
 
     # compare log likelihoods by MSE
     mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
-    print('\nmse_llk: {}'.format(mse_llk))
+    sse_llk = ((analytical_llk - scaled_ode_llk) ** 2).std()
+    print('\nmse_llk: {}\nsse_llk: {}'.format(mse_llk, sse_llk))
+
+    llk_stats = torch.stack([mse_llk, sse_llk])
+    torch.save(llk_stats, '{}/cond={}_llk_stats.pt'.format(
+        save_dir,
+        std.cond
+    ))
     import pdb; pdb.set_trace()
 
 def test_uniform(end_time, cfg, sample_trajs, std):

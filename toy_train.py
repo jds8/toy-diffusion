@@ -22,7 +22,8 @@ from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     UniformExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
-from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, TemporalNNet, DiffusionModel
+from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
+    TemporalNNet, DiffusionModel, TemporalUnetAlpha
 from models.toy_sampler import ForwardSample, AbstractSampler, \
     AbstractContinuousSampler, ForwardSample
 
@@ -423,11 +424,13 @@ def train(cfg):
         device=device
     )
     if isinstance(diffusion_model, TemporalUnet):
-        trainer = ConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+    elif isinstance(diffusion_model, TemporalUnetAlpha):
+        trainer = AlphaConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     elif isinstance(diffusion_model, TemporalTransformerUnet):
         trainer = TrajectoryConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     else:
-        trainer = ConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
 
     trainer.train()
 

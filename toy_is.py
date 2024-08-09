@@ -31,7 +31,11 @@ def importance_estimate(
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
     phis = test_fn(saps_raw, saps).squeeze()
-    return ((phis * w_bars).mean().log() + max_log_w).exp()
+    expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
+    logN = torch.tensor(log_ws.shape[0]).log()
+    log_std = (torch.logsumexp(2 * (phis * w_bars - expectation).log(), dim=1) - logN)/2
+    std = log_std.exp()
+    return expectation, std
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
@@ -43,11 +47,17 @@ def importance_sample(cfg):
     std = ContinuousEvaluator(cfg=cfg)
     cfg_obj = OmegaConf.to_object(cfg)
 
+    save_dir = 'figs/{}'.format(cfg.model_name)
+
     ##################################################
     # true tail probability under target
     ##################################################
     target = get_target(cfg_obj)
     tail_prob = target.analytical_prob(torch.tensor(cfg_obj.likelihood.alpha))
+    torch.save(tail_prob, '{}/cond={}_tail_prob.pt'.format(
+        save_dir,
+        std.cond
+    ))
     logger.info(f'true tail probability: {tail_prob}')
     ##################################################
 
@@ -72,14 +82,22 @@ def importance_sample(cfg):
     # test_fn = lambda x: (z_score(x).abs() < std.cond).to(torch.float)
     test_fn = std.likelihood.get_condition
 
-    target_estimate = importance_estimate(
+    target_estimate, target_std = importance_estimate(
         test_fn=test_fn,
         saps_raw=saps_raw,
         saps=saps,
         log_probs=log_probs,
         log_qrobs=log_qrobs
     )
-    logger.info(f'IS estimate with target: {target_estimate}')
+    target_is_stats = torch.stack([target_estimate, target_std])
+    torch.save(target_is_stats, '{}/cond={}_target_is_stats.pt'.format(
+        save_dir,
+        std.cond
+    ))
+    logger.info('IS estimate with target: {} and std. dev.: {}'.format(
+        target_estimate,
+        target_std,
+    ))
     ##################################################
 
     finish = time.time()
@@ -91,14 +109,22 @@ def importance_sample(cfg):
     std.set_no_guidance()
     diffusion_target = get_proposal(cfg_obj.example, std)
     log_drobs = diffusion_target.log_prob(saps).squeeze()
-    diffusion_estimate = importance_estimate(
+    diffusion_estimate, diffusion_std = importance_estimate(
         test_fn=test_fn,
         saps_raw=saps_raw,
         saps=saps,
         log_probs=log_drobs,
         log_qrobs=log_qrobs
     )
-    logger.info(f'IS estimate with diffusion: {diffusion_estimate}')
+    diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
+    torch.save(diffusion_is_stats, '{}/cond={}_diffusion_is_stats.pt'.format(
+        save_dir,
+        std.cond
+    ))
+    logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
+        diffusion_estimate,
+        diffusion_std,
+    ))
     ##################################################
 
     finish = time.time()
