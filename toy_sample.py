@@ -439,11 +439,7 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
     elif plot_type == 'line':
         idx = full_state_pred.argsort()
         sorted_state = full_state_pred[idx]
-        try:
-            sorted_lik = full_state_lik[idx]
-        except:
-            import pdb; pdb.set_trace()
-            sorted_lik = full_state_lik[idx]
+        sorted_lik = full_state_lik[idx]
         plt.plot(sorted_state, sorted_lik, color='red')
     elif plot_type == '3d_scatter':
         if ax is None:
