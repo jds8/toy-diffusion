@@ -55,6 +55,14 @@ class UniformExampleConfig(ExampleConfig):
 
 
 @dataclass
+class StudentTExampleConfig(ExampleConfig):
+    nu: float = 3.
+
+    def name(self):
+        return 'StudentTExampleConfig'
+
+
+@dataclass
 class BaseConfig:
     sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
     diffusion: ModelConfig = field(default_factory=ModelConfig)
@@ -132,7 +140,7 @@ class IntegratorType(Enum):
 class SampleConfig(BaseConfig):
     num_samples: int = 100
     cond: Optional[float] = None
-    guidance: GuidanceType = GuidanceType.ClassifierFree
+    guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
 

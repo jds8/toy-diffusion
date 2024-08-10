@@ -6,6 +6,8 @@ import wandb
 import os
 import pathlib
 
+from typing_extensions import Tuple
+
 import hydra
 from omegaconf import OmegaConf
 from hydra.core.config_store import ConfigStore
@@ -19,7 +21,7 @@ from dataclasses import dataclass
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
-    UniformExampleConfig
+    UniformExampleConfig, StudentTExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
@@ -35,14 +37,24 @@ def suppresswarning():
     warnings.warn("user", UserWarning)
 
 
-@dataclass
 class ModelInput:
-    cond = None
+    def __init__(self, cond):
+        self.cond = cond
+
+    def update(self, kept_idx: torch.Tensor):
+        return ModelInput(self.cond[kept_idx])
 
 
-@dataclass
 class AlphaModelInput(ModelInput):
-    alpha = None
+    def __init__(self, cond, alpha):
+        super().__init__(cond)
+        self.alpha = alpha
+
+    def update(self, kept_idx: torch.Tensor):
+        return AlphaModelInput(
+            self.cond[kept_idx],
+            self.alpha[kept_idx]
+        )
 
 
 class ToyTrainer:
@@ -220,21 +232,29 @@ class ToyTrainer:
             logit_x0 = torch.logit(x0_raw)
             # Var[logit(X)] = pi^2/3 if X is uniform
             x0 = logit_x0 / (torch.pi / torch.tensor(3.).sqrt())
+        elif isinstance(self.example, StudentTExampleConfig):
+            x0_raw = dist.StudentT(self.cfg.example.nu).sample([
+                self.cfg.batch_size, 1, 1,
+            ]).to(device)
+            scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
+            x0 = x0_raw / scale
         else:
             raise NotImplementedError
         return x0_raw, x0
 
-    def upsample(self, x0_in, cond, factor=3):
-        x0_raw, x0 = x0_in
-        num_rare = torch.maximum(cond.sum(), torch.tensor(1.))
-        nonrare_idx = cond.squeeze().logical_not().to(float).nonzero()
-        rare_idx = cond.squeeze().to(float).nonzero()
+    def upsample(self, x0_in, model_in, factor=3) -> Tuple[
+            torch.Tensor,
+            ModelInput,
+]:
+        _, x0 = x0_in
+        num_rare = torch.maximum(model_in.cond.sum(), torch.tensor(1.))
+        nonrare_idx = model_in.cond.squeeze().logical_not().to(float).nonzero()
+        rare_idx = model_in.cond.squeeze().to(float).nonzero()
         kept_nonrare_idx = nonrare_idx[:(num_rare * factor).to(int)]
         kept_idx = torch.cat([rare_idx, kept_nonrare_idx]).squeeze()
-        kept_raw = x0_raw[kept_idx]
         kept_x0 = x0[kept_idx]
-        kept_cond = cond[kept_idx]
-        return kept_raw, kept_x0, kept_cond
+        kept_model_in = model_in.update(kept_idx)
+        return kept_x0, kept_model_in
 
     def get_cond_model_input(self, x0_in) -> ModelInput:
         raise NotImplementedError
@@ -251,8 +271,9 @@ class ConditionTrainer(ToyTrainer):
         else:
             model_in = self.get_uncond_model_input(x0_in)
 
+        _, x0 = x0_in
         if self.cfg.upsample:
-            x0_raw, x0, cond = self.upsample(x0_in, model_in.cond)
+            x0, model_in = self.upsample(x0_in, model_in)
 
         extras = {}
         if isinstance(self.example, GaussianExampleConfig):
@@ -327,7 +348,7 @@ class ThresholdConditionTrainer(ConditionTrainer):
         return ModelInput(cond)
 
     def get_uncond_model_input(self, x0_in) -> ModelInput:
-        return ModelInput()
+        return ModelInput(None)
 
     def get_model_output(
             self,
@@ -351,7 +372,7 @@ class AlphaConditionTrainer(ConditionTrainer):
         return AlphaModelInput(cond, alpha)
 
     def get_uncond_model_input(self, x0_in) -> AlphaModelInput:
-        return AlphaModelInput()
+        return AlphaModelInput(None, None)
 
     def get_model_output(
             self,

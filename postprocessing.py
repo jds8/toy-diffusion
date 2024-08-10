@@ -33,6 +33,28 @@ def plot_is_estimates(model_name):
     suffix = 'is_estimates'
     plot_data(model_name, suffix)
 
+def plot_is_estimates2(
+        alphas,
+        target_is,
+        diffusion_is,
+        trues,
+        model_name,
+        suffix
+):
+    save_dir = 'figs/{}'.format(model_name)
+    plt.plot(alphas, target_is, label='IS Estimate Against Target')
+    plt.plot(
+        alphas,
+        diffusion_is,
+        label='IS Estimate Against Unconditional Diffusion',
+        color='green'
+    )
+    plt.plot(alphas, trues, label='True Tail Probability', color='red')
+    plt.xlabel('Alpha')
+    plt.ylabel('Probability')
+    plt.legend()
+    plt.savefig('{}/{}.pdf'.format(save_dir, suffix))
+
 
 if __name__ == '__main__':
     model_name = 'VPSDEVelocitySampler_TemporalUnetAlpha_BrownianMotionDiffExampleConfig_puncond_0.1_v651_v1999'

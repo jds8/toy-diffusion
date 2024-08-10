@@ -167,6 +167,7 @@ class VelocitySamplerConfig(DiscreteSamplerConfig):
 class GuidanceType(Enum):
     Classifier = 'classifier'
     ClassifierFree = 'classifier_free'
+    NoGuidance = 'no_guidance'
 
 
 @dataclass
