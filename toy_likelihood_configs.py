@@ -19,6 +19,18 @@ class LikelihoodConfig:
 
 
 @dataclass
+class GaussianTailsLikelihoodConfig(LikelihoodConfig):
+    alpha: float = 3.
+    _target_: str = 'toy_likelihoods.GaussianTailsLikelihood'
+
+
+@dataclass
+class BrownianMotionDiffTailsLikelihoodConfig(LikelihoodConfig):
+    alpha: float = 3.
+    _target_: str = 'toy_likelihoods.BrownianMotionDiffTailsLikelihood'
+
+
+@dataclass
 class DistLikelihoodConfig(LikelihoodConfig):
     dist_fun_type: DistanceFunction = DistanceFunction.FinalState
     sigma: float = 0.3

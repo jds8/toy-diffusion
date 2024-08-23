@@ -27,7 +27,7 @@ class SamplerType(Enum):
 @dataclass
 class BaseSamplerConfig:
     diffusion_timesteps: int = 1000
-    guidance_coef: float = 1.
+    guidance_coef: float = 0.
 
     def name(self):
         return 'BaseSampler'
@@ -51,9 +51,9 @@ class ContinuousSamplerConfig(BaseSamplerConfig):
 
 @dataclass
 class VPSDESamplerConfig(ContinuousSamplerConfig):
+    beta_schedule: BetaSchedule = BetaSchedule.CosineSchedule
     beta0: float = 0.1
     beta1: float = 20.
-    t_eps: float = 1e-5
 
     def name(self):
         return 'VPSDESampler'
@@ -167,11 +167,11 @@ class VelocitySamplerConfig(DiscreteSamplerConfig):
 class GuidanceType(Enum):
     Classifier = 'classifier'
     ClassifierFree = 'classifier_free'
+    NoGuidance = 'no_guidance'
 
 
 @dataclass
 class ModelConfig:
-
     def name(self):
         return 'ModelConfig'
 
@@ -183,6 +183,15 @@ class TemporalUnetConfig(ModelConfig):
 
     def name(self):
         return 'TemporalUnet'
+
+
+@dataclass
+class TemporalUnetAlphaConfig(ModelConfig):
+    cond_dim: int = 1
+    _target_: str = 'models.toy_temporal.TemporalUnetAlpha'
+
+    def name(self):
+        return 'TemporalUnetAlpha'
 
 
 @dataclass
@@ -201,3 +210,11 @@ class TemporalTransformerUnetConfig(ModelConfig):
 
     def name(self):
         return 'TemporalTransformerUnet'
+
+
+@dataclass
+class TemporalIDKConfig(ModelConfig):
+    _target_: str = 'models.toy_temporal.TemporalIDK'
+
+    def name(self):
+        return 'TemporalIDK'

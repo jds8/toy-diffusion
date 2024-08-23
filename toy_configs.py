@@ -11,9 +11,14 @@ from models.toy_diffusion_models_config import \
     VPSDEGaussianScoreFunctionSamplerConfig, \
     EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
-    TemporalUnetConfig, TemporalNnetConfig, TemporalTransformerUnetConfig
-from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, RLAILikelihoodConfig, ClassifierLikelihoodConfig
-from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig
+    TemporalUnetConfig, TemporalUnetAlphaConfig, TemporalNnetConfig, \
+    TemporalTransformerUnetConfig, TemporalIDKConfig
+from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
+    RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
+    BrownianMotionDiffTailsLikelihoodConfig
+from toy_train_config import GaussianExampleConfig, \
+    BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
+    UniformExampleConfig, StudentTExampleConfig
 
 
 def register_configs() -> None:
@@ -85,6 +90,11 @@ def register_configs() -> None:
     )
     cs.store(
         group='diffusion',
+        name='temporal_unet_alpha',
+        node=TemporalUnetAlphaConfig,
+    )
+    cs.store(
+        group='diffusion',
         name='temporal_n_net',
         node=TemporalNnetConfig,
     )
@@ -94,9 +104,24 @@ def register_configs() -> None:
         node=TemporalTransformerUnetConfig,
     )
     cs.store(
+        group='diffusion',
+        name='temporal_idk',
+        node=TemporalIDKConfig,
+    )
+    cs.store(
         group="likelihood",
         name="base_likelihood",
         node=DistLikelihoodConfig,
+    )
+    cs.store(
+        group="likelihood",
+        name="gaussian_tails_likelihood",
+        node=GaussianTailsLikelihoodConfig,
+    )
+    cs.store(
+        group="likelihood",
+        name="brownian_motion_diff_tails_likelihood",
+        node=BrownianMotionDiffTailsLikelihoodConfig,
     )
     cs.store(
         group='likelihood',
@@ -122,4 +147,19 @@ def register_configs() -> None:
         group='example',
         name='brownian_motion_diff_example',
         node=BrownianMotionDiffExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='brownian_motion_example',
+        node=BrownianMotionExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='uniform_example',
+        node=UniformExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='student_t_example',
+        node=StudentTExampleConfig
     )
