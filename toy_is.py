@@ -128,7 +128,6 @@ def importance_sample(cfg):
 
     finish = time.time()
     logger.info(f'total time: {finish-start}')
-    import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
