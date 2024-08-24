@@ -46,7 +46,7 @@ class BrownianMotionDiffProposal(Proposal):
 
     def log_prob(self, samples):
         raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
-        scale_factor = self.dt.sqrt().log() * self.std.cfg.example.sde_steps
+        scale_factor = self.dt.sqrt().log() * (self.std.cfg.example.sde_steps-1)
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
 
@@ -75,6 +75,7 @@ class GaussianTarget(Target):
             self.cfg.example.mu - alpha * self.cfg.example.sigma
         )
 
+
 class BrownianMotionDiffTarget(Target):
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -88,7 +89,7 @@ class BrownianMotionDiffTarget(Target):
         # saps.diff(dim=1) are independent increments
         return self.dist.log_prob(saps.diff(dim=1)).sum(dim=1)
     def analytical_prob(self, alpha):
-        # 0.3351 for alpha=3
+        # 0.0059 for alpha=3
         return 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
 
 

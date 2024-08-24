@@ -32,6 +32,9 @@ class Likelihood:
     def grad_log_lik(self, y, x, wrt):
         raise NotImplementedError
 
+    def get_rarity(self, _, x0):
+        return x0.abs().max(dim=1).values
+
 
 class GaussianTailsLikelihood(Likelihood):
     def __init__(self, alpha: float):

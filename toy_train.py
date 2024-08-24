@@ -73,6 +73,7 @@ class ToyTrainer:
         self.end_time = torch.tensor(1., device=device)
 
         self.num_saves = 0
+        self.rarity = torch.tensor(0.)
 
         self.initialize_optimizer()
 
@@ -139,7 +140,12 @@ class ToyTrainer:
 
     def _save_model(self):
         self.num_saves += 1
-        saved_model_path = '{}_v{}'.format(get_model_path(self.cfg), self.num_saves)
+        rarity = '%.1f' % self.rarity
+        saved_model_path = '{}_rare{}_v{}'.format(
+            get_model_path(self.cfg),
+            rarity,
+            self.num_saves,
+        )
         try:
             pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
             torch.save(self.diffusion_model.module.state_dict(), saved_model_path)
@@ -271,6 +277,8 @@ class ConditionTrainer(ToyTrainer):
         else:
             model_in = self.get_uncond_model_input(x0_in)
 
+        self.rarity = torch.maximum(self.rarity, self.likelihood.get_rarity(*x0_in).max())
+
         _, x0 = x0_in
         if self.cfg.upsample:
             x0, model_in = self.upsample(x0_in, model_in)
@@ -364,10 +372,13 @@ class ThresholdConditionTrainer(ConditionTrainer):
 
 class AlphaConditionTrainer(ConditionTrainer):
     def get_cond_model_input(self, x0_in) -> AlphaModelInput:
-        x0_raw, _ = x0_in
-        alphas = (torch.rand(self.cfg.batch_size) * 5).tile(self.cfg.example.sde_steps, 1).T
+        x0_raw, x0 = x0_in
+        alphas = (torch.rand(self.cfg.batch_size) * 5).tile(x0_raw.shape[1], 1).T
         self.likelihood.alpha = alphas
-        cond = self.likelihood.get_condition(x0_raw.squeeze(-1)).reshape(-1, 1)
+        cond = self.likelihood.get_condition(
+            x0_raw.squeeze(-1),
+            x0.squeeze(-1),
+        ).reshape(-1, 1)
         alpha = alphas[:, 0].reshape(-1, 1)
         return AlphaModelInput(cond, alpha)
 

@@ -598,7 +598,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * cfg.example.sde_steps
+    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
