@@ -549,9 +549,10 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = 'figs/{}'.format(cfg.model_name)
-    plt.savefig('{}/cond={}_brownian_motion_diff_hist.pdf'.format(
+    alpha = '.1f' % std.likelihood.alpha.item()
+    plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
 
     # turn state diffs into Brownian motion
@@ -565,9 +566,9 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
     os.makedirs(save_dir, exist_ok=True)
-    plt.savefig('{}/cond={}_brownian_motion_diff_samples.pdf'.format(
+    plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
 
     # plot cut off trajectories
@@ -578,9 +579,9 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.numpy(), states, marker='o', color='red')
-    plt.savefig('{}/cond={}_exit_brownian_motion_diff_samples.pdf'.format(
+    plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
     exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
@@ -598,7 +599,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * cfg.example.sde_steps
+    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
@@ -607,7 +608,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}\nsse_llk: {}'.format(mse_llk, sse_llk))
 
     llk_stats = torch.stack([mse_llk, sse_llk])
-    torch.save(llk_stats, '{}/cond={}_llk_stats.pt'.format(
+    torch.save(llk_stats, '{}/alpha={}_llk_stats.pt'.format(
         save_dir,
         std.cond
     ))

@@ -33,7 +33,7 @@ def importance_estimate(
     phis = test_fn(saps_raw, saps).squeeze()
     expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
     logN = torch.tensor(log_ws.shape[0]).log()
-    log_std = (torch.logsumexp(2 * (phis * w_bars - expectation).log(), dim=1) - logN)/2
+    log_std = (torch.logsumexp((phis * w_bars - expectation) ** 2, dim=0) - logN)/2
     std = log_std.exp()
     return expectation, std
 
@@ -54,9 +54,10 @@ def importance_sample(cfg):
     ##################################################
     target = get_target(cfg_obj)
     tail_prob = target.analytical_prob(torch.tensor(cfg_obj.likelihood.alpha))
-    torch.save(tail_prob, '{}/cond={}_tail_prob.pt'.format(
+    alpha = '%.1f' % cfg_obj.likelihood.alpha
+    torch.save(tail_prob, '{}/alpha={}_tail_prob.pt'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
     logger.info(f'true tail probability: {tail_prob}')
     ##################################################
@@ -78,8 +79,6 @@ def importance_sample(cfg):
     log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
     log_probs = target.log_prob(saps_raw).squeeze()
 
-    # z_score = lambda x: (x - cfg.example.mu) / cfg.example.sigma
-    # test_fn = lambda x: (z_score(x).abs() < std.cond).to(torch.float)
     test_fn = std.likelihood.get_condition
 
     target_estimate, target_std = importance_estimate(
@@ -90,9 +89,9 @@ def importance_sample(cfg):
         log_qrobs=log_qrobs
     )
     target_is_stats = torch.stack([target_estimate, target_std])
-    torch.save(target_is_stats, '{}/cond={}_target_is_stats.pt'.format(
+    torch.save(target_is_stats, '{}/alpha={}_target_is_stats.pt'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
     logger.info('IS estimate with target: {} and std. dev.: {}'.format(
         target_estimate,
@@ -117,9 +116,9 @@ def importance_sample(cfg):
         log_qrobs=log_qrobs
     )
     diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
-    torch.save(diffusion_is_stats, '{}/cond={}_diffusion_is_stats.pt'.format(
+    torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats.pt'.format(
         save_dir,
-        std.cond
+        alpha,
     ))
     logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
         diffusion_estimate,
@@ -129,7 +128,6 @@ def importance_sample(cfg):
 
     finish = time.time()
     logger.info(f'total time: {finish-start}')
-    import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
