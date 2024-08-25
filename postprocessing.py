@@ -42,6 +42,9 @@ def plot_is_estimates2(
         suffix
 ):
     save_dir = 'figs/{}'.format(model_name)
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_yscale('log')
     plt.plot(alphas, target_is, label='IS Estimate Against Target')
     plt.plot(
         alphas,
