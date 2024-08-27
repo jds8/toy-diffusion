@@ -63,6 +63,15 @@ class StudentTExampleConfig(ExampleConfig):
 
 
 @dataclass
+class StudentTTrajectoryExampleConfig(ExampleConfig):
+    nu: float = 3.
+    sde_steps: int = 104
+
+    def name(self):
+        return 'StudentTTrajectoryExampleConfig'
+
+
+@dataclass
 class BaseConfig:
     sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
     diffusion: ModelConfig = field(default_factory=ModelConfig)
@@ -82,7 +91,7 @@ class TrainConfig(BaseConfig):
     max_gradient: float = 1.
     loss_fn: str = 'l2'
     p_uncond: float = 1.
-    iterations_before_save: int = 10
+    iterations_before_save: int = 1000
     upsample: bool = False
 
 
