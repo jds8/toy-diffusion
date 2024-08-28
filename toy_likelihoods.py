@@ -36,6 +36,7 @@ class Likelihood:
         raise NotImplementedError
 
     def get_rarity(self, _, x0):
+        x0 = x0 if x0 is not None else torch.zeros_like(x0)
         return x0.abs().max(dim=1).values
 
 

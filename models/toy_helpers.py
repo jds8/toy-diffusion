@@ -132,6 +132,65 @@ class LinearAttention(nn.Module):
         return self.to_out(out)
 
 
+class LinearCrossAttention(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0., permute=False):
+        super().__init__()
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+        inner_dim = dim_head * heads
+
+        self.to_q = nn.Linear(dim, inner_dim, bias=False)
+        self.to_k = nn.Linear(dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(dim, inner_dim, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+        self.permute = permute
+
+    def forward(self, x, context=None):
+        b, n, _ = x.shape
+        h = self.heads
+
+        if context is None:
+            context = x
+
+        if self.permute:
+            x = x.permute(0, 2, 1)
+            context = context.permute(0, 2, 1)
+
+        q = self.to_q(x)  # (batch, seq_len_query, dim)
+        k = self.to_k(context)  # (batch, seq_len_context, dim)
+        v = self.to_v(context)  # (batch, seq_len_context, dim)
+
+        # Reshape for multi-head attention
+        q = q.view(b, n, h, -1).permute(0, 2, 1, 3)  # (batch, heads, seq_len_query, dim_head)
+        k = k.view(b, n, h, -1).permute(0, 2, 1, 3)  # (batch, heads, seq_len_context, dim_head)
+        v = v.view(b, n, h, -1).permute(0, 2, 1, 3)  # (batch, heads, seq_len_context, dim_head)
+
+        # Apply kernel function (e.g., ReLU or Softmax) to approximate attention
+        q = F.elu(q) + 1  # Add 1 to avoid negative values (one possible kernelization approach)
+        k = F.elu(k) + 1
+
+        # Compute attention scores in a linear way
+        attn_scores = torch.einsum('bhid,bhjd->bhij', q, k)  # (batch, heads, seq_len_query, seq_len_context)
+
+        # Linear approximation by normalization
+        attn_weights = attn_scores / (attn_scores.sum(dim=-1, keepdim=True) + 1e-6)
+
+        # Compute output
+        out = torch.einsum('bhij,bhjd->bhid', attn_weights, v)  # (batch, heads, seq_len_query, dim_head)
+        out = out.permute(0, 2, 1, 3).contiguous().view(b, n, -1)  # (batch, seq_len_query, inner_dim)
+
+        out = self.to_out(out)
+
+        if self.permute:
+            out = out.permute(0, 2, 1)
+        return out
+
+
 def exists(val):
     return val is not None
 

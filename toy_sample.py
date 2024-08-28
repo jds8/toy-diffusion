@@ -642,17 +642,19 @@ def test_uniform(end_time, cfg, sample_trajs, std):
 
 def test_student_t(end_time, cfg, sample_trajs, std):
     cond = std.cond if std.cond else torch.tensor([0.])
-    sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2))
+    sigma = 2582.6870  # from dist.StudentT(1.5).sample([100000000]).var()
+    if std.cfg.example.nu:
+        sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2))
     traj = sample_trajs * sigma
     cond = std.likelihood.alpha if cond else torch.tensor([0.])
     datapoints_left = torch.linspace(
-        -6*sigma,
+        -0.5*sigma,
         -cond.item()*sigma,
         500
     )
     datapoints_right = torch.linspace(
         cond.item()*sigma,
-        6*sigma,
+        0.5*sigma,
         500
     )
     # datapoints_center = torch.tensor([

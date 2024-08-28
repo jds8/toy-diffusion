@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
-    UniformExampleConfig, StudentTExampleConfig
+    UniformExampleConfig, StudentTExampleConfig, StudentTTrajectoryExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
@@ -38,20 +38,31 @@ def suppresswarning():
 
 
 class ModelInput:
-    def __init__(self, cond):
+    def __init__(self, x0_in, cond):
+        self.x0_in = x0_in
         self.cond = cond
 
+    def get_kept_x(self, kept_idx: torch.Tensor):
+        x0_raw, x0 = self.x0_in
+        kept_raw = x0_raw[kept_idx]
+        kept_x0 = x0[kept_idx]
+        kept_x = kept_raw, kept_x0
+        return kept_x
+
     def update(self, kept_idx: torch.Tensor):
-        return ModelInput(self.cond[kept_idx])
+        kept_x = self.get_kept_x(kept_idx)
+        return ModelInput(kept_x, self.cond[kept_idx])
 
 
 class AlphaModelInput(ModelInput):
-    def __init__(self, cond, alpha):
-        super().__init__(cond)
+    def __init__(self, x0_in, cond, alpha):
+        super().__init__(x0_in, cond)
         self.alpha = alpha
 
     def update(self, kept_idx: torch.Tensor):
+        kept_x = self.get_kept_x(kept_idx)
         return AlphaModelInput(
+            kept_x,
             self.cond[kept_idx],
             self.alpha[kept_idx]
         )
@@ -195,6 +206,28 @@ class ToyTrainer:
                     self.log_artifact(saved_model_path, 'diffusion_model')
                     self.delete_model(saved_model_path)
 
+    def train_batch(self):
+        x0 = self.get_x0()
+        loss = self.forward_process(x0)
+        if torch.is_grad_enabled():
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.clip_gradients()
+            self.optimizer.step()
+            self.num_steps += 1
+            try:
+                if not self.cfg.no_wandb:
+                    wandb.log({"train_loss": loss.detach()})
+                    grads = []
+                    for param in self.diffusion_model.parameters():
+                        grads.append(param.grad.view(-1))
+                    grads = torch.cat(grads)
+                    grad_norm = grads.norm()
+                    wandb.log({"train_grad_norm": grad_norm})
+                else:
+                    print("train_loss: {}".format(loss.detach()))
+            except Exception as e:
+                print(e)
 
     def viz_trajs(self, traj, end_time, idx, clf=True):
         import matplotlib.pyplot as plt
@@ -207,9 +240,6 @@ class ToyTrainer:
 
         if clf:
             plt.clf()
-
-    def train_batch(self):
-        raise NotImplementedError
 
     def get_x0(self):
         if type(self.example) == BrownianMotionDiffExampleConfig:
@@ -242,8 +272,24 @@ class ToyTrainer:
             x0_raw = dist.StudentT(self.cfg.example.nu).sample([
                 self.cfg.batch_size, 1, 1,
             ]).to(device)
-            scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
+            scale = 2582.6870  # from dist.StudentT(1.5).sample([100000000]).var()
+            if self.cfg.example.nu > 2.:
+                scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
             x0 = x0_raw / scale
+        elif isinstance(self.example, StudentTTrajectoryExampleConfig):
+            unscaled_x0 = dist.StudentT(self.cfg.example.nu).sample([
+                self.cfg.batch_size,
+                self.cfg.example.sde_steps-1,
+                1,
+            ]).to(device)
+            scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
+            x0 = unscaled_x0 / scale
+            dt = self.end_time / (self.cfg.example.sde_steps-1)
+            scaled_x0 = x0 * dt.sqrt()  # standardize data
+            x0_raw = torch.cat([
+                torch.zeros(self.cfg.batch_size, 1, 1, device=device),
+                scaled_x0.cumsum(dim=1)
+            ], dim=1)
         else:
             raise NotImplementedError
         return x0_raw, x0
@@ -258,9 +304,8 @@ class ToyTrainer:
         rare_idx = model_in.cond.squeeze().to(float).nonzero()
         kept_nonrare_idx = nonrare_idx[:(num_rare * factor).to(int)]
         kept_idx = torch.cat([rare_idx, kept_nonrare_idx]).squeeze()
-        kept_x0 = x0[kept_idx]
         kept_model_in = model_in.update(kept_idx)
-        return kept_x0, kept_model_in
+        return kept_model_in
 
     def get_cond_model_input(self, x0_in) -> ModelInput:
         raise NotImplementedError
@@ -268,8 +313,6 @@ class ToyTrainer:
     def get_uncond_model_input(self, x0_in) -> ModelInput:
         raise NotImplementedError
 
-
-class ConditionTrainer(ToyTrainer):
     def forward_process(self, x0_in):
         use_cond = torch.rand(1) > self.cfg.p_uncond
         if use_cond:
@@ -279,16 +322,19 @@ class ConditionTrainer(ToyTrainer):
 
         self.rarity = torch.maximum(self.rarity, self.likelihood.get_rarity(*x0_in).max())
 
-        _, x0 = x0_in
         if self.cfg.upsample:
-            x0, model_in = self.upsample(x0_in, model_in)
+            model_in = self.upsample(x0_in, model_in)
 
         extras = {}
         if isinstance(self.example, GaussianExampleConfig):
             extras['mu'] = self.cfg.example.mu
             extras['sigma'] = self.cfg.example.sigma
 
-        forward_sample_output = self.sampler.forward_sample(x_start=x0, extras=extras)
+        _, x0 = model_in.x0_in
+        forward_sample_output = self.sampler.forward_sample(
+            x_start=x0,
+            extras=extras
+        )
 
         model_output = self.get_model_output(forward_sample_output, model_in)
 
@@ -296,6 +342,8 @@ class ConditionTrainer(ToyTrainer):
 
         return loss
 
+
+class ConditionTrainer(ToyTrainer):
     def analytical_gaussian_score(self, t, x):
         '''
         Compute the analytical marginal score of p_t for t in (0, 1)
@@ -325,38 +373,16 @@ class ConditionTrainer(ToyTrainer):
                 print('score error: {}'.format(error))
         return
 
-    def train_batch(self):
-        x0 = self.get_x0()
-        loss = self.forward_process(x0)
-        if torch.is_grad_enabled():
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.clip_gradients()
-            self.optimizer.step()
-            self.num_steps += 1
-            try:
-                if not self.cfg.no_wandb:
-                    wandb.log({"train_loss": loss.detach()})
-                    grads = []
-                    for param in self.diffusion_model.parameters():
-                        grads.append(param.grad.view(-1))
-                    grads = torch.cat(grads)
-                    grad_norm = grads.norm()
-                    wandb.log({"train_grad_norm": grad_norm})
-                else:
-                    print("train_loss: {}".format(loss.detach()))
-            except Exception as e:
-                print(e)
 
 
 class ThresholdConditionTrainer(ConditionTrainer):
     def get_cond_model_input(self, x0_in) -> ModelInput:
         x0_raw, x0 = x0_in
         cond = self.likelihood.get_condition(x0_raw, x0).reshape(-1, 1)
-        return ModelInput(cond)
+        return ModelInput(x0_in, cond)
 
     def get_uncond_model_input(self, x0_in) -> ModelInput:
-        return ModelInput(None)
+        return ModelInput(x0_in, None)
 
     def get_model_output(
             self,
@@ -380,10 +406,10 @@ class AlphaConditionTrainer(ConditionTrainer):
             x0.squeeze(-1),
         ).reshape(-1, 1)
         alpha = alphas[:, 0].reshape(-1, 1)
-        return AlphaModelInput(cond, alpha)
+        return AlphaModelInput(x0_in, cond, alpha)
 
     def get_uncond_model_input(self, x0_in) -> AlphaModelInput:
-        return AlphaModelInput(None, None)
+        return AlphaModelInput(x0_in, None, None)
 
     def get_model_output(
             self,
@@ -399,40 +425,33 @@ class AlphaConditionTrainer(ConditionTrainer):
 
 
 class TrajectoryConditionTrainer(ToyTrainer):
-    def forward_transformer_process(self, x0, x_cond):
-        cond_traj = x_cond if torch.rand(1) > self.cfg.p_uncond else None
-        cond = self.traj_dist(x0, cond_traj).reshape(-1, 1) if cond_traj is not None else None
+    def get_model_output(
+            self,
+            forward_sample_output: ForwardSample,
+            alpha_model_in: AlphaModelInput,
+    ) -> torch.Tensor:
+        return self.diffusion_model(
+            x=forward_sample_output.xt,
+            time=forward_sample_output.t,
+            cond=alpha_model_in.cond,
+            alpha=alpha_model_in.alpha,
+        )
 
-        xt, t, noise, to_predict = self.sampler.forward_sample(x_start=x0)
+    def get_cond_model_input(self, x0_in) -> AlphaModelInput:
+        x0_raw, x0 = x0_in
+        alpha = x0_raw.max(dim=1).values.squeeze()
+        sorted_alpha, sorted_idx = alpha.sort()
+        sorted_x0_raw = x0_raw[sorted_idx]
+        sorted_x0 = x0[sorted_idx]
+        cond_x = sorted_x0[:self.n_samples//2]
+        x_raw = sorted_x0_raw[self.n_samples//2:]
+        x = sorted_x0[self.n_samples//2:]
+        x_in = x_raw, x
+        cond_alpha = sorted_alpha[self.n_samples//2:].unsqueeze(1)
+        return AlphaModelInput(x_in, cond_x, cond_alpha)
 
-        model_output = self.diffusion_model(xt, t, cond_traj, cond)
-
-        loss = self.loss_fn(model_output, to_predict)
-
-        return loss
-
-    def train_batch(self):
-        xs = self.get_x0()
-        x0 = xs[:self.n_samples//2]
-        x_cond = xs[self.n_samples//2:]
-        loss = self.forward_transformer_process(x0, x_cond)
-        if torch.is_grad_enabled():
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.clip_gradients()
-            self.optimizer.step()
-            self.num_steps += 1
-            try:
-                if not self.cfg.no_wandb:
-                    wandb.log({"train_loss": loss.detach()})
-                    grads = []
-                    for param in self.diffusion_model.parameters():
-                        grads.append(param.grad.view(-1))
-                    grads = torch.cat(grads)
-                    grad_norm = grads.norm()
-                    wandb.log({"train_grad_norm": grad_norm})
-            except Exception as e:
-                print(e)
+    def get_uncond_model_input(self, x0_in) -> AlphaModelInput:
+        return AlphaModelInput(x0_in, None, None)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_train_config")
