@@ -549,7 +549,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = 'figs/{}'.format(cfg.model_name)
-    alpha = '.1f' % std.likelihood.alpha.item()
+    alpha = '%.1f' % std.likelihood.alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         save_dir,
         alpha,
@@ -642,19 +642,19 @@ def test_uniform(end_time, cfg, sample_trajs, std):
 
 def test_student_t(end_time, cfg, sample_trajs, std):
     cond = std.cond if std.cond else torch.tensor([0.])
-    sigma = 2582.6870  # from dist.StudentT(1.5).sample([100000000]).var()
-    if std.cfg.example.nu:
-        sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2))
+    sigma = tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
+    if std.cfg.example.nu > 2.:
+        sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2)).std()
     traj = sample_trajs * sigma
     cond = std.likelihood.alpha if cond else torch.tensor([0.])
     datapoints_left = torch.linspace(
-        -0.5*sigma,
+        -3.5*sigma,
         -cond.item()*sigma,
         500
     )
     datapoints_right = torch.linspace(
         cond.item()*sigma,
-        0.5*sigma,
+        3.5*sigma,
         500
     )
     # datapoints_center = torch.tensor([
@@ -684,7 +684,6 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt_llk(traj, ode_lk, plot_type='scatter')
     plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
-    import pdb; pdb.set_trace()
 
 def test(end_time, cfg, out_trajs, std):
     if type(std.example) == GaussianExampleConfig:

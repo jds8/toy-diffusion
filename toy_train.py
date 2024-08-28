@@ -272,9 +272,9 @@ class ToyTrainer:
             x0_raw = dist.StudentT(self.cfg.example.nu).sample([
                 self.cfg.batch_size, 1, 1,
             ]).to(device)
-            scale = 2582.6870  # from dist.StudentT(1.5).sample([100000000]).var()
+            scale = tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
             if self.cfg.example.nu > 2.:
-                scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
+                scale = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
             x0 = x0_raw / scale
         elif isinstance(self.example, StudentTTrajectoryExampleConfig):
             unscaled_x0 = dist.StudentT(self.cfg.example.nu).sample([
