@@ -272,7 +272,7 @@ class ToyTrainer:
             x0_raw = dist.StudentT(self.cfg.example.nu).sample([
                 self.cfg.batch_size, 1, 1,
             ]).to(device)
-            scale = tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
+            scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
             if self.cfg.example.nu > 2.:
                 scale = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
             x0 = x0_raw / scale
@@ -282,7 +282,7 @@ class ToyTrainer:
                 self.cfg.example.sde_steps-1,
                 1,
             ]).to(device)
-            scale = self.cfg.example.nu / (self.cfg.example.nu - 2)
+            scale = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
             x0 = unscaled_x0 / scale
             dt = self.end_time / (self.cfg.example.sde_steps-1)
             scaled_x0 = x0 * dt.sqrt()  # standardize data
