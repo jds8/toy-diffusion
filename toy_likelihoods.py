@@ -32,6 +32,9 @@ class Likelihood:
     def __init__(self, alpha: float):
         self.alpha = torch.tensor(alpha)
 
+    def set_alpha(self, alpha: torch.Tensor):
+        self.alpha = alpha
+
     def grad_log_lik(self, y, x, wrt):
         raise NotImplementedError
 

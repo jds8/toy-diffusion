@@ -400,7 +400,7 @@ class AlphaConditionTrainer(ConditionTrainer):
     def get_cond_model_input(self, x0_in) -> AlphaModelInput:
         x0_raw, x0 = x0_in
         alphas = (torch.rand(self.cfg.batch_size) * 5).tile(x0_raw.shape[1], 1).T
-        self.likelihood.alpha = alphas
+        self.likelihood.set_alpha(alphas)
         cond = self.likelihood.get_condition(
             x0_raw.squeeze(-1),
             x0.squeeze(-1),

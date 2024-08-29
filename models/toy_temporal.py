@@ -950,7 +950,7 @@ class TemporalTransformerUnet(nn.Module):
 
         if alpha is None:
             alpha = torch.ones(t.shape[0], 1, device=x.device) * -1
-        aemb = self.alpha_mlp(alpha).reshape(use_cond.shape[0], -1)
+        aemb = self.alpha_mlp(alpha)#.reshape(use_cond.shape[0], -1)
 
         h = []
         h_cond = []

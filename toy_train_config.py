@@ -84,7 +84,7 @@ class BaseConfig:
 @dataclass
 class TrainConfig(BaseConfig):
     batch_size: int = 1024
-    lr: float = 0.0001
+    lr: float = 0.001
     classifier_lr: float = 0.0001
     no_wandb: bool = 1
     delete_local_model: bool = False
@@ -152,6 +152,11 @@ class SampleConfig(BaseConfig):
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+
+
+@dataclass
+class SMCSampleConfig(SampleConfig):
+    time_steps: int = 5
 
 
 @dataclass
