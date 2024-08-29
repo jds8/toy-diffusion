@@ -71,7 +71,15 @@ class ToyEvaluator:
             self.diffusion_model.load_state_dict(torch.load('{}'.format(model_path)))
             print('successfully loaded diffusion model')
         except Exception as e:
-            print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
+            try:
+                self.diffusion_model.load_state_dict(
+                    torch.load(
+                        '{}'.format(model_path),
+                        map_location='cpu'
+                    )
+                )
+            except Exception as e:
+                print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
