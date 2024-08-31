@@ -93,6 +93,7 @@ class TrainConfig(BaseConfig):
     p_uncond: float = 1.
     iterations_before_save: int = 1000
     upsample: bool = False
+    use_fixed_dataset: bool = False
 
 
 def get_path(cfg: TrainConfig, model_name):

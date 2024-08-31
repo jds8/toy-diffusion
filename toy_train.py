@@ -15,6 +15,7 @@ import torch
 import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from dataclasses import dataclass
 
@@ -86,6 +87,7 @@ class ToyTrainer:
         self.num_saves = 0
         self.rarity = torch.tensor(0.)
 
+        self.dl_iter = None
         self.initialize_optimizer()
 
         if self.cfg.model_name:
@@ -104,6 +106,7 @@ class ToyTrainer:
     def initialize_optimizer(self):
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
         self.num_steps = 0
+        self.num_epochs = 0
 
     def clip_gradients(self):
         nn.utils.clip_grad_norm_(self.diffusion_model.module.parameters(), self.cfg.max_gradient)
@@ -207,7 +210,10 @@ class ToyTrainer:
                     self.delete_model(saved_model_path)
 
     def train_batch(self):
-        x0 = self.get_x0()
+        if self.cfg.use_fixed_dataset:
+            x0 = self.get_batch()
+        else:
+            x0 = self.get_x0()
         loss = self.forward_process(x0)
         if torch.is_grad_enabled():
             self.optimizer.zero_grad()
@@ -290,6 +296,28 @@ class ToyTrainer:
                 torch.zeros(self.cfg.batch_size, 1, 1, device=device),
                 scaled_x0.cumsum(dim=1)
             ], dim=1)
+        else:
+            raise NotImplementedError
+        return x0_raw, x0
+
+    def set_dl_iter(self):
+        dataset = torch.load('training_data.pt')
+        dl = DataLoader(dataset, batch_size=self.cfg.batch_size)
+        self.dl_iter = iter(dl)
+
+    def get_batch(self):
+        if self.dl_iter is None:
+            self.set_dl_iter()
+        try:
+            x0_raw = next(self.dl_iter)
+        except StopIteration:
+            self.num_epochs += 1
+            self.set_dl_iter()
+            x0_raw = next(self.dl_iter)
+        if type(self.example) == BrownianMotionDiffExampleConfig:
+            x0_raw = x0_raw.to(device)
+            dt = self.end_time / (self.cfg.example.sde_steps-1)
+            x0 = x0_raw.diff(dim=1) / dt.sqrt()
         else:
             raise NotImplementedError
         return x0_raw, x0
