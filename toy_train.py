@@ -107,6 +107,7 @@ class ToyTrainer:
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
         self.num_steps = 0
         self.num_epochs = 0
+        self.last_saved_epoch = 0
 
     def clip_gradients(self):
         nn.utils.clip_grad_norm_(self.diffusion_model.module.parameters(), self.cfg.max_gradient)
@@ -154,6 +155,7 @@ class ToyTrainer:
 
     def _save_model(self):
         self.num_saves += 1
+        self.last_saved_epoch = self.num_epochs
         rarity = '%.1f' % self.rarity
         saved_model_path = '{}_rare{}_v{}'.format(
             get_model_path(self.cfg),
@@ -170,7 +172,8 @@ class ToyTrainer:
 
     def should_save(self) -> bool:
         if self.cfg.use_fixed_dataset:
-            return self.num_epochs % self.cfg.epochs_before_save == 0
+            return self.num_epochs % self.cfg.epochs_before_save == 0 and \
+                   self.last_saved_epoch < self.num_epochs
         else:
             return self.num_steps % self.cfg.iterations_before_save == 0
 
