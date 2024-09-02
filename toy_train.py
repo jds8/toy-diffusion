@@ -168,10 +168,16 @@ class ToyTrainer:
             print('could not save model because {}'.format(e))
         return saved_model_path
 
+    def should_save(self) -> bool:
+        if self.cfg.use_fixed_dataset:
+            return self.num_epochs % self.cfg.epochs_before_save == 0
+        else:
+            return self.num_steps % self.cfg.iterations_before_save == 0
+
     def train(self):
         while True:
             self.train_batch()
-            if self.num_steps % self.cfg.iterations_before_save == 0:
+            if self.should_save():
                 saved_model_path = self._save_model()
                 if isinstance(self.example, GaussianExampleConfig):
                     # score_function_heat_map(
