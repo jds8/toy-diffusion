@@ -94,6 +94,7 @@ class TrainConfig(BaseConfig):
     iterations_before_save: int = 1000
     upsample: bool = False
     use_fixed_dataset: bool = False
+    epochs_before_save: int = 25
 
 
 def get_path(cfg: TrainConfig, model_name):
