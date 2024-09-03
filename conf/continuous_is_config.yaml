@@ -1,6 +1,6 @@
 defaults:
   - vpsde_is_config
-  - sampler: vpsde_epsilon_sampler
+  - sampler: vpsde_velocity_sampler
   - diffusion: base_temporal_unet
   - likelihood: base_likelihood
   - example: gaussian_example

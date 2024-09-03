@@ -8,6 +8,7 @@ from collections import namedtuple
 import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
+import scipy.stats as stats
 import numpy as np
 import torch
 import torch.distributions as dist
@@ -18,7 +19,8 @@ from torchdiffeq import odeint
 
 from toy_plot import SDE, analytical_log_likelihood, plot_ode_trajectories
 from toy_configs import register_configs
-from toy_train_config import SampleConfig, get_model_path, get_classifier_path, ExampleConfig, \
+from toy_train_config import SampleConfig, SMCSampleConfig, \
+    get_model_path, get_classifier_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
     UniformExampleConfig, StudentTExampleConfig, TestType, IntegratorType
 from models.toy_sampler import AbstractSampler, interpolate_schedule
@@ -70,7 +72,15 @@ class ToyEvaluator:
             self.diffusion_model.load_state_dict(torch.load('{}'.format(model_path)))
             print('successfully loaded diffusion model')
         except Exception as e:
-            print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
+            try:
+                self.diffusion_model.load_state_dict(
+                    torch.load(
+                        '{}'.format(model_path),
+                        map_location='cpu'
+                    )
+                )
+            except Exception as e:
+                print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
@@ -206,28 +216,37 @@ class DiscreteEvaluator(ToyEvaluator):
 
 
 class ContinuousEvaluator(ToyEvaluator):
-    def get_score_function(self, t, x, evaluate_likelihood):
+    def get_score_function(self, t, x, evaluate_likelihood, **kwargs):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
-            unconditional_output = self.diffusion_model(
-                x=x,
-                time=t,
-            )
+            # unconditional_output = self.diffusion_model(
+            #     x=x,
+            #     time=t,
+            # )
             # uncond_sf_est = self.sampler.get_sf_estimator(
             #     unconditional_output,
             #     xt=x,
             #     t=t
             # )
             if self.cfg.guidance == GuidanceType.ClassifierFree:
-                conditional_output = self.diffusion_model(
-                    x=x,
-                    time=t,
-                    cond=self.cond,
-                    alpha=self.likelihood.alpha.reshape(-1, 1)
-                )
+                unconditional_output = torch.zeros_like(x)
+                if self.cfg.sampler.guidance_coef != 0.:
+                    unconditional_output = self.diffusion_model(
+                        x=x,
+                        time=t,
+                    )
+                try:
+                    conditional_output = self.diffusion_model(
+                        x=x,
+                        time=t,
+                        cond=kwargs['cond'],
+                        alpha=kwargs['alpha'],
+                    )
+                except:
+                    import pdb; pdb.set_trace()
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x,
                     unconditional_output=unconditional_output,
@@ -249,12 +268,13 @@ class ContinuousEvaluator(ToyEvaluator):
     def set_no_guidance(self):
         self.cfg.guidance = GuidanceType.Classifier
 
-    def get_dx_dt(self, t, x, evaluate_likelihood):
+    def get_dx_dt(self, t, x, evaluate_likelihood, **kwargs):
         time = t.reshape(-1)
         sf_est = self.get_score_function(
             t=time,
             x=x,
-            evaluate_likelihood=evaluate_likelihood
+            evaluate_likelihood=evaluate_likelihood,
+            **kwargs,
         )
         dx_dt = self.sampler.probability_flow_ode(
             x,
@@ -320,7 +340,7 @@ class ContinuousEvaluator(ToyEvaluator):
         denom = var * (self.cfg.example.nu + (x - mean) ** 2 / var)
         return num / denom
 
-    def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000)):
+    def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000), **kwargs):
         x_min = self.get_x_min()
         x = x_min.clone()
 
@@ -332,14 +352,14 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps)
 
-    def sample_trajectories_probability_flow(self, cond=None, atol=1e-5, rtol=1e-5):
+    def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5, **kwargs):
         x_min = self.get_x_min()
 
         fevals = 0
         def ode_fn(t, x):
             nonlocal fevals
             fevals += 1
-            dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=False)
+            dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=False, **kwargs)
             return dx_dt
 
         times = torch.linspace(
@@ -351,18 +371,18 @@ class ContinuousEvaluator(ToyEvaluator):
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         return SampleOutput(samples=sol, fevals=fevals)
 
-    def sample_trajectories(self):
+    def sample_trajectories(self, **kwargs):
         print('sampling trajectories...')
         if self.cfg.integrator_type == IntegratorType.ProbabilityFlow:
-            sample_out = self.sample_trajectories_probability_flow()
+            sample_out = self.sample_trajectories_probability_flow(**kwargs)
         elif self.cfg.integrator_type == IntegratorType.EulerMaruyama:
-            sample_out = self.sample_trajectories_euler_maruyama()
+            sample_out = self.sample_trajectories_euler_maruyama(**kwargs)
         else:
             raise NotImplementedError
         return sample_out
 
     @torch.no_grad()
-    def ode_log_likelihood(self, x, cond=None, atol=1e-5, rtol=1e-5):
+    def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
         # hutchinson's trick
         # if self.cfg.guidance == GuidanceType.ClassifierFree:
@@ -376,7 +396,7 @@ class ContinuousEvaluator(ToyEvaluator):
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True)
+                dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True, **kwargs)
                 # if self.cfg.guidance == GuidanceType.ClassifierFree:
                 #     grad_uncond = torch.autograd.grad(
                 #         (dx_dt[0] * v[0]).sum(),
@@ -466,28 +486,33 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
     plt.savefig('figs/scatter.pdf')
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
-    cond = std.cond if std.cond else torch.tensor([0.])
+    cond = std.cond if std.cond else torch.tensor([-1.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
-    cond = std.likelihood.alpha if cond else torch.tensor([0.])
+    alpha = std.likelihood.alpha if cond == 1. else torch.tensor([0.])
     datapoints_left = torch.linspace(
         cfg.example.mu-6*cfg.example.sigma,
-        cfg.example.mu-cond.item()*cfg.example.sigma,
+        cfg.example.mu-alpha.item()*cfg.example.sigma,
         500
     )
     datapoints_right = torch.linspace(
-        cfg.example.mu+cond.item()*cfg.example.sigma,
+        cfg.example.mu+alpha.item()*cfg.example.sigma,
         cfg.example.mu+6*cfg.example.sigma,
         500
     )
     datapoints_center = torch.tensor([
-        cfg.example.mu-cond.item()*cfg.example.sigma + 1/500,
-        cfg.example.mu+cond.item()*cfg.example.sigma - 1/500,
+        cfg.example.mu-alpha.item()*cfg.example.sigma + 1/500,
+        cfg.example.mu+alpha.item()*cfg.example.sigma - 1/500,
     ])
+    if alpha > 0:
+        datapoints = torch.hstack([datapoints_left, datapoints_center, datapoints_right])
+    else:
+        datapoints = torch.hstack([datapoints_left, torch.tensor([-1/500]), datapoints_right])
     datapoints = torch.hstack([datapoints_left, datapoints_center, datapoints_right])
+    datapoints = datapoints.sort().values.unique()
     datapoint_dist = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
     )
-    tail = 2 * datapoint_dist.cdf(cfg.example.mu-cond*cfg.example.sigma)
+    tail = 2 * datapoint_dist.cdf(cfg.example.mu-alpha*cfg.example.sigma)
     datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail.log()
     datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
     datapoint_center_llk = -torch.ones(2) * torch.inf
@@ -495,7 +520,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs)
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
     ode_lk = ode_llk[0].exp() / cfg.example.sigma
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(
@@ -549,10 +574,11 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = 'figs/{}'.format(cfg.model_name)
-    alpha = '.1f' % std.likelihood.alpha.item()
+    alpha = std.likelihood.alpha
+    alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         save_dir,
-        alpha,
+        alpha_str,
     ))
 
     # turn state diffs into Brownian motion
@@ -568,11 +594,11 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
-        alpha,
+        alpha_str,
     ))
 
     # plot cut off trajectories
-    exit_idx = (bm_trajs.abs() > std.likelihood.alpha).to(float).argmax(dim=1)
+    exit_idx = (bm_trajs.abs() > alpha).to(float).argmax(dim=1)
     plt.clf()
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     dtimes = exit_idx * dt
@@ -581,7 +607,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.scatter(dtimes.numpy(), states, marker='o', color='red')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
-        alpha,
+        alpha_str,
     ))
     exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
@@ -598,7 +624,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
-    ode_llk = std.ode_log_likelihood(sample_trajs)
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
     scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
@@ -623,7 +649,7 @@ def test_uniform(end_time, cfg, sample_trajs, std):
     ).log_prob(traj)
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs)
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond)
     # derivative of sigmoid inverse is derivative of logit
     std_unif_traj = (traj - cfg.example.lower) / (cfg.example.upper - cfg.example.lower)
     logit_derivative = 1 / (std_unif_traj * (1 - std_unif_traj))
@@ -641,36 +667,42 @@ def test_uniform(end_time, cfg, sample_trajs, std):
     import pdb; pdb.set_trace()
 
 def test_student_t(end_time, cfg, sample_trajs, std):
-    cond = std.cond if std.cond else torch.tensor([0.])
-    sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2))
+    cond = std.cond if std.cond else torch.tensor([-1.])
+    sigma = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).std()
+    if std.cfg.example.nu > 2.:
+        sigma = torch.tensor(std.cfg.example.nu / (std.cfg.example.nu - 2)).sqrt()
     traj = sample_trajs * sigma
-    cond = std.likelihood.alpha if cond else torch.tensor([0.])
+    alpha = std.likelihood.alpha if cond == 1. else torch.tensor([0.])
     datapoints_left = torch.linspace(
-        -6*sigma,
-        -cond.item()*sigma,
+        -6.5*sigma,
+        -alpha.item()*sigma,
         500
     )
     datapoints_right = torch.linspace(
-        cond.item()*sigma,
-        6*sigma,
+        alpha.item()*sigma,
+        6.5*sigma,
         500
     )
-    # datapoints_center = torch.tensor([
-    #     -cond.item()*sigma + 1/500,
-    #     cond.item()*sigma - 1/500,
-    # ])
-    datapoints_center = torch.empty(0)
-    datapoints = torch.hstack([datapoints_left, datapoints_center, datapoints_right])
+    datapoints_center = torch.tensor([
+        -alpha.item()*sigma + 1/500,
+        alpha.item()*sigma - 1/500,
+    ])
+    if alpha > 0:
+        datapoints = torch.hstack([datapoints_left, datapoints_center, datapoints_right])
+    else:
+        datapoints = torch.hstack([datapoints_left, torch.tensor([-1/500]), datapoints_right])
+    datapoints = datapoints.sort().values.unique()
     datapoint_dist = torch.distributions.StudentT(std.cfg.example.nu)
-    tail = torch.tensor(1.)  # 2 * datapoint_dist.cdf(-cond*sigma)
-    datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail.log()
-    datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
-    datapoint_center_llk = -torch.ones(2) * torch.inf if tail.log() else torch.empty(0)
+    tail = 2 * stats.t.cdf(-alpha*sigma, std.cfg.example.nu)
+    tail_log = torch.tensor(np.log(tail))
+    datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail_log
+    datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail_log
+    datapoint_center_llk = -torch.ones(2) * torch.inf if tail_log else torch.empty(0)
     datapoint_llk = torch.hstack([datapoint_left_llk, datapoint_center_llk, datapoint_right_llk])
-    analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
+    analytical_llk = datapoint_dist.log_prob(traj) - tail_log
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs)
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
     ode_lk = ode_llk[0].exp() / sigma
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(
@@ -682,6 +714,69 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt_llk(traj, ode_lk, plot_type='scatter')
     plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
+    import pdb; pdb.set_trace()
+
+def test_transformer_bm(end_time, std):
+    all_bm_trajs = []
+    alphas = []
+    cond = None
+    alpha = None
+    for _ in range(std.cfg.time_steps):
+        alphas.append(alpha)
+        sample_trajs = std.sample_trajectories(
+            cond=cond,
+            alpha=alpha,
+        ).samples[-1]
+        import pdb; pdb.set_trace()
+
+        # # make histogram
+        # data = sample_trajs.reshape(-1).numpy()
+        # plt.clf()
+        # plt.hist(data, bins=30, edgecolor='black')
+        # plt.title('Histogram of brownian motion state diffs')
+        save_dir = 'figs/{}'.format(std.cfg.model_name)
+        # alpha = '%.1f' % std.likelihood.alpha.item()
+        # plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
+        #     save_dir,
+        #     alpha,
+        # ))
+
+        # de-standardize data for visualization purposes
+        dt = end_time / (std.cfg.example.sde_steps-1)
+        destandardized_trajs = sample_trajs * dt.sqrt()
+        # turn state diffs into Brownian motion
+        bm_trajs = torch.cat([
+            torch.zeros(sample_trajs.shape[0], 1, 1, device=sample_trajs.device),
+            destandardized_trajs.cumsum(dim=-2)
+        ], dim=1)
+        all_bm_trajs.append(bm_trajs)
+
+        # set new cond and alpha
+        cond = sample_trajs
+        alpha = bm_trajs.max(dim=1).values + 1.
+
+    import pdb; pdb.set_trace()
+    # create colors
+    cmap = plt.get_cmap('seismic')
+    num_colors = 10  # Number of colors in the gradient
+    colors = [cmap(i / (num_colors - 1)) for i in range(num_colors)]
+
+    times = torch.linspace(0., 1., bm_trajs.shape[1])
+    alphas[0] = torch.zeros(std.cfg.num_samples)
+    bm_trajs_tensor = torch.stack(all_bm_trajs)
+
+    for j, bm_trajs_vec in enumerate(bm_trajs_tensor.split(dim=1, split_size=1)):
+        trajs_vec = bm_trajs_vec.squeeze(1)
+        plt.clf()
+        for i, traj in enumerate(trajs_vec):
+            alpha = alphas[i][j]
+            plt.plot(times.numpy(), traj.numpy().T, label=f'alpha={alpha}', color=colors[i])
+        plt.legend()
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig('{}/brownian_motion_smc_samples_{}.pdf'.format(
+            save_dir,
+            j,
+        ))
     import pdb; pdb.set_trace()
 
 def test(end_time, cfg, out_trajs, std):
@@ -707,7 +802,7 @@ def viz_trajs(cfg, std, out_trajs, end_time):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_smc_sample_config")
 def sample(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
@@ -722,7 +817,14 @@ def sample(cfg):
 
     end_time = torch.tensor(1., device=device)
 
-    sample_traj_out = std.sample_trajectories()
+    if isinstance(std.diffusion_model, TemporalTransformerUnet):
+        test_transformer_bm(end_time, std)
+        exit()
+
+    sample_traj_out = std.sample_trajectories(
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+    )
 
     # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
     # plot_ode_trajectories(ode_trajs)
@@ -745,6 +847,7 @@ if __name__ == "__main__":
 
     cs = ConfigStore.instance()
     cs.store(name="vpsde_sample_config", node=SampleConfig)
+    cs.store(name="vpsde_smc_sample_config", node=SMCSampleConfig)
     register_configs()
 
     with torch.no_grad():

@@ -63,6 +63,15 @@ class StudentTExampleConfig(ExampleConfig):
 
 
 @dataclass
+class StudentTTrajectoryExampleConfig(ExampleConfig):
+    nu: float = 3.
+    sde_steps: int = 104
+
+    def name(self):
+        return 'StudentTTrajectoryExampleConfig'
+
+
+@dataclass
 class BaseConfig:
     sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
     diffusion: ModelConfig = field(default_factory=ModelConfig)
@@ -75,15 +84,17 @@ class BaseConfig:
 @dataclass
 class TrainConfig(BaseConfig):
     batch_size: int = 1024
-    lr: float = 0.0001
+    lr: float = 0.001
     classifier_lr: float = 0.0001
     no_wandb: bool = 1
     delete_local_model: bool = False
     max_gradient: float = 1.
     loss_fn: str = 'l2'
     p_uncond: float = 1.
-    iterations_before_save: int = 10
+    iterations_before_save: int = 1000
     upsample: bool = False
+    use_fixed_dataset: bool = False
+    epochs_before_save: int = 25
 
 
 def get_path(cfg: TrainConfig, model_name):
@@ -143,6 +154,11 @@ class SampleConfig(BaseConfig):
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+
+
+@dataclass
+class SMCSampleConfig(SampleConfig):
+    time_steps: int = 5
 
 
 @dataclass

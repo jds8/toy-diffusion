@@ -32,10 +32,14 @@ class Likelihood:
     def __init__(self, alpha: float):
         self.alpha = torch.tensor(alpha)
 
+    def set_alpha(self, alpha: torch.Tensor):
+        self.alpha = alpha
+
     def grad_log_lik(self, y, x, wrt):
         raise NotImplementedError
 
     def get_rarity(self, _, x0):
+        x0 = x0 if x0 is not None else torch.zeros_like(x0)
         return x0.abs().max(dim=1).values
 
 
