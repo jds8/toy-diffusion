@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
-    UniformExampleConfig, StudentTExampleConfig, StudentTTrajectoryExampleConfig
+    UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
@@ -291,7 +291,7 @@ class ToyTrainer:
             if self.cfg.example.nu > 2.:
                 scale = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
             x0 = x0_raw / scale
-        elif isinstance(self.example, StudentTTrajectoryExampleConfig):
+        elif isinstance(self.example, StudentTDiffExampleConfig):
             unscaled_x0 = dist.StudentT(self.cfg.example.nu).sample([
                 self.cfg.batch_size,
                 self.cfg.example.sde_steps-1,

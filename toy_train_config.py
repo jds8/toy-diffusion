@@ -63,12 +63,12 @@ class StudentTExampleConfig(ExampleConfig):
 
 
 @dataclass
-class StudentTTrajectoryExampleConfig(ExampleConfig):
-    nu: float = 3.
+class StudentTDiffExampleConfig(ExampleConfig):
+    nu: float = 2.1
     sde_steps: int = 104
 
     def name(self):
-        return 'StudentTTrajectoryExampleConfig'
+        return 'StudentTDiffExampleConfig'
 
 
 @dataclass
