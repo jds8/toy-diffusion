@@ -716,6 +716,89 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
     import pdb; pdb.set_trace()
 
+def test_student_t_diff(end_time, cfg, sample_trajs, std):
+    dt = end_time / (cfg.example.sde_steps-1)
+    # de-standardize data
+    trajs = sample_trajs * dt.sqrt()
+
+    # make histogram
+    data = sample_trajs.reshape(-1).numpy()
+    plt.clf()
+    plt.hist(data, bins=30, edgecolor='black')
+    plt.title('Histogram of Student T state diffs')
+    save_dir = 'figs/{}'.format(cfg.model_name)
+    alpha = std.likelihood.alpha
+    alpha_str = '%.1f' % alpha.item()
+    plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
+        save_dir,
+        alpha_str,
+    ))
+
+    # turn state diffs into Brownian motion
+    st_trajs = torch.cat([
+        torch.zeros(trajs.shape[0], 1, 1, device=trajs.device),
+        trajs.cumsum(dim=-2)
+    ], dim=1)
+
+    # plot trajectories
+    plt.clf()
+    times = torch.linspace(0., 1., st_trajs.shape[1])
+    plt.plot(times.numpy(), st_trajs[..., 0].numpy().T)
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
+        save_dir,
+        alpha_str,
+    ))
+
+    # plot cut off trajectories
+    exit_idx = (st_trajs.abs() > alpha).to(float).argmax(dim=1)
+    plt.clf()
+    times = torch.linspace(0., 1., st_trajs.shape[1])
+    dtimes = exit_idx * dt
+    states = st_trajs[torch.arange(st_trajs.shape[0]), exit_idx.squeeze()]
+    plt.plot(times.numpy(), st_trajs[..., 0].numpy().T, alpha=0.2)
+    plt.scatter(dtimes.numpy(), states, marker='o', color='red')
+    plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
+        save_dir,
+        alpha_str,
+    ))
+    exited = (st_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
+    prop_exited = exited.mean() * 100
+    num_exited = exited.mean()
+    print('{}% of {} trajectories exited [-{}, {}]'.format(
+        prop_exited,
+        num_exited,
+        std.likelihood.alpha,
+        std.likelihood.alpha,
+    ))
+
+    # compute (discretized) "analytical" log likelihood
+    scale = torch.tensor(cfg.example.nu / (cfg.example.nu - 2)).sqrt()
+    scaled_trajs = sample_trajs * scale
+    analytical_llk = (
+        dist.StudentT(cfg.example.nu).log_prob(scaled_trajs) \
+        + scale.log() \
+        - dt.sqrt().log()
+    ).sum(1).squeeze()
+    print('analytical_llk: {}'.format(analytical_llk))
+
+    # compute log likelihood under diffusion model
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
+    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    print('\node_llk: {}'.format(scaled_ode_llk))
+
+    # compare log likelihoods by MSE
+    mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
+    sse_llk = ((analytical_llk - scaled_ode_llk) ** 2).std()
+    print('\nmse_llk: {}\nsse_llk: {}'.format(mse_llk, sse_llk))
+
+    llk_stats = torch.stack([mse_llk, sse_llk])
+    torch.save(llk_stats, '{}/alpha={}_llk_stats.pt'.format(
+        save_dir,
+        std.cond
+    ))
+    import pdb; pdb.set_trace()
+
 def test_transformer_bm(end_time, std):
     all_bm_trajs = []
     alphas = []

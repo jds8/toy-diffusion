@@ -18,7 +18,7 @@ from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodCo
     BrownianMotionDiffTailsLikelihoodConfig
 from toy_train_config import GaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
-    UniformExampleConfig, StudentTExampleConfig
+    UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig
 
 
 def register_configs() -> None:
@@ -162,4 +162,9 @@ def register_configs() -> None:
         group='example',
         name='student_t_example',
         node=StudentTExampleConfig
+    )
+    cs.store(
+        group='example',
+        name='student_t_diff_example',
+        node=StudentTDiffExampleConfig
     )
