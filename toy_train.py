@@ -162,6 +162,8 @@ class ToyTrainer:
             rarity,
             self.num_saves,
         )
+        if self.last_saved_epoch:
+            saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
             pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
             torch.save(self.diffusion_model.module.state_dict(), saved_model_path)
@@ -320,9 +322,9 @@ class ToyTrainer:
         try:
             x0_raw = next(self.dl_iter)
         except StopIteration:
-            self.num_epochs += 1
             self.set_dl_iter()
             x0_raw = next(self.dl_iter)
+        self.num_epochs += 1
         if type(self.example) == BrownianMotionDiffExampleConfig:
             x0_raw = x0_raw.to(device)
             dt = self.end_time / (self.cfg.example.sde_steps-1)
