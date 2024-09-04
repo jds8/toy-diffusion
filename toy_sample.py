@@ -574,6 +574,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = 'figs/{}'.format(cfg.model_name)
+    os.makedirs(save_dir, exist_ok=True)
     alpha = std.likelihood.alpha
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -591,7 +592,6 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
-    os.makedirs(save_dir, exist_ok=True)
     plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
