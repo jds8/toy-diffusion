@@ -222,10 +222,6 @@ class ContinuousEvaluator(ToyEvaluator):
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
-            # unconditional_output = self.diffusion_model(
-            #     x=x,
-            #     time=t,
-            # )
             # uncond_sf_est = self.sampler.get_sf_estimator(
             #     unconditional_output,
             #     xt=x,
@@ -238,15 +234,12 @@ class ContinuousEvaluator(ToyEvaluator):
                         x=x,
                         time=t,
                     )
-                try:
-                    conditional_output = self.diffusion_model(
-                        x=x,
-                        time=t,
-                        cond=kwargs['cond'],
-                        alpha=kwargs['alpha'],
-                    )
-                except:
-                    import pdb; pdb.set_trace()
+                conditional_output = self.diffusion_model(
+                    x=x,
+                    time=t,
+                    cond=kwargs['cond'],
+                    alpha=kwargs['alpha'],
+                )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x,
                     unconditional_output=unconditional_output,
@@ -257,6 +250,10 @@ class ContinuousEvaluator(ToyEvaluator):
                 #     return torch.stack([uncond_sf_est, cond_sf_est], dim=0)
                 return cond_sf_est
             else:
+                unconditional_output = self.diffusion_model(
+                    x=x,
+                    time=t,
+                )
                 return self.sampler.get_sf_estimator(
                     unconditional_output,
                     xt=x,
@@ -266,7 +263,7 @@ class ContinuousEvaluator(ToyEvaluator):
             raise NotImplementedError
 
     def set_no_guidance(self):
-        self.cfg.guidance = GuidanceType.Classifier
+        self.cfg.guidance = GuidanceType.NoGuidance
 
     def get_dx_dt(self, t, x, evaluate_likelihood, **kwargs):
         time = t.reshape(-1)

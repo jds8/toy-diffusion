@@ -65,66 +65,69 @@ def importance_sample(cfg):
     finish = time.time()
     logger.info(f'total time: {finish-start}')
 
-    ##################################################
-    # IS estimate using target
-    ##################################################
-    proposal = get_proposal(cfg_obj.example, std)
-    start_sample = time.time()
-    saps_raw, saps = proposal.sample()
-    finish_sample = time.time()
-    log_proposal = proposal.log_prob(saps).squeeze()
-    finish_evaluate = time.time()
-    logger.info(f'total sample time: {finish_sample-start_sample}')
-    logger.info(f'total time: {finish_evaluate-finish_sample}')
-    log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
-    log_probs = target.log_prob(saps_raw).squeeze()
+    for i in range(cfg.num_rounds):
+        ##################################################
+        # IS estimate using target
+        ##################################################
+        proposal = get_proposal(cfg_obj.example, std)
+        start_sample = time.time()
+        saps_raw, saps = proposal.sample()
+        finish_sample = time.time()
+        log_proposal = proposal.log_prob(saps).squeeze()
+        finish_evaluate = time.time()
+        logger.info(f'total sample time: {finish_sample-start_sample}')
+        logger.info(f'total time: {finish_evaluate-finish_sample}')
+        log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
+        log_probs = target.log_prob(saps_raw).squeeze()
 
-    test_fn = std.likelihood.get_condition
+        test_fn = std.likelihood.get_condition
 
-    target_estimate, target_std = importance_estimate(
-        test_fn=test_fn,
-        saps_raw=saps_raw,
-        saps=saps,
-        log_probs=log_probs,
-        log_qrobs=log_qrobs
-    )
-    target_is_stats = torch.stack([target_estimate, target_std])
-    torch.save(target_is_stats, '{}/alpha={}_target_is_stats.pt'.format(
-        save_dir,
-        alpha,
-    ))
-    logger.info('IS estimate with target: {} and std. dev.: {}'.format(
-        target_estimate,
-        target_std,
-    ))
-    ##################################################
+        target_estimate, target_std = importance_estimate(
+            test_fn=test_fn,
+            saps_raw=saps_raw,
+            saps=saps,
+            log_probs=log_probs,
+            log_qrobs=log_qrobs
+        )
+        target_is_stats = torch.stack([target_estimate, target_std])
+        torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
+            save_dir,
+            alpha,
+            i
+        ))
+        logger.info('IS estimate with target: {} and std. dev.: {}'.format(
+            target_estimate,
+            target_std,
+        ))
+        ##################################################
 
-    finish = time.time()
-    logger.info(f'total time: {finish-start}')
+        finish = time.time()
+        logger.info(f'total time: {finish-start}')
 
-    ##################################################
-    # IS estimate using unconditional diffusion model
-    ##################################################
-    std.set_no_guidance()
-    diffusion_target = get_proposal(cfg_obj.example, std)
-    log_drobs = diffusion_target.log_prob(saps).squeeze()
-    diffusion_estimate, diffusion_std = importance_estimate(
-        test_fn=test_fn,
-        saps_raw=saps_raw,
-        saps=saps,
-        log_probs=log_drobs,
-        log_qrobs=log_qrobs
-    )
-    diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
-    torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats.pt'.format(
-        save_dir,
-        alpha,
-    ))
-    logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
-        diffusion_estimate,
-        diffusion_std,
-    ))
-    ##################################################
+        ##################################################
+        # IS estimate using unconditional diffusion model
+        ##################################################
+        std.set_no_guidance()
+        diffusion_target = get_proposal(cfg_obj.example, std)
+        log_drobs = diffusion_target.log_prob(saps).squeeze()
+        diffusion_estimate, diffusion_std = importance_estimate(
+            test_fn=test_fn,
+            saps_raw=saps_raw,
+            saps=saps,
+            log_probs=log_drobs,
+            log_qrobs=log_qrobs
+        )
+        diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
+        torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
+            save_dir,
+            alpha,
+            i
+        ))
+        logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
+            diffusion_estimate,
+            diffusion_std,
+        ))
+        ##################################################
 
     finish = time.time()
     logger.info(f'total time: {finish-start}')
