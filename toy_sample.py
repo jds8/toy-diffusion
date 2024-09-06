@@ -133,7 +133,7 @@ class ToyEvaluator:
             x_min = dist.Normal(0, 1, device).sample([
                 self.cfg.num_samples, 1, 1
             ])
-        return x_min
+        return x_min.to(device)
 
 
 class DiscreteEvaluator(ToyEvaluator):
@@ -222,51 +222,48 @@ class ContinuousEvaluator(ToyEvaluator):
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
-            # unconditional_output = self.diffusion_model(
-            #     x=x,
-            #     time=t,
-            # )
             # uncond_sf_est = self.sampler.get_sf_estimator(
             #     unconditional_output,
-            #     xt=x,
-            #     t=t
+            #     xt=x.to(device),
+            #     t=t.to(device)
             # )
             if self.cfg.guidance == GuidanceType.ClassifierFree:
                 unconditional_output = torch.zeros_like(x)
                 if self.cfg.sampler.guidance_coef != 0.:
                     unconditional_output = self.diffusion_model(
-                        x=x,
-                        time=t,
+                        x=x.to(device),
+                        time=t.to(device),
                     )
-                try:
-                    conditional_output = self.diffusion_model(
-                        x=x,
-                        time=t,
-                        cond=kwargs['cond'],
-                        alpha=kwargs['alpha'],
-                    )
-                except:
-                    import pdb; pdb.set_trace()
+                conditional_output = self.diffusion_model(
+                    x=x.to(device),
+                    time=t.to(device),
+                    cond=kwargs['cond'],
+                    alpha=kwargs['alpha'],
+                )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
-                    xt=x,
+                    xt=x.to(device),
                     unconditional_output=unconditional_output,
-                    t=t,
+                    t=t.to(device),
                     conditional_output=conditional_output,
                 )
                 # if evaluate_likelihood:
                 #     return torch.stack([uncond_sf_est, cond_sf_est], dim=0)
                 return cond_sf_est
             else:
+                unconditional_output = self.diffusion_model(
+                    x=x.to(device),
+                    time=t.to(device),
+                )
                 return self.sampler.get_sf_estimator(
                     unconditional_output,
-                    xt=x,
-                    t=t
+                    xt=x.to(device),
+                    t=t.to(device)
                 )
         else:
             raise NotImplementedError
 
     def set_no_guidance(self):
-        self.cfg.guidance = GuidanceType.Classifier
+        self.cfg.guidance = GuidanceType.NoGuidance
 
     def get_dx_dt(self, t, x, evaluate_likelihood, **kwargs):
         time = t.reshape(-1)

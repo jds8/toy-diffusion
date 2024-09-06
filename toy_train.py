@@ -322,9 +322,9 @@ class ToyTrainer:
         try:
             x0_raw = next(self.dl_iter)
         except StopIteration:
+            self.num_epochs += 1
             self.set_dl_iter()
             x0_raw = next(self.dl_iter)
-        self.num_epochs += 1
         if type(self.example) == BrownianMotionDiffExampleConfig:
             x0_raw = x0_raw.to(device)
             dt = self.end_time / (self.cfg.example.sde_steps-1)
