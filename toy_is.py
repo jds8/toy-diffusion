@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import warnings
+import os
 import logging
 from typing import Callable
 import time
@@ -48,6 +49,7 @@ def importance_sample(cfg):
     cfg_obj = OmegaConf.to_object(cfg)
 
     save_dir = 'figs/{}'.format(cfg.model_name)
+    os.makedirs(save_dir, exist_ok=True)
 
     ##################################################
     # true tail probability under target
@@ -66,6 +68,7 @@ def importance_sample(cfg):
     logger.info(f'total time: {finish-start}')
 
     for i in range(cfg.num_rounds):
+        print('round {}'.format(i))
         ##################################################
         # IS estimate using target
         ##################################################
