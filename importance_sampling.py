@@ -14,13 +14,20 @@ class Proposal:
 
 class GaussianProposal(Proposal):
     def sample(self):
-        sample_traj_out = self.std.sample_trajectories()
+        sample_traj_out = self.std.sample_trajectories(
+            cond=self.std.cond,
+            alpha=self.std.likelihood.alpha.reshape(-1, 1),
+        )
         self.sample_trajs = sample_traj_out.samples[-1]
         self.trajs = self.sample_trajs * self.std.cfg.example.sigma + self.std.cfg.example.mu
         return self.trajs, self.sample_trajs
 
     def log_prob(self, samples):
-        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
+        raw_ode_llk = self.std.ode_log_likelihood(
+            samples,
+            cond=self.std.cond,
+            alpha=self.std.likelihood.alpha.reshape(-1, 1)
+        )[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
@@ -32,7 +39,10 @@ class BrownianMotionDiffProposal(Proposal):
         self.dt = torch.tensor(1/(self.std.example.sde_steps-1))
 
     def sample(self):
-        sample_traj_out = self.std.sample_trajectories()
+        sample_traj_out = self.std.sample_trajectories(
+            cond=self.std.cond,
+            alpha=self.std.likelihood.alpha.reshape(-1, 1),
+        )
         self.sample_trajs = sample_traj_out.samples[-1]
         scaled_trajs = self.sample_trajs * self.dt.sqrt()
         self.trajs = torch.cat([
@@ -45,7 +55,11 @@ class BrownianMotionDiffProposal(Proposal):
         return self.trajs, self.sample_trajs
 
     def log_prob(self, samples):
-        raw_ode_llk = self.std.ode_log_likelihood(samples)[0]
+        raw_ode_llk = self.std.ode_log_likelihood(
+            samples,
+            cond=self.std.cond,
+            alpha=self.std.likelihood.alpha.reshape(-1, 1)
+        )[0]
         scale_factor = self.dt.sqrt().log() * (self.std.cfg.example.sde_steps-1)
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
