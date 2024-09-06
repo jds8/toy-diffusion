@@ -5,6 +5,9 @@ import torch
 import numpy as np
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class Proposal:
     def __init__(self, std):
         self.std = std
@@ -15,8 +18,8 @@ class Proposal:
 class GaussianProposal(Proposal):
     def sample(self):
         sample_traj_out = self.std.sample_trajectories(
-            cond=self.std.cond,
-            alpha=self.std.likelihood.alpha.reshape(-1, 1),
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
         )
         self.sample_trajs = sample_traj_out.samples[-1]
         self.trajs = self.sample_trajs * self.std.cfg.example.sigma + self.std.cfg.example.mu
@@ -25,8 +28,8 @@ class GaussianProposal(Proposal):
     def log_prob(self, samples):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
-            cond=self.std.cond,
-            alpha=self.std.likelihood.alpha.reshape(-1, 1)
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
         self.ode_llk = raw_ode_llk - scale_factor
@@ -40,8 +43,8 @@ class BrownianMotionDiffProposal(Proposal):
 
     def sample(self):
         sample_traj_out = self.std.sample_trajectories(
-            cond=self.std.cond,
-            alpha=self.std.likelihood.alpha.reshape(-1, 1),
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )
         self.sample_trajs = sample_traj_out.samples[-1]
         scaled_trajs = self.sample_trajs * self.dt.sqrt()
@@ -57,8 +60,8 @@ class BrownianMotionDiffProposal(Proposal):
     def log_prob(self, samples):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
-            cond=self.std.cond,
-            alpha=self.std.likelihood.alpha.reshape(-1, 1)
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )[0]
         scale_factor = self.dt.sqrt().log() * (self.std.cfg.example.sde_steps-1)
         self.ode_llk = raw_ode_llk - scale_factor

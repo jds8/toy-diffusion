@@ -133,7 +133,7 @@ class ToyEvaluator:
             x_min = dist.Normal(0, 1, device).sample([
                 self.cfg.num_samples, 1, 1
             ])
-        return x_min
+        return x_min.to(device)
 
 
 class DiscreteEvaluator(ToyEvaluator):
@@ -224,26 +224,26 @@ class ContinuousEvaluator(ToyEvaluator):
         elif self.cfg.test == TestType.Test:
             # uncond_sf_est = self.sampler.get_sf_estimator(
             #     unconditional_output,
-            #     xt=x,
-            #     t=t
+            #     xt=x.to(device),
+            #     t=t.to(device)
             # )
             if self.cfg.guidance == GuidanceType.ClassifierFree:
                 unconditional_output = torch.zeros_like(x)
                 if self.cfg.sampler.guidance_coef != 0.:
                     unconditional_output = self.diffusion_model(
-                        x=x,
-                        time=t,
+                        x=x.to(device),
+                        time=t.to(device),
                     )
                 conditional_output = self.diffusion_model(
-                    x=x,
-                    time=t,
+                    x=x.to(device),
+                    time=t.to(device),
                     cond=kwargs['cond'],
                     alpha=kwargs['alpha'],
                 )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
-                    xt=x,
+                    xt=x.to(device),
                     unconditional_output=unconditional_output,
-                    t=t,
+                    t=t.to(device),
                     conditional_output=conditional_output,
                 )
                 # if evaluate_likelihood:
@@ -251,13 +251,13 @@ class ContinuousEvaluator(ToyEvaluator):
                 return cond_sf_est
             else:
                 unconditional_output = self.diffusion_model(
-                    x=x,
-                    time=t,
+                    x=x.to(device),
+                    time=t.to(device),
                 )
                 return self.sampler.get_sf_estimator(
                     unconditional_output,
-                    xt=x,
-                    t=t
+                    xt=x.to(device),
+                    t=t.to(device)
                 )
         else:
             raise NotImplementedError
