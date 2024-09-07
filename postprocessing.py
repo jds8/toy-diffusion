@@ -7,6 +7,21 @@ import matplotlib.pyplot as plt
 import torch
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def target_is_performance(alpha):
+    return f'alpha={alpha}_target_is_performance.pt'
+
+def diffusion_is_performance(alpha):
+    return f'alpha={alpha}_diffusion_is_performance.pt'
+
+def true_tail_prob(alpha):
+    return f'alpha={alpha}_tail_prob.pt'
+
+def effort_v_performance_plot_name(alpha):
+    return f'alpha={alpha}_effort_v_performance'
+
 def plot_data(model_name, suffix):
     torch_suffix = '{}.pt'.format(suffix)
     pattern = re.compile(r'\[(\d+(\.\d*)?)\]')
@@ -16,7 +31,7 @@ def plot_data(model_name, suffix):
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         if filename.endswith(torch_suffix):
-            data = torch.load(file_path)
+            data = torch.load(file_path, map_location=device)
             mse_data = torch.stack([mse_data, data]) if mse_data else data
             alpha = pattern.search(filename).group(1)
             alphas.append(alpha)
@@ -72,32 +87,148 @@ def plot_is_vs_alpha(model_name):
     true_alphas = []
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
-        if filename.endswith(target_suffix):
-            data = torch.load(file_path)
+        if target_suffix in filename:
+            data = torch.load(file_path, map_location=device)
             target_is.append(data[0])
             alpha = pattern.search(filename).group(1)
             target_alphas.append(float(alpha))
-        elif filename.endswith(diffusion_suffix):
-            data = torch.load(file_path)
+        elif diffusion_suffix in filename:
+            data = torch.load(file_path, map_location=device)
             diffusion_is.append(data[0])
             alpha = pattern.search(filename).group(1)
             diffusion_alphas.append(float(alpha))
-        elif filename.endswith(true_suffix):
-            data = torch.load(file_path)
+        elif true_suffix in filename:
+            data = torch.load(file_path, map_location=device)
             trues.append(data)
             alpha = pattern.search(filename).group(1)
             true_alphas.append(float(alpha))
-    sorted_target_alphas, idx = torch.sort(torch.tensor(target_alphas))
+    _, idx = torch.sort(torch.tensor(target_alphas))
     target_is = torch.tensor(target_is)[idx]
-    sorted_diffusion_alphas, idx = torch.sort(torch.tensor(diffusion_alphas))
+    _, idx = torch.sort(torch.tensor(diffusion_alphas))
     diffusion_is = torch.tensor(diffusion_is)[idx]
     sorted_true_alphas, idx = torch.sort(torch.tensor(true_alphas))
     trues = torch.tensor(trues)[idx]
     plot_is_estimates2(sorted_true_alphas, target_is, diffusion_is, trues, model_name, 'is_vs_alpha')
 
+def process_performance_data(model_name):
+    target_suffix = 'target_is_stats'
+    diffusion_suffix = 'diffusion_is_stats'
+    true_suffix = 'tail_prob.pt'
+    pattern = re.compile(r'(\d+(\.\d*)?)')
+    directory = 'figs/{}'.format(model_name)
+    target_alphas = []
+    diffusion_alphas = []
+    target_alpha_map = {}
+    diffusion_alpha_map = {}
+    true_alpha_map = {}
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+        if target_suffix in filename:
+            data = torch.load(file_path, map_location=device)
+            alpha = float(pattern.search(filename).group(1))
+            target_alphas.append(alpha)
+            if alpha in target_alpha_map:
+                target_alpha_map[alpha].append(data[0])
+            else:
+                target_alpha_map[alpha] = [data[0]]
+        elif diffusion_suffix in filename:
+            data = torch.load(file_path, map_location=device)
+            alpha = float(pattern.search(filename).group(1))
+            diffusion_alphas.append(alpha)
+            if alpha in diffusion_alpha_map:
+                diffusion_alpha_map[alpha].append(data[0])
+            else:
+                diffusion_alpha_map[alpha] = [data[0]]
+        elif true_suffix in filename:
+            data = torch.load(file_path, map_location=device)
+            alpha = float(pattern.search(filename).group(1))
+            true_alpha_map[alpha] = data
+    for alpha in true_alpha_map.keys():
+        target = torch.stack(target_alpha_map[alpha])
+        target_performance_data = torch.stack([target.mean(), target.std()])
+        diffusion = torch.stack(diffusion_alpha_map[alpha])
+        diffusion_performance_data = torch.stack([diffusion.mean(), diffusion.std()])
+        target_path = '{}/{}'.format(
+            directory,
+            target_is_performance(
+                alpha
+            )
+        )
+        diffusion_path = '{}/{}'.format(
+            directory,
+            diffusion_is_performance(alpha)
+        )
+        torch.save(target_performance_data, target_path)
+        torch.save(diffusion_performance_data, diffusion_path)
+
+def plot_effort_v_performance(model_names, model_idxs, alphas):
+    for alpha in alphas:
+        target_means = []
+        target_upr = []
+        target_lwr = []
+        diffusion_means = []
+        diffusion_upr = []
+        diffusion_lwr = []
+        for model_name in model_names:
+            directory = 'figs/{}'.format(model_name)
+            target_file = '{}/{}'.format(
+                directory,
+                target_is_performance(alpha)
+            )
+            mean_std = torch.load(target_file)
+            target_mean_minus_std = torch.maximum(
+                torch.tensor(0.),
+                mean_std[0] - mean_std[1]
+            )
+            target_mean_plus_std = mean_std[0] + mean_std[1]
+            target_means.append(mean_std[0])
+            target_lwr.append(target_mean_minus_std)
+            target_upr.append(target_mean_plus_std)
+
+            diffusion_file = '{}/{}'.format(
+                directory,
+                diffusion_is_performance(alpha)
+            )
+            mean_std = torch.load(diffusion_file)
+            diffusion_mean_minus_std = torch.maximum(
+                torch.tensor(0.),
+                mean_std[0] - mean_std[1]
+            )
+            diffusion_mean_plus_std = mean_std[0] + mean_std[1]
+            diffusion_means.append(mean_std[0])
+            diffusion_lwr.append(diffusion_mean_minus_std)
+            diffusion_upr.append(diffusion_mean_plus_std)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_yscale('log')
+        plt.plot(model_idxs, target_means, color='darkblue')
+        plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
+        plt.plot(model_idxs, diffusion_means, color='darkgreen')
+        plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
+        true_file = '{}/{}'.format(
+            directory,
+            true_tail_prob(alpha)
+        )
+        true = [torch.load(true_file) for _ in model_idxs]
+        plt.plot(model_idxs, true, color='red')
+        fig_file = '{}/{}.pdf'.format('figs', effort_v_performance_plot_name(alpha))
+        plt.savefig(fig_file)
+        plt.clf()
+
 
 if __name__ == '__main__':
-    model_name = 'VPSDEVelocitySampler_TemporalUnetAlpha_BrownianMotionDiffExampleConfig_puncond_0.1_v651_v1999'
-    # plot_mse_llk(model_name)
-    # plot_is_estimates(model_name)
-    plot_is_vs_alpha(model_name)
+    model_idxs = [30, 34, 38, 42, 46]
+    model_names = [
+        'VPSDEVelocitySampler_TemporalUnetAlpha_' \
+        'BrownianMotionDiffExampleConfig_puncond' \
+        '_0.1_rare5.7_v{}_epoch{}00'.format(idx, idx)
+        for idx in model_idxs
+    ]
+    alphas = [3., 4., 5., 6.]
+    # for model_name in model_names:
+    #     # plot_mse_llk(model_name)
+    #     # plot_is_estimates(model_name)
+    #     # plot_is_vs_alpha(model_name)
+    #     process_performance_data(model_name)
+    plot_effort_v_performance(model_names, model_idxs, alphas)
