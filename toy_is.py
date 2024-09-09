@@ -67,11 +67,13 @@ def importance_sample(cfg):
     finish = time.time()
     logger.info(f'total time: {finish-start}')
 
+    guidance = std.cfg.guidance
     for i in range(cfg.num_rounds):
         print('round {}'.format(i))
         ##################################################
         # IS estimate using target
         ##################################################
+        std.cfg.guidance = guidance
         proposal = get_proposal(cfg_obj.example, std)
         start_sample = time.time()
         saps_raw, saps = proposal.sample()
