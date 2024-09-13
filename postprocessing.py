@@ -145,9 +145,13 @@ def process_performance_data(model_name):
             true_alpha_map[alpha] = data
     for alpha in true_alpha_map.keys():
         target = torch.stack(target_alpha_map[alpha])
-        target_performance_data = torch.stack([target.mean(), target.std()])
+        target_performance_data = torch.stack([
+            target.mean(), target.quantile(0.05), target.quantile(0.95)
+        ])
         diffusion = torch.stack(diffusion_alpha_map[alpha])
-        diffusion_performance_data = torch.stack([diffusion.mean(), diffusion.std()])
+        diffusion_performance_data = torch.stack([
+            diffusion.mean(), diffusion.quantile(0.05), diffusion.quantile(0.95)
+        ])
         target_path = '{}/{}'.format(
             directory,
             target_is_performance(
@@ -175,29 +179,19 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
                 directory,
                 target_is_performance(alpha)
             )
-            mean_std = torch.load(target_file)
-            target_mean_minus_std = torch.maximum(
-                torch.tensor(0.),
-                mean_std[0] - mean_std[1]
-            )
-            target_mean_plus_std = mean_std[0] + mean_std[1]
-            target_means.append(mean_std[0])
-            target_lwr.append(target_mean_minus_std)
-            target_upr.append(target_mean_plus_std)
+            mean_quantiles = torch.load(target_file)
+            target_means.append(mean_quantiles[0])
+            target_lwr.append(mean_quantiles[1])
+            target_upr.append(mean_quantiles[2])
 
             diffusion_file = '{}/{}'.format(
                 directory,
                 diffusion_is_performance(alpha)
             )
-            mean_std = torch.load(diffusion_file)
-            diffusion_mean_minus_std = torch.maximum(
-                torch.tensor(0.),
-                mean_std[0] - mean_std[1]
-            )
-            diffusion_mean_plus_std = mean_std[0] + mean_std[1]
-            diffusion_means.append(mean_std[0])
-            diffusion_lwr.append(diffusion_mean_minus_std)
-            diffusion_upr.append(diffusion_mean_plus_std)
+            mean_quantiles = torch.load(diffusion_file)
+            diffusion_means.append(mean_quantiles[0])
+            diffusion_lwr.append(mean_quantiles[1])
+            diffusion_upr.append(mean_quantiles[2])
 
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
@@ -212,13 +206,15 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         )
         true = [torch.load(true_file) for _ in model_idxs]
         plt.plot(model_idxs, true, color='red')
+        plt.xlabel('Training Epochs')
+        plt.ylabel('Probability Estimate')
         fig_file = '{}/{}.pdf'.format('figs', effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
 
 
 if __name__ == '__main__':
-    model_idxs = [30, 34, 38, 42, 46]
+    model_idxs = [1000]
     model_names = [
         'VPSDEVelocitySampler_TemporalUnetAlpha_' \
         'BrownianMotionDiffExampleConfig_puncond' \
@@ -226,9 +222,9 @@ if __name__ == '__main__':
         for idx in model_idxs
     ]
     alphas = [3., 4., 5., 6.]
-    # for model_name in model_names:
-    #     # plot_mse_llk(model_name)
-    #     # plot_is_estimates(model_name)
-    #     # plot_is_vs_alpha(model_name)
-    #     process_performance_data(model_name)
+    for model_name in model_names:
+        # plot_mse_llk(model_name)
+        # plot_is_estimates(model_name)
+        # plot_is_vs_alpha(model_name)
+        process_performance_data(model_name)
     plot_effort_v_performance(model_names, model_idxs, alphas)

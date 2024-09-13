@@ -235,6 +235,13 @@ def plot_ode_trajectories(ode_trajs: torch.Tensor):
 
     plt.savefig('figs/ode_trajs/ode_traj.pdf')
 
+def generate_bm(N, sde_steps):
+    trajs = torch.randn(N, sde_steps-1)
+    dt = torch.tensor(1/(sde_steps-1))
+    scaled_trajs = trajs * dt.sqrt()
+    bm = torch.hstack([torch.zeros(N, 1), scaled_trajs.cumsum(dim=1)])
+    return bm
+
 
 if __name__ == "__main__":
     with warnings.catch_warnings():
@@ -249,7 +256,6 @@ if __name__ == "__main__":
     gamma = torch.tensor(3.0)
     print(analytical_log_likelihood(trajs.W, sde, trajs.dt))
     # print(prob_above_threshold(timesteps, trajs.dt, gamma, idx=1))
-    import pdb; pdb.set_trace()
     print('p(|x|>3\u03c3)={}'.format(2*prob_above_3sigma(timesteps, trajs.dt, idx=1)))
     plot_motions(trajs)
     plt.show()
