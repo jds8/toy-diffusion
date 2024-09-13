@@ -93,6 +93,7 @@ class TrainConfig(BaseConfig):
     p_uncond: float = 1.
     iterations_before_save: int = 1000
     upsample: bool = False
+    max_alpha: float = 5.
     use_fixed_dataset: bool = False
     epochs_before_save: int = 100
 
