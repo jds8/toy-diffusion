@@ -312,7 +312,12 @@ class ToyTrainer:
         return x0_raw, x0
 
     def set_dl_iter(self):
-        dataset = torch.load('training_data.pt')
+        if isinstance(self.example, GaussianExampleConfig):
+            dataset = torch.load('gaussian_dataset.pt')
+        elif isinstance(self.example, BrownianMotionDiffExampleConfig):
+            dataset = torch.load('bm_dataset.pt')
+        else:
+            raise NotImplementedError
         dl = DataLoader(dataset, batch_size=self.cfg.batch_size)
         self.dl_iter = iter(dl)
 
