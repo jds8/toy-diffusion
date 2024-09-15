@@ -330,7 +330,9 @@ class ToyTrainer:
             self.num_epochs += 1
             self.set_dl_iter()
             x0_raw = next(self.dl_iter)
-        if type(self.example) == BrownianMotionDiffExampleConfig:
+        if type(self.example) == GaussianExampleConfig:
+            x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
+        elif type(self.example) == BrownianMotionDiffExampleConfig:
             x0_raw = x0_raw.to(device)
             dt = self.end_time / (self.cfg.example.sde_steps-1)
             x0 = x0_raw.diff(dim=1) / dt.sqrt()
