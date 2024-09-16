@@ -3,7 +3,9 @@
 import os
 import re
 import matplotlib.pyplot as plt
+import numpy as np
 
+import argparse
 import torch
 
 
@@ -196,6 +198,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.set_yscale('log')
+        plt.ylim((1e-10, 1e-2))
         plt.plot(model_idxs, target_means, color='darkblue')
         plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
         plt.plot(model_idxs, diffusion_means, color='darkgreen')
@@ -212,9 +215,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         plt.savefig(fig_file)
         plt.clf()
 
-
-if __name__ == '__main__':
-    model_idxs = [1000]
+def make_effort_v_performance_bm(model_idxs):
     model_names = [
         'VPSDEVelocitySampler_TemporalUnetAlpha_' \
         'BrownianMotionDiffExampleConfig_puncond' \
@@ -223,8 +224,30 @@ if __name__ == '__main__':
     ]
     alphas = [3., 4., 5., 6.]
     for model_name in model_names:
-        # plot_mse_llk(model_name)
-        # plot_is_estimates(model_name)
-        # plot_is_vs_alpha(model_name)
         process_performance_data(model_name)
     plot_effort_v_performance(model_names, model_idxs, alphas)
+
+
+def make_effort_v_performance(model, example, rarity, model_idxs):
+    model_names = [
+        f'VPSDEVelocitySampler_{model}_' \
+        f'{example}_puncond' \
+        f'_0.1_rare{rarity}_v{idx}_epoch{idx}00'
+        for idx in model_idxs
+    ]
+    alphas = [3., 4., 5., 6.]
+    for model_name in model_names:
+        process_performance_data(model_name)
+    plot_effort_v_performance(model_names, model_idxs, alphas)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Parser')
+    parser.add_argument('--model_idx', type=int, nargs='+')
+    args = parser.parse_args()
+
+    # plot_mse_llk(model_name)
+    # plot_is_estimates(model_name)
+    # plot_is_vs_alpha(model_name)
+
+    make_effort_v_performance_bm(model_idxs=args.model_idx)
