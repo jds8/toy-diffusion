@@ -332,6 +332,11 @@ class ToyTrainer:
             x0_raw = next(self.dl_iter)
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
+        elif isinstance(self.example, StudentTExampleConfig):
+            scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
+            if self.cfg.example.nu > 2.:
+                scale = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
+            x0 = x0_raw / scale
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x0_raw = x0_raw.to(device)
             dt = self.end_time / (self.cfg.example.sde_steps-1)
