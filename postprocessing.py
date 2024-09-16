@@ -216,6 +216,8 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
+        os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
+
 
 def make_effort_v_performance_bm(model_idxs):
     model_names = [
@@ -224,20 +226,19 @@ def make_effort_v_performance_bm(model_idxs):
         '_0.1_rare5.7_v{}_epoch{}00'.format(idx, idx)
         for idx in model_idxs
     ]
-    alphas = [3., 4., 5., 6.]
+    alphas = [3., 4., 5.]
     for model_name in model_names:
         process_performance_data(model_name)
     plot_effort_v_performance(model_names, model_idxs, alphas)
 
 
-def make_effort_v_performance(model, example, rarity, model_idxs):
+def make_effort_v_performance(model, example, rarity, model_idxs, alphas):
     model_names = [
         f'VPSDEVelocitySampler_{model}_' \
         f'{example}_puncond' \
         f'_0.1_rare{rarity}_v{idx}_epoch{idx}00'
         for idx in model_idxs
     ]
-    alphas = [3., 4., 5., 6.]
     for model_name in model_names:
         process_performance_data(model_name)
     plot_effort_v_performance(model_names, model_idxs, alphas)
