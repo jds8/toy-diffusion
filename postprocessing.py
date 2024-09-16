@@ -211,7 +211,9 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         plt.plot(model_idxs, true, color='red')
         plt.xlabel('Training Epochs')
         plt.ylabel('Probability Estimate')
-        fig_file = '{}/{}.pdf'.format('figs', effort_v_performance_plot_name(alpha))
+        directory = 'figs/effort_v_performance'
+        os.makedirs(directory, exist_ok=True)
+        fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
 
