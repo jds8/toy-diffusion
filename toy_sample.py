@@ -897,27 +897,28 @@ def sample(cfg):
 
     end_time = torch.tensor(1., device=device)
 
-    if isinstance(std.diffusion_model, TemporalTransformerUnet):
-        test_transformer_bm(end_time, std)
-        exit()
+    with torch.no_grad():
+        if isinstance(std.diffusion_model, TemporalTransformerUnet):
+            test_transformer_bm(end_time, std)
+            exit()
 
-    sample_traj_out = std.sample_trajectories(
-        cond=std.cond,
-        alpha=std.likelihood.alpha.reshape(-1, 1),
-    )
+        sample_traj_out = std.sample_trajectories(
+            cond=std.cond,
+            alpha=std.likelihood.alpha.reshape(-1, 1),
+        )
 
-    # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
-    # plot_ode_trajectories(ode_trajs)
+        # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
+        # plot_ode_trajectories(ode_trajs)
 
-    print('fevals: {}'.format(sample_traj_out.fevals))
-    sample_trajs = sample_traj_out.samples
-    trajs = sample_trajs[-1]
-    out_trajs = trajs
+        print('fevals: {}'.format(sample_traj_out.fevals))
+        sample_trajs = sample_traj_out.samples
+        trajs = sample_trajs[-1]
+        out_trajs = trajs
 
-    # viz_trajs(cfg, std, out_trajs, end_time)
+        # viz_trajs(cfg, std, out_trajs, end_time)
 
-    test(end_time, cfg, out_trajs, std)
-    import pdb; pdb.set_trace()
+        test(end_time, cfg, out_trajs, std)
+        import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":

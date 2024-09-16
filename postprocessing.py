@@ -3,6 +3,7 @@
 import os
 import re
 import matplotlib.pyplot as plt
+import numpy as np
 
 import argparse
 import torch
@@ -197,6 +198,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.set_yscale('log')
+        plt.ylim((1e-10, 1e-2))
         plt.plot(model_idxs, target_means, color='darkblue')
         plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
         plt.plot(model_idxs, diffusion_means, color='darkgreen')
