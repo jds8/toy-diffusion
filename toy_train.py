@@ -314,6 +314,8 @@ class ToyTrainer:
     def set_dl_iter(self):
         if isinstance(self.example, GaussianExampleConfig):
             dataset = torch.load('gaussian_dataset.pt', map_location=device)
+        elif isinstance(self.example, StudentTExampleConfig):
+            dataset = torch.load('student_t_dataset.pt', map_location=device)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
             dataset = torch.load('bm_dataset.pt', map_location=device)
         else:
