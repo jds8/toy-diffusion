@@ -199,9 +199,9 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         ax = fig.add_subplot(1, 1, 1)
         ax.set_yscale('log')
         plt.ylim((1e-10, 1e-2))
-        plt.plot(model_idxs, target_means, color='darkblue')
+        plt.plot(model_idxs, target_means, color='darkblue', label='Against Target')
         plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
-        plt.plot(model_idxs, diffusion_means, color='darkgreen')
+        plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion')
         plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
         true_file = '{}/{}'.format(
             directory,
@@ -209,6 +209,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         )
         true = [torch.load(true_file) for _ in model_idxs]
         plt.plot(model_idxs, true, color='red')
+        plt.legend()
         plt.xlabel('Training Epochs')
         plt.ylabel('Probability Estimate')
         directory = 'figs/effort_v_performance'

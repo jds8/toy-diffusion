@@ -233,16 +233,16 @@ class ToyTrainer:
             self.optimizer.step()
             self.num_steps += 1
             try:
+                grads = []
+                for param in self.diffusion_model.parameters():
+                    grads.append(param.grad.view(-1))
+                grads = torch.cat(grads)
+                grad_norm = grads.norm()
                 if not self.cfg.no_wandb:
                     wandb.log({"train_loss": loss.detach()})
-                    grads = []
-                    for param in self.diffusion_model.parameters():
-                        grads.append(param.grad.view(-1))
-                    grads = torch.cat(grads)
-                    grad_norm = grads.norm()
                     wandb.log({"train_grad_norm": grad_norm})
                 else:
-                    print("train_loss: {}".format(loss.detach()))
+                    print("train_loss: {} grad_norm: {}".format(loss.detach(), grad_norm))
             except Exception as e:
                 print(e)
 
