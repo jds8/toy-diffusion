@@ -218,6 +218,18 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         plt.savefig(fig_file)
         plt.clf()
         os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
+        os.system('cp figs/effort_v_performance.tar.gz ~')
+
+
+def make_effort_v_performance_gaussian(model_idxs):
+    model_names = [
+        'VPSDEVelocitySampler_TemporalIDK_GaussianExampleConfig_1.0_2.0_puncond_0.1_rare5.7_v{}_epoch{}00'.format(idx, idx)
+        for idx in model_idxs
+    ]
+    alphas = [3., 4., 5.]
+    for model_name in model_names:
+        process_performance_data(model_name)
+    plot_effort_v_performance(model_names, model_idxs, alphas)
 
 
 def make_effort_v_performance_bm(model_idxs):
@@ -254,4 +266,5 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    make_effort_v_performance_bm(model_idxs=args.model_idx)
+    # make_effort_v_performance_bm(model_idxs=args.model_idx)
+    make_effort_v_performance_gaussian(model_idxs=args.model_idx)
