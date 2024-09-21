@@ -485,7 +485,7 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
 def test_gaussian(end_time, cfg, sample_trajs, std):
     cond = std.cond if std.cond else torch.tensor([-1.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
-    alpha = std.likelihood.alpha if cond == 1. else torch.tensor([0.])
+    alpha = torch.tensor([std.likelihood.alpha]) if cond == 1. else torch.tensor([0.])
     datapoints_left = torch.linspace(
         cfg.example.mu-6*cfg.example.sigma,
         cfg.example.mu-alpha.item()*cfg.example.sigma,
@@ -572,7 +572,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.title('Histogram of brownian motion state diffs')
     save_dir = 'figs/{}'.format(cfg.model_name)
     os.makedirs(save_dir, exist_ok=True)
-    alpha = std.likelihood.alpha
+    alpha = torch.tensor([std.likelihood.alpha])
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         save_dir,

@@ -167,6 +167,12 @@ class ISConfig(SampleConfig):
     likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
     example: ExampleConfig = field(default_factory=ExampleConfig)
     num_rounds: int = 1
+    split_size: int = 10000
+
+    def num_splits(self):
+        num_full_splits = self.num_samples // self.split_size
+        num_leftover = self.num_samples % self.split_size
+        return num_full_splits, num_leftover
 
 
 def get_target(cfg):

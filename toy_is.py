@@ -38,6 +38,24 @@ def importance_estimate(
     std = log_std.exp()
     return expectation, std
 
+def iterative_importance_estimate(
+        test_fn: Callable,
+        saps_raw: torch.Tensor,
+        saps: torch.Tensor,
+        log_probs: torch.Tensor,
+        log_qrobs: torch.Tensor,
+        cur_expectation: torch.Tensor,
+        cur_N: torch.Tensor,
+):
+    log_ws = log_probs - log_qrobs
+    max_log_w = log_ws.max()
+    w_bars = (log_ws - max_log_w).exp()
+    phis = test_fn(saps_raw, saps).squeeze()
+    new_expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
+    total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
+    total_N = cur_N + log_probs.nelement()
+    total_expectation = total_sum / total_N
+    return total_expectation, total_N
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
@@ -77,24 +95,55 @@ def importance_sample(cfg):
             std.cfg.guidance = guidance
             proposal = get_proposal(cfg_obj.example, std)
             start_sample = time.time()
-            saps_raw, saps = proposal.sample()
+            num_full_splits, num_leftover = cfg_obj.num_splits()
+            std.cfg.num_samples = std.cfg.split_size
+            num_samples_list = []
+            saps_raw_list = []
+            saps_list = []
+            for j in range(num_full_splits):
+                saps_raw, saps = proposal.sample()
+                saps_raw_list.append(saps_raw)
+                saps_list.append(saps)
+                num_samples_list.append(std.cfg.split_size)
+            if num_leftover:
+                std.cfg.num_samples = num_leftover
+                saps_raw, saps = proposal.sample()
+                saps_raw_list.append(saps_raw)
+                saps_list.append(saps)
+                num_samples_list.append(num_leftover)
             finish_sample = time.time()
-            log_proposal = proposal.log_prob(saps).squeeze()
+            log_proposal_list = []
+            true_log_probs_list = []
+            for j in range(num_full_splits + int(num_leftover > 0)):
+                log_proposal = proposal.log_prob(saps_list[j]).squeeze()
+                log_proposal_list.append(log_proposal)
+                true_log_probs = target.log_prob(saps_raw_list[j]).squeeze()
+                true_log_probs_list.append(true_log_probs)
             finish_evaluate = time.time()
             logger.info(f'total sample time: {finish_sample-start_sample}')
             logger.info(f'total eval time: {finish_evaluate-finish_sample}')
-            log_qrobs, log_drobs = log_proposal[:cfg.num_samples], log_proposal[cfg.num_samples:]
-            log_probs = target.log_prob(saps_raw).squeeze()
 
             test_fn = std.likelihood.get_condition
+            target_estimate = torch.tensor([0.])
+            target_N = 0
+            for j in range(num_full_splits + int(num_leftover > 0)):
+                num_samples = num_samples_list[j]
+                log_qrobs = log_proposal_list[j][:num_samples]
+                log_drobs = log_proposal_list[j][num_samples:]
+                true_log_probs = true_log_probs_list[j]
+                saps = saps_list[j]
+                saps_raw = saps_raw_list[j]
+                target_estimate, target_N = iterative_importance_estimate(
+                    test_fn=test_fn,
+                    saps_raw=saps_raw,
+                    saps=saps,
+                    log_probs=true_log_probs,
+                    log_qrobs=log_qrobs,
+                    cur_expectation=target_estimate,
+                    cur_N=target_N,
+                )
 
-            target_estimate, target_std = importance_estimate(
-                test_fn=test_fn,
-                saps_raw=saps_raw,
-                saps=saps,
-                log_probs=log_probs,
-                log_qrobs=log_qrobs
-            )
+            target_std = torch.tensor([0.])
             target_is_stats = torch.stack([target_estimate, target_std])
             torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
                 save_dir,
@@ -115,14 +164,32 @@ def importance_sample(cfg):
             ##################################################
             std.set_no_guidance()
             diffusion_target = get_proposal(cfg_obj.example, std)
-            log_drobs = diffusion_target.log_prob(saps).squeeze()
-            diffusion_estimate, diffusion_std = importance_estimate(
-                test_fn=test_fn,
-                saps_raw=saps_raw,
-                saps=saps,
-                log_probs=log_drobs,
-                log_qrobs=log_qrobs
-            )
+            num_full_splits, num_leftover = cfg_obj.num_splits()
+            std.cfg.num_samples = std.cfg.split_size
+            log_droposal_list = []
+            for j in range(num_full_splits + int(num_leftover > 0)):
+                log_droposal = diffusion_target.log_prob(saps_list[j]).squeeze()
+                log_droposal_list.append(log_droposal)
+
+            test_fn = std.likelihood.get_condition
+            diffusion_estimate = torch.tensor([0.])
+            target_N = 0
+            for j in range(num_full_splits + int(num_leftover > 0)):
+                num_samples = num_samples_list[j]
+                log_qrobs = log_proposal_list[j][:num_samples]
+                log_drobs = log_droposal_list[j]
+                saps = saps_list[j]
+                saps_raw = saps_raw_list[j]
+                diffusion_estimate, target_N = iterative_importance_estimate(
+                    test_fn=test_fn,
+                    saps_raw=saps_raw,
+                    saps=saps,
+                    log_probs=log_drobs,
+                    log_qrobs=log_qrobs,
+                    cur_expectation=diffusion_estimate,
+                    cur_N=target_N,
+                )
+            diffusion_std = torch.tensor([0.])
             diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
             torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
                 save_dir,
