@@ -55,6 +55,7 @@ def iterative_importance_estimate(
     total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
     total_N = cur_N + log_probs.nelement()
     total_expectation = total_sum / total_N
+    import pdb; pdb.set_trace()
     return total_expectation, total_N
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
@@ -172,7 +173,7 @@ def importance_sample(cfg):
                 log_droposal_list.append(log_droposal)
 
             test_fn = std.likelihood.get_condition
-            diffusion_estimate = torch.tensor([0.])
+            diffusion_estimate = torch.tensor([0.], device=device)
             target_N = 0
             for j in range(num_full_splits + int(num_leftover > 0)):
                 num_samples = num_samples_list[j]
@@ -189,7 +190,7 @@ def importance_sample(cfg):
                     cur_expectation=diffusion_estimate,
                     cur_N=target_N,
                 )
-            diffusion_std = torch.tensor([0.])
+            diffusion_std = torch.tensor([0.], device=device)
             diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
             torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
                 save_dir,
