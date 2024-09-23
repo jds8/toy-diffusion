@@ -3,6 +3,7 @@
 from typing import Callable
 import torch
 import numpy as np
+import scipy.stats as stats
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -68,6 +69,31 @@ class BrownianMotionDiffProposal(Proposal):
         return self.ode_llk
 
 
+class StudentTProposal(Proposal):
+    def __init__(self, std):
+        super().__init__(std)
+        self.sigma = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).std()
+        if self.std.cfg.example.nu > 2.:
+            self.sigma = torch.tensor(self.std.cfg.example.nu / (self.std.cfg.example.nu - 2)).sqrt()
+    def sample(self):
+        sample_traj_out = self.std.sample_trajectories(
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+        )
+        self.sample_trajs = sample_traj_out.samples[-1]
+        self.trajs = self.sample_trajs * self.sigma
+        return self.trajs, self.sample_trajs
+
+    def log_prob(self, samples):
+        raw_ode_llk = self.std.ode_log_likelihood(
+            samples,
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+        )[0]
+        self.ode_llk = raw_ode_llk - self.sigma.log()
+        return self.ode_llk
+
+
 class Target:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -108,6 +134,22 @@ class BrownianMotionDiffTarget(Target):
     def analytical_prob(self, alpha):
         # 0.0059 for alpha=3
         return 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
+
+
+class StudentTTarget(Target):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.sigma = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).std()
+        if self.cfg.example.nu > 2.:
+            self.sigma = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
+    def log_prob(self, saps):
+        return torch.tensor(stats.t.pdf(saps, df=self.cfg.example.nu)).log()
+    def analytical_prob(self, alpha):
+        # 0.0027 for self.cfg.cond=3
+        return torch.tensor(2*stats.t.cdf(
+            -alpha * self.sigma,
+            df=self.cfg.example.nu
+        ))
 
 
 class ImportanceSampler:

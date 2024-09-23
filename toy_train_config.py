@@ -5,8 +5,10 @@ from typing import Optional
 from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
-from importance_sampling import GaussianTarget, BrownianMotionDiffTarget, \
-    GaussianProposal, BrownianMotionDiffProposal
+from importance_sampling import \
+    GaussianTarget, GaussianProposal, \
+    BrownianMotionDiffTarget, BrownianMotionDiffProposal, \
+    StudentTTarget, StudentTProposal \
 
 import torch
 from omegaconf import OmegaConf
@@ -180,6 +182,8 @@ def get_target(cfg):
         return GaussianTarget(cfg)
     elif isinstance(cfg.example, BrownianMotionDiffExampleConfig):
         return BrownianMotionDiffTarget(cfg)
+    elif isinstance(cfg.example, StudentTExampleConfig):
+        return StudentTTarget(cfg)
     else:
         raise NotImplementedError
 
@@ -188,5 +192,7 @@ def get_proposal(example, std):
         return GaussianProposal(std)
     elif isinstance(example, BrownianMotionDiffExampleConfig):
         return BrownianMotionDiffProposal(std)
+    elif isinstance(example, StudentTExampleConfig):
+        return StudentTProposal(std)
     else:
         raise NotImplementedError
