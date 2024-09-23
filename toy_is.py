@@ -124,7 +124,7 @@ def importance_sample(cfg):
             logger.info(f'total eval time: {finish_evaluate-finish_sample}')
 
             test_fn = std.likelihood.get_condition
-            target_estimate = torch.tensor([0.])
+            target_estimate = torch.tensor([0.], device=device)
             target_N = 0
             for j in range(num_full_splits + int(num_leftover > 0)):
                 num_samples = num_samples_list[j]
@@ -143,7 +143,7 @@ def importance_sample(cfg):
                     cur_N=target_N,
                 )
 
-            target_std = torch.tensor([0.])
+            target_std = torch.tensor([0.], device=device)
             target_is_stats = torch.stack([target_estimate, target_std])
             torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
                 save_dir,
