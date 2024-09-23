@@ -55,7 +55,6 @@ def iterative_importance_estimate(
     total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
     total_N = cur_N + log_probs.nelement()
     total_expectation = total_sum / total_N
-    import pdb; pdb.set_trace()
     return total_expectation, total_N
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
