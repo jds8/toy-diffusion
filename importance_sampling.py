@@ -143,7 +143,7 @@ class StudentTTarget(Target):
         if self.cfg.example.nu > 2.:
             self.sigma = torch.tensor(self.cfg.example.nu / (self.cfg.example.nu - 2)).sqrt()
     def log_prob(self, saps):
-        return torch.tensor(stats.t.pdf(saps, df=self.cfg.example.nu)).log()
+        return torch.tensor(stats.t.pdf(saps.cpu(), df=self.cfg.example.nu)).log()
     def analytical_prob(self, alpha):
         # 0.0027 for self.cfg.cond=3
         return torch.tensor(2*stats.t.cdf(
