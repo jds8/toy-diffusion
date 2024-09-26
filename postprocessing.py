@@ -146,26 +146,29 @@ def process_performance_data(model_name):
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
     for alpha in true_alpha_map.keys():
-        target = torch.stack(target_alpha_map[alpha])
-        target_performance_data = torch.stack([
-            target.mean(), target.quantile(0.05), target.quantile(0.95)
-        ])
-        diffusion = torch.stack(diffusion_alpha_map[alpha])
-        diffusion_performance_data = torch.stack([
-            diffusion.mean(), diffusion.quantile(0.05), diffusion.quantile(0.95)
-        ])
-        target_path = '{}/{}'.format(
-            directory,
-            target_is_performance(
-                alpha
+        try:
+            target = torch.stack(target_alpha_map[alpha])
+            target_performance_data = torch.stack([
+                target.mean(), target.quantile(0.05), target.quantile(0.95)
+            ])
+            diffusion = torch.stack(diffusion_alpha_map[alpha])
+            diffusion_performance_data = torch.stack([
+                diffusion.mean(), diffusion.quantile(0.05), diffusion.quantile(0.95)
+            ])
+            target_path = '{}/{}'.format(
+                directory,
+                target_is_performance(
+                    alpha
+                )
             )
-        )
-        diffusion_path = '{}/{}'.format(
-            directory,
-            diffusion_is_performance(alpha)
-        )
-        torch.save(target_performance_data, target_path)
-        torch.save(diffusion_performance_data, diffusion_path)
+            diffusion_path = '{}/{}'.format(
+                directory,
+                diffusion_is_performance(alpha)
+            )
+            torch.save(target_performance_data, target_path)
+            torch.save(diffusion_performance_data, diffusion_path)
+        except:
+            pass
 
 def plot_effort_v_performance(model_names, model_idxs, alphas):
     for alpha in alphas:
@@ -266,5 +269,5 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    # make_effort_v_performance_bm(model_idxs=args.model_idx)
-    make_effort_v_performance_gaussian(model_idxs=args.model_idx)
+    make_effort_v_performance_bm(model_idxs=args.model_idx)
+    # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
