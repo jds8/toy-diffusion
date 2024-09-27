@@ -261,6 +261,8 @@ def make_effort_v_performance(model, example, rarity, model_idxs, alphas):
 
 
 if __name__ == '__main__':
+    os.system('echo git commit: $(git rev-parse HEAD)')
+
     parser = argparse.ArgumentParser(description='Parser')
     parser.add_argument('--model_idx', type=int, nargs='+')
     args = parser.parse_args()
