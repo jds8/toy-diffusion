@@ -889,6 +889,8 @@ def sample(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
+    os.system('echo git commit: $(git rev-parse HEAD)')
+
     omega_sampler = OmegaConf.to_object(cfg.sampler)
     if isinstance(omega_sampler, DiscreteSamplerConfig):
         std = DiscreteEvaluator(cfg=cfg)

@@ -515,8 +515,7 @@ def train(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
-    logger.info('git commit: ')
-    os.system('git rev-parse HEAD')
+    os.system('echo git commit: $(git rev-parse HEAD)')
 
     logger.info(f"\nNUM THREADS: {torch.get_num_threads()}\n")
     if not cfg.no_wandb:

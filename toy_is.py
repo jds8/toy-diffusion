@@ -62,6 +62,8 @@ def importance_sample(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
+    os.system('echo git commit: $(git rev-parse HEAD)')
+
     with torch.no_grad():
         start = time.time()
         std = ContinuousEvaluator(cfg=cfg)
