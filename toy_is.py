@@ -148,7 +148,7 @@ def importance_sample(cfg):
             torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
                 save_dir,
                 alpha,
-                i
+                cfg.start_round+i
             ))
             logger.info('IS estimate with target: {} and std. dev.: {}'.format(
                 target_estimate,
@@ -194,7 +194,7 @@ def importance_sample(cfg):
             torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
                 save_dir,
                 alpha,
-                i
+                cfg.start_round+i
             ))
             logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
                 diffusion_estimate,
