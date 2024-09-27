@@ -263,7 +263,9 @@ class ContinuousEvaluator(ToyEvaluator):
             raise NotImplementedError
 
     def set_no_guidance(self):
+        old_guidance = self.cfg.guidance
         self.cfg.guidance = GuidanceType.NoGuidance
+        return old_guidance
 
     def get_dx_dt(self, t, x, evaluate_likelihood, **kwargs):
         time = t.reshape(-1)

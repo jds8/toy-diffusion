@@ -86,54 +86,30 @@ def importance_sample(cfg):
         finish = time.time()
         logger.info(f'total time: {finish-start}')
 
-        guidance = std.cfg.guidance
+        old_guidance = std.cfg.guidance
         for i in range(cfg.num_rounds):
             print('round {}'.format(i))
             ##################################################
             # IS estimate using target
             ##################################################
-            std.cfg.guidance = guidance
+            diffusion_target = get_proposal(cfg_obj.example, std)
             proposal = get_proposal(cfg_obj.example, std)
             start_sample = time.time()
             num_full_splits, num_leftover = cfg_obj.num_splits()
-            std.cfg.num_samples = std.cfg.split_size
-            num_samples_list = []
-            saps_raw_list = []
-            saps_list = []
-            for j in range(num_full_splits):
-                saps_raw, saps = proposal.sample()
-                saps_raw_list.append(saps_raw)
-                saps_list.append(saps)
-                num_samples_list.append(std.cfg.split_size)
-            if num_leftover:
-                std.cfg.num_samples = num_leftover
-                saps_raw, saps = proposal.sample()
-                saps_raw_list.append(saps_raw)
-                saps_list.append(saps)
-                num_samples_list.append(num_leftover)
-            finish_sample = time.time()
-            log_proposal_list = []
-            true_log_probs_list = []
-            for j in range(num_full_splits + int(num_leftover > 0)):
-                log_proposal = proposal.log_prob(saps_list[j]).squeeze()
-                log_proposal_list.append(log_proposal)
-                true_log_probs = target.log_prob(saps_raw_list[j]).squeeze()
-                true_log_probs_list.append(true_log_probs)
-            finish_evaluate = time.time()
-            logger.info(f'total sample time: {finish_sample-start_sample}')
-            logger.info(f'total eval time: {finish_evaluate-finish_sample}')
-
+            num_samples_list = [std.cfg.split_size] * num_full_splits + [num_leftover]
             test_fn = std.likelihood.get_condition
             target_estimate = torch.tensor([0.], device=device)
+            diffusion_estimate = torch.tensor([0.], device=device)
             target_N = 0
-            for j in range(num_full_splits + int(num_leftover > 0)):
-                num_samples = num_samples_list[j]
-                log_qrobs = log_proposal_list[j][:num_samples]
-                log_drobs = log_proposal_list[j][num_samples:]
-                true_log_probs = true_log_probs_list[j]
-                saps = saps_list[j]
-                saps_raw = saps_raw_list[j]
-                target_estimate, target_N = iterative_importance_estimate(
+            for j in range(num_full_splits):
+                std.cfg.num_samples = num_samples_list[j]
+                saps_raw, saps = proposal.sample()
+                std.cfg.guidance = old_guidance
+                log_qrobs = proposal.log_prob(saps).squeeze()
+                old_guidance = std.set_no_guidance()
+                log_drobs = diffusion_target.log_prob(saps).squeeze()
+                true_log_probs = target.log_prob(saps_raw).squeeze()
+                target_estimate, _ = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
                     saps=saps,
@@ -142,44 +118,9 @@ def importance_sample(cfg):
                     cur_expectation=target_estimate,
                     cur_N=target_N,
                 )
-
-            target_std = torch.tensor([0.], device=device)
-            target_is_stats = torch.stack([target_estimate, target_std])
-            torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
-                save_dir,
-                alpha,
-                cfg.start_round+i
-            ))
-            logger.info('IS estimate with target: {} and std. dev.: {}'.format(
-                target_estimate,
-                target_std,
-            ))
-            ##################################################
-
-            finish = time.time()
-            logger.info(f'total time: {finish-start}')
-
-            ##################################################
-            # IS estimate using unconditional diffusion model
-            ##################################################
-            std.set_no_guidance()
-            diffusion_target = get_proposal(cfg_obj.example, std)
-            num_full_splits, num_leftover = cfg_obj.num_splits()
-            std.cfg.num_samples = std.cfg.split_size
-            log_droposal_list = []
-            for j in range(num_full_splits + int(num_leftover > 0)):
-                log_droposal = diffusion_target.log_prob(saps_list[j]).squeeze()
-                log_droposal_list.append(log_droposal)
-
-            test_fn = std.likelihood.get_condition
-            diffusion_estimate = torch.tensor([0.], device=device)
-            target_N = 0
-            for j in range(num_full_splits + int(num_leftover > 0)):
-                num_samples = num_samples_list[j]
-                log_qrobs = log_proposal_list[j][:num_samples]
-                log_drobs = log_droposal_list[j]
-                saps = saps_list[j]
-                saps_raw = saps_raw_list[j]
+                ##################################################
+                # IS estimate using unconditional diffusion model
+                ##################################################
                 diffusion_estimate, target_N = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
@@ -189,8 +130,25 @@ def importance_sample(cfg):
                     cur_expectation=diffusion_estimate,
                     cur_N=target_N,
                 )
-            diffusion_std = torch.tensor([0.], device=device)
-            diffusion_is_stats = torch.stack([diffusion_estimate, diffusion_std])
+
+            finish_sample = time.time()
+            logger.info(f'total sample+eval time: {finish_sample-start_sample}')
+            zero_std = torch.tensor([0.], device=device)
+            target_is_stats = torch.stack([target_estimate, zero_std])
+            torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
+                save_dir,
+                alpha,
+                cfg.start_round+i
+            ))
+            logger.info('IS estimate with target: {} and std. dev.: {}'.format(
+                target_estimate,
+                zero_std,
+            ))
+
+            finish = time.time()
+            logger.info(f'total time: {finish-start}')
+
+            diffusion_is_stats = torch.stack([diffusion_estimate, zero_std])
             torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
                 save_dir,
                 alpha,
@@ -198,7 +156,7 @@ def importance_sample(cfg):
             ))
             logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
                 diffusion_estimate,
-                diffusion_std,
+                zero_std,
             ))
             ##################################################
 
