@@ -198,13 +198,13 @@ class TemporalIDK(nn.Module):
 
     def __init__(
         self,
+        dim=32,
         device=None,
         *args,
         **kwargs,
     ):
         super().__init__()
 
-        dim = 32
         time_dim = dim
         self.time_dim = time_dim
         self.time_mlp = nn.Sequential(

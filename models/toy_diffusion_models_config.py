@@ -172,6 +172,7 @@ class GuidanceType(Enum):
 
 @dataclass
 class ModelConfig:
+    dim: int = 32
     def name(self):
         return 'ModelConfig'
 
@@ -188,7 +189,6 @@ class TemporalUnetConfig(ModelConfig):
 @dataclass
 class TemporalUnetAlphaParentConfig(ModelConfig):
     cond_dim: int = 1
-    dim: int = 32
     dim_mults: list = (1, 2, 4, 8)
     _target_: str = 'models.toy_temporal.TemporalGaussianUnetAlpha'
 
