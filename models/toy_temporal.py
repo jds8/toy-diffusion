@@ -394,6 +394,137 @@ class TemporalUnet(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
+class TemporalGaussianUnetAlpha(nn.Module):
+
+    def __init__(
+        self,
+        d_model,
+        cond_dim,
+        dim=32,
+        dim_mults=(1, 2, 4, 8),
+        attention=False,
+        device=None,
+    ):
+        super().__init__()
+
+        dims = [d_model, *map(lambda m: dim * m, dim_mults)]
+        in_out = list(zip(dims[:-1], dims[1:]))
+        self.in_out = in_out
+        print(f'[ models/temporal ] Channel dimensions: {in_out}')
+
+        self.d_model = d_model
+
+        time_dim = dim
+        self.time_dim = time_dim
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(dim),
+            nn.Linear(dim, dim * 4),
+            nn.Mish(),
+            nn.Linear(dim * 4, dim),
+        )
+
+        self.cond_dim = cond_dim
+        self.cond_mlp = nn.Sequential(
+            nn.Linear(self.cond_dim, dim),
+            nn.Mish(),
+            nn.Linear(dim, dim),
+        )
+
+        self.alpha_mlp = nn.Sequential(
+            nn.Linear(1, dim),
+            nn.Mish(),
+            nn.Linear(dim, dim),
+        )
+
+        self.bool_mlp = nn.Sequential(
+            SinusoidalPosEmb(dim),
+            nn.Linear(dim, dim),
+            nn.Mish(),
+            nn.Linear(dim, dim),
+        )
+
+        self.downs = nn.ModuleList([])
+        self.ups = nn.ModuleList([])
+        num_resolutions = len(in_out)
+
+        print(in_out)
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.downs.append(nn.ModuleList([
+                ResidualTemporalAlphaBlock(dim_in, dim_out, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_out, dim_out, embed_dim=time_dim),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
+            ]))
+
+        mid_dim = dims[-1]
+        self.mid_block1 = ResidualTemporalAlphaBlock(mid_dim, mid_dim, embed_dim=time_dim)
+        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
+        self.mid_block2 = ResidualTemporalAlphaBlock(mid_dim, mid_dim, embed_dim=time_dim)
+
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.ups.append(nn.ModuleList([
+                ResidualTemporalAlphaBlock(dim_out * 2, dim_in, embed_dim=time_dim),
+                ResidualTemporalAlphaBlock(dim_in, dim_in, embed_dim=time_dim),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
+            ]))
+
+        self.final_conv = nn.Sequential(
+            Conv1dBlock(dim, dim, kernel_size=5),
+            nn.Conv1d(dim, d_model, 1),
+        )
+
+    def forward(self, x, time, cond=None, alpha=None, *args, **kwargs):
+        """
+            x : [ batch x traj_length x input_channels ]
+            Note that traj_length needs to be an even number
+            for upsampling to work properly.
+        """
+
+        b_dim, h_dim, t_dim = x.shape
+        x = einops.rearrange(x, 'b h t -> b t h')
+
+        t = self.time_mlp(time)
+        cond_in = cond
+        if cond is None:
+            cond_in = torch.ones(t.shape[0], 1, device=x.device) * -1
+        cemb = self.cond_mlp(cond_in).reshape(cond_in.shape[0], -1)
+
+        use_cond = (cond_in > 0.).to(torch.float).reshape(cond_in.shape)
+        bool_emb = self.bool_mlp(use_cond).reshape(cemb.shape)
+
+        alpha_in = alpha
+        if alpha is None or cond is None:
+            alpha_in = torch.ones(t.shape[0], 1, device=x.device) * -1
+        aemb = self.alpha_mlp(alpha_in).reshape(cond_in.shape[0], -1)
+
+        h = []
+
+        for idx, (resnet, resnet2, attn) in enumerate(self.downs):
+            x = resnet(x, t, cemb, bool_emb, aemb)
+            x = resnet2(x, t, cemb, bool_emb, aemb)
+            x = attn(x)
+            h.append(x)
+
+        x = self.mid_block1(x, t, cemb, bool_emb, aemb)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t, cemb, bool_emb, aemb)
+
+        for idx, (resnet, resnet2, attn) in enumerate(self.ups):
+            hpop = h.pop()
+            x = torch.cat((x, hpop), dim=1)
+            x = resnet(x, t, cemb, bool_emb, aemb)
+            x = resnet2(x, t, cemb, bool_emb, aemb)
+            x = attn(x)
+
+        x = self.final_conv(x)
+
+        x = einops.rearrange(x, 'b t h -> b h t')
+        return x[:b_dim, :h_dim, :t_dim]
+
+
 class TemporalUnetAlpha(nn.Module):
 
     def __init__(

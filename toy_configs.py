@@ -11,7 +11,7 @@ from models.toy_diffusion_models_config import \
     VPSDEGaussianScoreFunctionSamplerConfig, \
     EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
-    TemporalUnetConfig, TemporalUnetAlphaConfig, TemporalNnetConfig, \
+    TemporalUnetConfig, TemporalGaussianUnetAlphaConfig, TemporalUnetAlphaConfig, TemporalNnetConfig, \
     TemporalTransformerUnetConfig, TemporalIDKConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
     RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
@@ -87,6 +87,11 @@ def register_configs() -> None:
         group='diffusion',
         name='base_temporal_unet',
         node=TemporalUnetConfig,
+    )
+    cs.store(
+        group='diffusion',
+        name='temporal_gaussian_unet_alpha',
+        node=TemporalGaussianUnetAlphaConfig,
     )
     cs.store(
         group='diffusion',

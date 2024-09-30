@@ -271,5 +271,5 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    make_effort_v_performance_bm(model_idxs=args.model_idx)
-    # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
+    # make_effort_v_performance_bm(model_idxs=args.model_idx)
+    make_effort_v_performance_gaussian(model_idxs=args.model_idx)

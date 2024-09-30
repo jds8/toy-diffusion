@@ -186,6 +186,15 @@ class TemporalUnetConfig(ModelConfig):
 
 
 @dataclass
+class TemporalGaussianUnetAlphaConfig(ModelConfig):
+    cond_dim: int = 1
+    _target_: str = 'models.toy_temporal.TemporalGaussianUnetAlpha'
+
+    def name(self):
+        return 'TemporalGaussianUnetAlpha'
+
+
+@dataclass
 class TemporalUnetAlphaConfig(ModelConfig):
     cond_dim: int = 1
     _target_: str = 'models.toy_temporal.TemporalUnetAlpha'

@@ -884,7 +884,7 @@ def viz_trajs(cfg, std, out_trajs, end_time):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="continuous_smc_sample_config")
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
