@@ -65,6 +65,14 @@ class ToyEvaluator:
         self.num_params = self.get_num_params()
         self.load_model()
 
+    def get_num_params(self):
+        model_parameters = filter(
+            lambda p: p.requires_grad,
+            self.diffusion_model.parameters()
+        )
+        num_params = sum([np.prod(p.size()) for p in model_parameters])
+        return num_params
+
     def load_model(self):
         model_path = get_model_path(self.cfg, self.num_params)
         try:
