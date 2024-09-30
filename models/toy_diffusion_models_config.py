@@ -186,8 +186,18 @@ class TemporalUnetConfig(ModelConfig):
 
 
 @dataclass
-class TemporalGaussianUnetAlphaConfig(ModelConfig):
+class TemporalUnetAlphaParentConfig(ModelConfig):
     cond_dim: int = 1
+    dim: int = 32
+    dim_mults: list = (1, 2, 4, 8)
+    _target_: str = 'models.toy_temporal.TemporalGaussianUnetAlpha'
+
+    def name(self):
+        return 'TemporalUnetAlphaParent'
+
+
+@dataclass
+class TemporalGaussianUnetAlphaConfig(TemporalUnetAlphaParentConfig):
     _target_: str = 'models.toy_temporal.TemporalGaussianUnetAlpha'
 
     def name(self):
@@ -195,8 +205,7 @@ class TemporalGaussianUnetAlphaConfig(ModelConfig):
 
 
 @dataclass
-class TemporalUnetAlphaConfig(ModelConfig):
-    cond_dim: int = 1
+class TemporalUnetAlphaConfig(TemporalUnetAlphaParentConfig):
     _target_: str = 'models.toy_temporal.TemporalUnetAlpha'
 
     def name(self):

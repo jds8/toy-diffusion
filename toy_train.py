@@ -27,7 +27,8 @@ from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
-    TemporalNNet, DiffusionModel, TemporalUnetAlpha
+    TemporalNNet, DiffusionModel, TemporalGaussianUnetAlpha, \
+    TemporalUnetAlpha, TemporalIDK
 from models.toy_sampler import ForwardSample, AbstractSampler, \
     AbstractContinuousSampler, ForwardSample
 
@@ -545,12 +546,16 @@ def train(cfg):
     )
     if isinstance(diffusion_model, TemporalUnet):
         trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+    if isinstance(diffusion_model, TemporalIDK):
+        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     elif isinstance(diffusion_model, TemporalUnetAlpha):
+        trainer = AlphaConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+    elif isinstance(diffusion_model, TemporalGaussianUnetAlpha):
         trainer = AlphaConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     elif isinstance(diffusion_model, TemporalTransformerUnet):
         trainer = TrajectoryConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     else:
-        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
+        raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
 
     trainer.train()
 
