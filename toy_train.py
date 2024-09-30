@@ -16,6 +16,7 @@ import torch.distributions as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import numpy as np
 
 from dataclasses import dataclass
 
@@ -89,12 +90,21 @@ class ToyTrainer:
 
         self.dl_iter = None
         self.initialize_optimizer()
+        self.num_params = self.get_num_params()
 
         if self.cfg.model_name:
             self.load_model()
 
+    def get_num_params(self):
+        model_parameters = filter(
+            lambda p: p.requires_grad,
+            self.diffusion_model.parameters()
+        )
+        num_params = sum([np.prod(p.size()) for p in model_parameters])
+        return num_params
+
     def load_model(self):
-        model_path = get_model_path(self.cfg)
+        model_path = get_model_path(self.cfg, self.num_params)
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
@@ -158,7 +168,7 @@ class ToyTrainer:
         self.last_saved_epoch = self.num_epochs
         rarity = '%.1f' % self.rarity
         saved_model_path = '{}_rare{}_v{}'.format(
-            get_model_path(self.cfg),
+            get_model_path(self.cfg, self.num_params),
             rarity,
             self.num_saves,
         )
@@ -184,38 +194,38 @@ class ToyTrainer:
             self.train_batch()
             if self.should_save():
                 saved_model_path = self._save_model()
-                if isinstance(self.example, GaussianExampleConfig):
-                    # score_function_heat_map(
-                    #     lambda x, time: self.diffusion_model(
-                    #         x=x.reshape(-1, 1),
-                    #         time=time.reshape(-1, 1),
-                    #     ),
-                    #     self.num_saves,
-                    #     t_eps=1e-5,
-                    #     mu=self.cfg.example.mu,
-                    #     sigma=self.cfg.example.sigma,
-                    # )
-                    try:
-                        score_function_heat_map(
-                            lambda x, time: self.sampler.get_sf_estimator(
-                                self.diffusion_model(
-                                    x=x,
-                                    time=time,
-                                ),
-                                xt=x.reshape(-1, 1, 1),
-                                t=time.reshape(-1)
-                            ),
-                            self.num_saves,
-                            t_eps=1e-5,
-                            # mu=self.cfg.example.mu,  # not including mu and sigma due to standardization
-                            # sigma=self.cfg.example.sigma,
-                        )
-                        # create_gif('figs/heat_maps', '{}_training_scores'.format(
-                        #     OmegaConf.to_object(self.cfg.sampler).name()
-                        # ))
-                    except Exception as e:
-                        print(e)
-                        pass
+                # if isinstance(self.example, GaussianExampleConfig):
+                #     # score_function_heat_map(
+                #     #     lambda x, time: self.diffusion_model(
+                #     #         x=x.reshape(-1, 1),
+                #     #         time=time.reshape(-1, 1),
+                #     #     ),
+                #     #     self.num_saves,
+                #     #     t_eps=1e-5,
+                #     #     mu=self.cfg.example.mu,
+                #     #     sigma=self.cfg.example.sigma,
+                #     # )
+                #     try:
+                #         score_function_heat_map(
+                #             lambda x, time: self.sampler.get_sf_estimator(
+                #                 self.diffusion_model(
+                #                     x=x,
+                #                     time=time,
+                #                 ),
+                #                 xt=x.reshape(-1, 1, 1),
+                #                 t=time.reshape(-1)
+                #             ),
+                #             self.num_saves,
+                #             t_eps=1e-5,
+                #             # mu=self.cfg.example.mu,  # not including mu and sigma due to standardization
+                #             # sigma=self.cfg.example.sigma,
+                #         )
+                #         # create_gif('figs/heat_maps', '{}_training_scores'.format(
+                #         #     OmegaConf.to_object(self.cfg.sampler).name()
+                #         # ))
+                #     except Exception as e:
+                #         print(e)
+                #         pass
                 if not self.cfg.no_wandb:
                     self.log_artifact(saved_model_path, 'diffusion_model')
                     self.delete_model(saved_model_path)
