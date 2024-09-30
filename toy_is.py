@@ -89,7 +89,7 @@ def importance_sample(cfg):
         logger.info(f'total time: {finish-start}')
 
         old_guidance = std.cfg.guidance
-        for i in range(cfg.num_rounds):
+        for i in range(cfg.num_rounds // cfg.round_divisor):
             print('round {}'.format(i))
             ##################################################
             # IS estimate using target
