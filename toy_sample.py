@@ -62,10 +62,11 @@ class ToyEvaluator:
 
         self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
 
+        self.num_params = self.get_num_params()
         self.load_model()
 
     def load_model(self):
-        model_path = get_model_path(self.cfg)
+        model_path = get_model_path(self.cfg, self.num_params)
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
