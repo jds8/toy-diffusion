@@ -910,6 +910,8 @@ def sample(cfg):
 
     end_time = torch.tensor(1., device=device)
 
+    logger.info(f'Num model params: {std.get_num_params()}')
+
     with torch.no_grad():
         if isinstance(std.diffusion_model, TemporalTransformerUnet):
             test_transformer_bm(end_time, std)

@@ -526,9 +526,9 @@ def train(cfg):
     logger = logging.getLogger("main")
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
-    os.system('echo git commit: $(git rev-parse HEAD)')
+    os.system('echo git commit: $(git rev-parse HEAD)\n')
 
-    logger.info(f"\nNUM THREADS: {torch.get_num_threads()}\n")
+    logger.info(f"NUM THREADS: {torch.get_num_threads()}\n")
     if not cfg.no_wandb:
         wandb.init(
             project="toy-diffusion",
@@ -556,6 +556,8 @@ def train(cfg):
         trainer = TrajectoryConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
     else:
         raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
+
+    logger.info(f'Num model params: {trainer.get_num_params()}')
 
     trainer.train()
 
