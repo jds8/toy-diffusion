@@ -463,7 +463,7 @@ class AlphaConditionTrainer(ConditionTrainer):
     def get_cond_model_input(self, x0_in) -> AlphaModelInput:
         x0_raw, x0 = x0_in
         alphas = (
-            torch.rand(self.cfg.batch_size) * self.cfg.max_alpha
+            torch.rand(x0_raw.shape[0]) * self.cfg.max_alpha
         ).tile(x0_raw.shape[1], 1).T.to(
             x0_raw.device
         )
