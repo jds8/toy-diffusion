@@ -106,7 +106,7 @@ def get_path(cfg: TrainConfig, model_name):
         model_name,
     )
 
-def get_model_path(cfg: TrainConfig, num_params: int):
+def get_model_path(cfg: TrainConfig, num_params: int, dim: int):
     if cfg.model_name:
         model_name = cfg.model_name
     else:
@@ -118,10 +118,11 @@ def get_model_path(cfg: TrainConfig, num_params: int):
         parameter_name = ''
         if isinstance(cfg_obj.example, GaussianExampleConfig):
             parameter_name = '_{}_{}'.format(cfg.example.mu, cfg.example.sigma)
-        model_name = "{}_{}_size_{}_{}{}_puncond_{}".format(
+        model_name = "{}_{}_size_{}_dim_{}_{}{}_puncond_{}".format(
             sampler_name,
             diffusion_name,
             num_params,
+            dim,
             example_name,
             parameter_name,
             p_uncond,

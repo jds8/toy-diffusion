@@ -105,7 +105,7 @@ class ToyTrainer:
         return num_params
 
     def load_model(self):
-        model_path = get_model_path(self.cfg, self.num_params)
+        model_path = get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim)
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
@@ -169,7 +169,7 @@ class ToyTrainer:
         self.last_saved_epoch = self.num_epochs
         rarity = '%.1f' % self.rarity
         saved_model_path = '{}_rare{}_v{}'.format(
-            get_model_path(self.cfg, self.num_params),
+            get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim),
             rarity,
             self.num_saves,
         )

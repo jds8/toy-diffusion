@@ -74,7 +74,7 @@ class ToyEvaluator:
         return num_params
 
     def load_model(self):
-        model_path = get_model_path(self.cfg, self.num_params)
+        model_path = get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim)
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
