@@ -79,7 +79,6 @@ class ToyEvaluator:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
             self.diffusion_model.load_state_dict(torch.load('{}'.format(model_path)))
-            print('successfully loaded diffusion model')
         except Exception as e:
             try:
                 self.diffusion_model.load_state_dict(
@@ -90,6 +89,8 @@ class ToyEvaluator:
                 )
             except Exception as e:
                 print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
+                return
+        print('successfully loaded diffusion model')
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
         x0_hat = self.sampler.predict_xstart(xt, model_output, t)
@@ -619,10 +620,9 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ))
     exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
-    num_exited = exited.mean()
     print('{}% of {} trajectories exited [-{}, {}]'.format(
         prop_exited,
-        num_exited,
+        bm_trajs.shape[0],
         std.likelihood.alpha,
         std.likelihood.alpha,
     ))
