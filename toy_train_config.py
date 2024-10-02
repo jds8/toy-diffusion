@@ -172,7 +172,6 @@ class ISConfig(SampleConfig):
     example: ExampleConfig = field(default_factory=ExampleConfig)
     num_rounds: int = 1
     start_round: int = 0
-    round_divisor: int = 10
     split_size: int = 10000
 
     def num_splits(self):

@@ -89,7 +89,7 @@ def importance_sample(cfg):
         logger.info(f'total time: {finish-start}')
 
         old_guidance = std.cfg.guidance
-        for i in range(cfg.num_rounds // cfg.round_divisor):
+        for i in range(cfg.num_rounds):
             print('round {}'.format(i))
             ##################################################
             # IS estimate using target
@@ -103,7 +103,7 @@ def importance_sample(cfg):
             target_estimate = torch.tensor([0.], device=device)
             diffusion_estimate = torch.tensor([0.], device=device)
             target_N = 0
-            for j in range(num_full_splits):
+            for j in range(num_full_splits + int(num_leftover > 0)):
                 std.cfg.num_samples = num_samples_list[j]
                 saps_raw, saps = proposal.sample()
                 std.cfg.guidance = old_guidance
