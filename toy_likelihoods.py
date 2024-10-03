@@ -54,6 +54,10 @@ class BrownianMotionDiffTailsLikelihood(Likelihood):
         # x0_raw is the brownian motion trajectory
         return (x0_raw.abs() > self.alpha).any(dim=1, keepdim=True).float()
 
+    def get_rarity(self, x0_raw, _):
+        x0_raw = x0_raw if x0_raw is not None else torch.zeros_like(x0_raw)
+        return x0_raw.abs().max(dim=1).values
+
 
 class DistLikelihood(Likelihood):
     def __init__(self, dist_fun_type, sigma, symmetric_llk_condition):
