@@ -185,18 +185,18 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
                 target_is_performance(alpha)
             )
             mean_quantiles = torch.load(target_file)
-            target_means.append(mean_quantiles[0])
-            target_lwr.append(mean_quantiles[1])
-            target_upr.append(mean_quantiles[2])
+            target_means.append(mean_quantiles[0].cpu())
+            target_lwr.append(mean_quantiles[1].cpu())
+            target_upr.append(mean_quantiles[2].cpu())
 
             diffusion_file = '{}/{}'.format(
                 directory,
                 diffusion_is_performance(alpha)
             )
             mean_quantiles = torch.load(diffusion_file)
-            diffusion_means.append(mean_quantiles[0])
-            diffusion_lwr.append(mean_quantiles[1])
-            diffusion_upr.append(mean_quantiles[2])
+            diffusion_means.append(mean_quantiles[0].cpu())
+            diffusion_lwr.append(mean_quantiles[1].cpu())
+            diffusion_upr.append(mean_quantiles[2].cpu())
 
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
