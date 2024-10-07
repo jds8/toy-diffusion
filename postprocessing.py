@@ -184,48 +184,42 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
                 directory,
                 target_is_performance(alpha)
             )
-            try:
-                mean_quantiles = torch.load(target_file)
-                target_means.append(mean_quantiles[0])
-                target_lwr.append(mean_quantiles[1])
-                target_upr.append(mean_quantiles[2])
+            mean_quantiles = torch.load(target_file)
+            target_means.append(mean_quantiles[0])
+            target_lwr.append(mean_quantiles[1])
+            target_upr.append(mean_quantiles[2])
 
-                diffusion_file = '{}/{}'.format(
-                    directory,
-                    diffusion_is_performance(alpha)
-                )
-                mean_quantiles = torch.load(diffusion_file)
-                diffusion_means.append(mean_quantiles[0])
-                diffusion_lwr.append(mean_quantiles[1])
-                diffusion_upr.append(mean_quantiles[2])
-            except:
-                pass
-
-        try:
-            fig = plt.figure()
-            ax = fig.add_subplot(1, 1, 1)
-            ax.set_yscale('log')
-            plt.ylim((1e-10, 1e-2))
-            plt.plot(model_idxs, target_means, color='darkblue', label='Against Target')
-            plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
-            plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion')
-            plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-            true_file = '{}/{}'.format(
+            diffusion_file = '{}/{}'.format(
                 directory,
-                true_tail_prob(alpha)
+                diffusion_is_performance(alpha)
             )
-            true = [torch.load(true_file) for _ in model_idxs]
-            plt.plot(model_idxs, true, color='red')
-            plt.legend()
-            plt.xlabel('Training Epochs')
-            plt.ylabel('Probability Estimate')
-            directory = 'figs/effort_v_performance'
-            os.makedirs(directory, exist_ok=True)
-            fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
-            plt.savefig(fig_file)
-            plt.clf()
-        except Exception as e:
-            print(f'Error plotting due to: {e}')
+            mean_quantiles = torch.load(diffusion_file)
+            diffusion_means.append(mean_quantiles[0])
+            diffusion_lwr.append(mean_quantiles[1])
+            diffusion_upr.append(mean_quantiles[2])
+
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_yscale('log')
+        plt.ylim((1e-10, 1e-2))
+        plt.plot(model_idxs, target_means, color='darkblue', label='Against Target')
+        plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
+        plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion')
+        plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
+        true_file = '{}/{}'.format(
+            directory,
+            true_tail_prob(alpha)
+        )
+        true = [torch.load(true_file) for _ in model_idxs]
+        plt.plot(model_idxs, true, color='red')
+        plt.legend()
+        plt.xlabel('Training Epochs')
+        plt.ylabel('Probability Estimate')
+        directory = 'figs/effort_v_performance'
+        os.makedirs(directory, exist_ok=True)
+        fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
+        plt.savefig(fig_file)
+        plt.clf()
 
     os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
     os.system('cp figs/effort_v_performance.tar.gz ~')
