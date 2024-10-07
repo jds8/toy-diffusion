@@ -225,7 +225,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
             plt.savefig(fig_file)
             plt.clf()
         except Exception as e:
-            print(e)
+            print(f'Error plotting due to: {e}')
 
     os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
     os.system('cp figs/effort_v_performance.tar.gz ~')
