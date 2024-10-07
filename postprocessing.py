@@ -259,11 +259,11 @@ def make_effort_v_performance_bm(model_idxs):
 def make_effort_v_performance(args):
     model_names = [
         args.model_prefix + f'v{idx}_epoch{idx}0'
-        for idx in args.model_idxs
+        for idx in args.model_idx
     ]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, args.model_idxs, args.alphas)
+    plot_effort_v_performance(model_names, args.model_idx, args.alphas)
 
 
 if __name__ == '__main__':
