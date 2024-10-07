@@ -256,22 +256,21 @@ def make_effort_v_performance_bm(model_idxs):
     plot_effort_v_performance(model_names, model_idxs, alphas)
 
 
-def make_effort_v_performance(model, example, rarity, model_idxs, alphas):
+def make_effort_v_performance(args):
     model_names = [
-        f'VPSDEVelocitySampler_{model}_' \
-        f'{example}_puncond' \
-        f'_0.1_rare{rarity}_v{idx}_epoch{idx}00'
-        for idx in model_idxs
+        args.model_prefix + f'v{idx}_epoch{idx}0'
+        for idx in args.model_idxs
     ]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, model_idxs, alphas)
+    plot_effort_v_performance(model_names, args.model_idxs, args.alphas)
 
 
 if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
 
     parser = argparse.ArgumentParser(description='Parser')
+    parser.add_argument('--model_prefix', type=str)
     parser.add_argument('--model_idx', type=int, nargs='+')
     args = parser.parse_args()
 
@@ -279,5 +278,6 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    make_effort_v_performance_bm(model_idxs=args.model_idx)
+    make_effort_v_performance(args)
+    # make_effort_v_performance_bm(model_idxs=args.model_idx)
     # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
