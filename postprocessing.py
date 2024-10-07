@@ -224,8 +224,8 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
             fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
             plt.savefig(fig_file)
             plt.clf()
-        except:
-            pass
+        except Exception as e:
+            print(e)
 
     os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
     os.system('cp figs/effort_v_performance.tar.gz ~')
