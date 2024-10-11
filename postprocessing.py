@@ -170,7 +170,7 @@ def process_performance_data(model_name):
         except:
             pass
 
-def plot_effort_v_performance(model_names, model_idxs, alphas):
+def plot_effort_v_performance(model_names, model_idxs, alphas, title):
     for alpha in alphas:
         target_means = []
         target_upr = []
@@ -214,7 +214,8 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         plt.plot(model_idxs, true, color='red')
         plt.legend()
         plt.xlabel('Training Epochs')
-        plt.ylabel('Probability Estimate')
+        plt.ylabel(f'Probability Estimate (alpha={alpha})')
+        plt.title()
         directory = 'figs/effort_v_performance'
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
@@ -233,7 +234,7 @@ def make_effort_v_performance_gaussian(model_idxs):
     alphas = [3., 4., 5.]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, model_idxs, alphas)
+    plot_effort_v_performance(model_names, model_idxs, alphas, 'Gaussian Effort vs Performance')
 
 
 def make_effort_v_performance_bm(model_idxs):
@@ -247,7 +248,7 @@ def make_effort_v_performance_bm(model_idxs):
     alphas = [3., 4.]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, model_idxs, alphas)
+    plot_effort_v_performance(model_names, model_idxs, alphas, 'Brownian Motion Effort vs Performance')
 
 
 def make_effort_v_performance(args):
@@ -257,7 +258,17 @@ def make_effort_v_performance(args):
     ]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, args.model_idx, args.alphas)
+    plot_effort_v_performance(model_names, args.model_idx, args.alphas, title)
+
+def get_title(model_prefix):
+    GAUSSIAN = 'Gaussian'
+    BM = 'BrownianMotion'
+    if GAUSSIAN in model_prefix:
+        return GAUSSIAN
+    elif BM in model_prefix:
+        return BM
+    else:
+        raise NotImplementedError
 
 
 if __name__ == '__main__':
@@ -269,10 +280,12 @@ if __name__ == '__main__':
     parser.add_argument('--alphas', type=float, nargs='+')
     args = parser.parse_args()
 
+    title = get_title(args.model_prefix)
+
     # plot_mse_llk(model_name)
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    # make_effort_v_performance(args)
+    # make_effort_v_performance(args, title)
     make_effort_v_performance_bm(model_idxs=args.model_idx)
     # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
