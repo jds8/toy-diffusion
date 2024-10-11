@@ -196,11 +196,9 @@ class ToyTrainer:
             return self.num_epochs % self.cfg.epochs_before_save == 0 and \
                    self.last_saved_epoch < self.num_epochs
         elif self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
-            out = self.training_samples_since_last_save > \
-                  self.cfg.training_samples_before_save
-            self.training_samples_thus_far += self.training_samples_since_last_save
-            self.training_samples_since_last_save = 0
-            return out
+            save = self.training_samples_since_last_save > \
+                   self.cfg.training_samples_before_save
+            return save
         else:
             raise NotImplementedError
 
@@ -208,6 +206,8 @@ class ToyTrainer:
         while True:
             self.train_batch()
             if self.should_save():
+                self.training_samples_thus_far += self.training_samples_since_last_save
+                self.training_samples_since_last_save = 0
                 saved_model_path = self._save_model()
                 # if isinstance(self.example, GaussianExampleConfig):
                 #     # score_function_heat_map(
