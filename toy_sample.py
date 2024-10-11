@@ -89,7 +89,7 @@ class ToyEvaluator:
                 )
             except Exception as e:
                 print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
-                return
+                raise e
         print('successfully loaded diffusion model')
 
     def grad_log_lik(self, xt, t, cond, model_output, cond_traj):
