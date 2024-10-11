@@ -202,9 +202,9 @@ def plot_effort_v_performance(model_names, model_idxs, alphas):
         ax = fig.add_subplot(1, 1, 1)
         ax.set_yscale('log')
         plt.ylim((1e-10, 1e-2))
-        plt.plot(model_idxs, target_means, color='darkblue', label='Against Target')
+        plt.plot(model_idxs, target_means, color='darkblue', label='Against Target', marker='x')
         plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
-        plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion')
+        plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
         plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
         true_file = '{}/{}'.format(
             directory,
@@ -273,6 +273,6 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    make_effort_v_performance(args)
-    # make_effort_v_performance_bm(model_idxs=args.model_idx)
+    # make_effort_v_performance(args)
+    make_effort_v_performance_bm(model_idxs=args.model_idx)
     # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
