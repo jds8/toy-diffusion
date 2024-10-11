@@ -83,6 +83,12 @@ class BaseConfig:
     example: ExampleConfig = field(default_factory=ExampleConfig)
 
 
+class SaveParadigm(Enum):
+    Iterations = 'iterations'
+    Epochs = 'epochs'
+    TrainingSamples = 'training_samples'
+
+
 @dataclass
 class TrainConfig(BaseConfig):
     batch_size: int = 1024
@@ -98,6 +104,8 @@ class TrainConfig(BaseConfig):
     max_alpha: float = 5.
     use_fixed_dataset: bool = False
     epochs_before_save: int = 1
+    save_paradigm: SaveParadigm = SaveParadigm.TrainingSamples
+    training_samples_before_save: int = 100000
 
 
 def get_path(cfg: TrainConfig, model_name):

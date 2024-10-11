@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from toy_plot import SDE, Trajectories, integrate, score_function_heat_map, create_gif
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
-    UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig
+    UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig, \
+    SaveParadigm
 from toy_configs import register_configs
 from toy_likelihoods import traj_dist, Likelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
@@ -119,6 +120,8 @@ class ToyTrainer:
         self.num_steps = 0
         self.num_epochs = 0
         self.last_saved_epoch = 0
+        self.training_samples_since_last_save = 0
+        self.training_samples_thus_far = 0
 
     def clip_gradients(self):
         nn.utils.clip_grad_norm_(self.diffusion_model.module.parameters(), self.cfg.max_gradient)
@@ -168,12 +171,15 @@ class ToyTrainer:
         self.num_saves += 1
         self.last_saved_epoch = self.num_epochs
         rarity = '%.1f' % self.rarity
+        save_version = self.num_saves
+        if self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
+            save_version = self.training_samples_thus_far
         saved_model_path = '{}_rare{}_v{}'.format(
             get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim),
             rarity,
-            self.num_saves,
+            save_version,
         )
-        if self.last_saved_epoch:
+        if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
             pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
@@ -184,11 +190,19 @@ class ToyTrainer:
         return saved_model_path
 
     def should_save(self) -> bool:
-        if self.cfg.use_fixed_dataset:
+        if self.cfg.save_paradigm == SaveParadigm.Iterations:
+            return self.num_steps % self.cfg.iterations_before_save == 0
+        elif self.cfg.save_paradigm == SaveParadigm.Epochs:
             return self.num_epochs % self.cfg.epochs_before_save == 0 and \
                    self.last_saved_epoch < self.num_epochs
+        elif self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
+            out = self.training_samples_since_last_save > \
+                  self.cfg.training_samples_before_save
+            self.training_samples_thus_far += self.training_samples_since_last_save
+            self.training_samples_since_last_save = 0
+            return out
         else:
-            return self.num_steps % self.cfg.iterations_before_save == 0
+            raise NotImplementedError
 
     def train(self):
         while True:
@@ -243,6 +257,7 @@ class ToyTrainer:
             self.clip_gradients()
             self.optimizer.step()
             self.num_steps += 1
+            self.training_samples_since_last_save += x0[0].shape[0]
             try:
                 grads = []
                 for param in self.diffusion_model.parameters():

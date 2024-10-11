@@ -88,7 +88,7 @@ class ToyEvaluator:
                     )
                 )
             except Exception as e:
-                print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
+                print('FAILED to load model: {} because {}'.format(model_path, e))
                 raise e
         print('successfully loaded diffusion model')
 
@@ -368,6 +368,8 @@ class ContinuousEvaluator(ToyEvaluator):
         def ode_fn(t, x):
             nonlocal fevals
             fevals += 1
+            if 'observed_idx' in kwargs:
+                x[:, kwargs['observed_idx']] = kwargs['observed_values']
             dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=False, **kwargs)
             return dx_dt
 
@@ -378,6 +380,17 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x_min.device
         )
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        # import matplotlib.pyplot as plt
+        # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
+        # bm_trajs = torch.cat([
+        #     torch.zeros(sol.shape[0], sol.shape[1], 1, 1, device=sol.device),
+        #     (sol * dt.sqrt()).cumsum(dim=-2)
+        # ], dim=2)
+        # plt.plot(torch.arange(104), bm_trajs[-10].squeeze().cpu(), color='blue')
+        # gt = torch.load('bm_dataset.pt', map_location=device)
+        # plt.plot(torch.arange(104), gt[0].squeeze().cpu(), color='red')
+        # plt.show()
+
         return SampleOutput(samples=sol, fevals=fevals)
 
     def sample_trajectories(self, **kwargs):
@@ -916,6 +929,19 @@ def sample(cfg):
         if isinstance(std.diffusion_model, TemporalTransformerUnet):
             test_transformer_bm(end_time, std)
             exit()
+
+        # dt = 1 / torch.tensor(cfg.example.sde_steps-1)
+        # data = torch.load('bm_dataset.pt', map_location=device)
+        # trajs = data[:cfg.num_samples].diff(dim=1) / dt.sqrt()
+        # max_idx = 0
+        # observed_values = trajs[:, :max_idx]
+        # observed_idx = torch.arange(max_idx)
+        # sample_traj_out = std.sample_trajectories(
+        #     cond=std.cond,
+        #     alpha=std.likelihood.alpha.reshape(-1, 1),
+        #     observed_values=observed_values,
+        #     observed_idx=observed_idx,
+        # )
 
         sample_traj_out = std.sample_trajectories(
             cond=std.cond,
