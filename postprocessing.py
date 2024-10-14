@@ -273,6 +273,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Parser')
     parser.add_argument('--model_names', type=str, nargs='+')
+    parser.add_argument('--model_idx', type=int, nargs='+')
     parser.add_argument('--alphas', type=float, nargs='+')
     args = parser.parse_args()
 
