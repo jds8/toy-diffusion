@@ -170,7 +170,11 @@ def process_performance_data(model_name):
         except:
             pass
 
-def plot_effort_v_performance(model_names, model_idxs, alphas, title):
+def plot_effort_v_performance(args, title):
+    model_names = args.model_names
+    model_idxs = args.model_idx
+    alphas = args.alphas
+    xlabel = args.xlabel
     for alpha in alphas:
         target_means = []
         target_upr = []
@@ -213,7 +217,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas, title):
         true = [torch.load(true_file) for _ in model_idxs]
         plt.plot(model_idxs, true, color='red')
         plt.legend()
-        plt.xlabel('Training Epochs')
+        plt.xlabel(xlabel)
         plt.ylabel(f'Probability Estimate (alpha={alpha})')
         plt.title(title)
         directory = 'figs/effort_v_performance'
@@ -226,7 +230,7 @@ def plot_effort_v_performance(model_names, model_idxs, alphas, title):
     os.system('cp figs/effort_v_performance.tar.gz ~')
 
 
-def make_effort_v_performance_gaussian(model_idxs):
+def make_effort_v_performance_gaussian(model_idxs, xlabel):
     model_names = [
         'VPSDEVelocitySampler_TemporalIDK_GaussianExampleConfig_1.0_2.0_puncond_0.1_rare5.7_v{}_epoch{}00'.format(idx, idx)
         for idx in model_idxs
@@ -234,10 +238,13 @@ def make_effort_v_performance_gaussian(model_idxs):
     alphas = [3., 4., 5.]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, model_idxs, alphas, 'Gaussian Effort vs Performance')
+    plot_effort_v_performance(
+        args,
+        'Gaussian Effort vs Performance',
+    )
 
 
-def make_effort_v_performance_bm(model_idxs):
+def make_effort_v_performance_bm(model_idxs, xlabel):
     model_names = [
         'VPSDEVelocitySampler_TemporalUnetAlpha_' \
         'BrownianMotionDiffExampleConfig_puncond' \
@@ -248,13 +255,20 @@ def make_effort_v_performance_bm(model_idxs):
     alphas = [3., 4.]
     for model_name in model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, model_idxs, alphas, 'Brownian Motion Effort vs Performance')
+    plot_effort_v_performance(
+        args,
+        'Brownian Motion Effort vs Performance',
+    )
 
 
-def make_effort_v_performance(args, title):
+def make_effort_v_performance(args):
+    title = get_title(args.model_names[0])
     for model_name in args.model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(args.model_names, args.model_idx, args.alphas, title)
+    plot_effort_v_performance(
+        args,
+        title,
+    )
 
 
 def get_title(model_prefix):
@@ -275,14 +289,13 @@ if __name__ == '__main__':
     parser.add_argument('--model_names', type=str, nargs='+')
     parser.add_argument('--model_idx', type=int, nargs='+')
     parser.add_argument('--alphas', type=float, nargs='+')
+    parser.add_argument('--xlabel', type=float, nargs='+')
     args = parser.parse_args()
-
-    title = get_title(args.model_names[0])
 
     # plot_mse_llk(model_name)
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    make_effort_v_performance(args, title)
-    # make_effort_v_performance_bm(model_idxs=args.model_idx)
-    # make_effort_v_performance_gaussian(model_idxs=args.model_idx)
+    make_effort_v_performance(args)
+    # make_effort_v_performance_bm(args)
+    # make_effort_v_performance_gaussian(args)
