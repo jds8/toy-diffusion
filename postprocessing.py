@@ -258,8 +258,8 @@ def make_effort_v_performance(args, title):
 
 
 def get_title(model_prefix):
-    GAUSSIAN = 'Gaussian'
-    BM = 'BrownianMotion'
+    GAUSSIAN = 'Gaussian Performance vs. Effort'
+    BM = 'BrownianMotion Performance vs. Effort'
     if GAUSSIAN in model_prefix:
         return GAUSSIAN
     elif BM in model_prefix:
