@@ -276,7 +276,7 @@ if __name__ == '__main__':
     parser.add_argument('--alphas', type=float, nargs='+')
     args = parser.parse_args()
 
-    title = get_title(args.model_prefix)
+    title = get_title(args.model_names[0])
 
     # plot_mse_llk(model_name)
     # plot_is_estimates(model_name)
