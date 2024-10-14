@@ -60,6 +60,7 @@ def iterative_importance_estimate(
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
     logger = logging.getLogger("main")
+    logger.info('run type: importance sampling')
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
     os.system('echo git commit: $(git rev-parse HEAD)')

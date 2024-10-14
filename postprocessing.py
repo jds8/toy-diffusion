@@ -251,14 +251,11 @@ def make_effort_v_performance_bm(model_idxs):
     plot_effort_v_performance(model_names, model_idxs, alphas, 'Brownian Motion Effort vs Performance')
 
 
-def make_effort_v_performance(args):
-    model_names = [
-        args.model_prefix + f'v{idx}_epoch{idx}0'
-        for idx in args.model_idx
-    ]
-    for model_name in model_names:
+def make_effort_v_performance(args, title):
+    for model_name in args.model_names:
         process_performance_data(model_name)
-    plot_effort_v_performance(model_names, args.model_idx, args.alphas, title)
+    plot_effort_v_performance(args.model_names, args.model_idx, args.alphas, title)
+
 
 def get_title(model_prefix):
     GAUSSIAN = 'Gaussian'
@@ -275,8 +272,7 @@ if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
 
     parser = argparse.ArgumentParser(description='Parser')
-    parser.add_argument('--model_prefix', type=str)
-    parser.add_argument('--model_idx', type=int, nargs='+')
+    parser.add_argument('--model_names', type=str, nargs='+')
     parser.add_argument('--alphas', type=float, nargs='+')
     args = parser.parse_args()
 
@@ -286,6 +282,6 @@ if __name__ == '__main__':
     # plot_is_estimates(model_name)
     # plot_is_vs_alpha(model_name)
 
-    # make_effort_v_performance(args, title)
-    make_effort_v_performance_bm(model_idxs=args.model_idx)
+    make_effort_v_performance(args, title)
+    # make_effort_v_performance_bm(model_idxs=args.model_idx)
     # make_effort_v_performance_gaussian(model_idxs=args.model_idx)

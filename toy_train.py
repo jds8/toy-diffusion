@@ -539,6 +539,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_train_config")
 def train(cfg):
     logger = logging.getLogger("main")
+    logger.info('run type: train')
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
     os.system('echo git commit: $(git rev-parse HEAD)\n')

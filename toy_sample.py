@@ -909,6 +909,7 @@ def viz_trajs(cfg, std, out_trajs, end_time):
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
     logger = logging.getLogger("main")
+    logger.info('run type: sample')
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
 
     os.system('echo git commit: $(git rev-parse HEAD)')
