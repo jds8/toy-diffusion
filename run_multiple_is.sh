@@ -26,17 +26,13 @@ do
     do
         for start_round in $(seq 0 10 90)
         do
-	    pushd .
-	    cd /ubc/cs/research/ubc_ml/jsefas/toy-diffusion 2> /dev/null
-            run=0
-            for round in $(seq $start_round 1 $((start_round+num_rounds)))
-            do
-                python3 check_run.py --model $model --round $start_round --alpha $alpha 2> /dev/null
-                run=$((run+$?))
-            done
+	        pushd .
+	        cd /ubc/cs/research/ubc_ml/jsefas/toy-diffusion 2> /dev/null
+            round=$((start_round+num_rounds-1))
+            python3 check_run.py --model $model --round $start_round --alpha $alpha 2> /dev/null
             popd
-            if [[ $run -gt 0 ]]
-            then 
+            if [[ $? -gt 0 ]]
+            then
                 sbatch ubcml_is_toy_diffusion.sh $alpha ${num_samples[$alpha]} $model $start_round $num_rounds $dim ${gaussian_params[$dim]}
             else
                 echo skipping $model
