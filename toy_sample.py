@@ -3,6 +3,8 @@ import os
 import warnings
 import logging
 
+from pathlib import Path
+
 from collections import namedtuple
 
 import hydra
@@ -75,6 +77,13 @@ class ToyEvaluator:
 
     def load_model(self):
         model_path = get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim)
+        path = Path(model_path)
+        if not os.path.isfile(model_path):
+            # scp from ubcml
+            os.system('ssh -t jsefas@remote.cs.ubc.ca "scp submit-ml:/ubc/cs/research/ubc_ml/jsefas/toy-diffusion/diffusion_models/{} ~"'.format(path.name))
+            os.system('scp jsefas@remote.cs.ubc.ca:~/{} {}'.format(path.name, model_path))
+            if not os.path.isfile(model_path):
+                raise Exception('cannot find file: {}'.format(model_path))
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
