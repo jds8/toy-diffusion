@@ -89,7 +89,9 @@ class ToyTrainer:
 
         self.num_saves = 0
         self.rarity = torch.tensor(0.)
+        self.total_num_training_points = 0
 
+        self.dl = None
         self.dl_iter = None
         self.initialize_optimizer()
         self.num_params = self.get_num_params()
@@ -167,6 +169,14 @@ class ToyTrainer:
         print('removing {}'.format(saved_model_path))
         os.remove(saved_model_path)
 
+    def construct_metadata(self):
+        metadata = dict(self.cfg)
+        metadata['num_parameters'] = self.num_params
+        metadata['rarity'] = self.rarity
+        metadata['training_samples_thus_far'] = self.training_samples_thus_far
+        metadata['total_num_training_points'] = self.total_num_training_points
+        return metadata
+
     def _save_model(self):
         self.num_saves += 1
         self.last_saved_epoch = self.num_epochs
@@ -183,7 +193,10 @@ class ToyTrainer:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
             pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
-            torch.save(self.diffusion_model.module.state_dict(), saved_model_path)
+            torch.save({
+                'model_state_dict': self.diffusion_model.module.state_dict(),
+                'metadata': self.construct_metadata()
+            }, saved_model_path)
             print('saved model {}'.format(save_version))
         except Exception as e:
             print('could not save model because {}'.format(e))
@@ -346,8 +359,9 @@ class ToyTrainer:
             dataset = torch.load('bm_dataset.pt', map_location=device)
         else:
             raise NotImplementedError
-        dl = DataLoader(dataset, batch_size=self.cfg.batch_size)
-        self.dl_iter = iter(dl)
+        self.total_num_training_points = dataset.shape[0]
+        self.dl = DataLoader(dataset, batch_size=self.cfg.batch_size)
+        self.dl_iter = iter(self.dl)
 
     def get_batch(self):
         if self.dl_iter is None:
@@ -356,7 +370,7 @@ class ToyTrainer:
             x0_raw = next(self.dl_iter)
         except StopIteration:
             self.num_epochs += 1
-            self.set_dl_iter()
+            self.dl_iter = iter(self.dl)
             x0_raw = next(self.dl_iter)
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
