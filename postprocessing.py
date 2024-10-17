@@ -172,7 +172,7 @@ def process_performance_data(model_name):
 
 def plot_effort_v_performance(args, title):
     model_names = args.model_names
-    model_idxs = args.model_idx
+    model_idxs = get_model_idx(args)
     alphas = args.alphas
     xlabel = args.xlabel
     for alpha in alphas:
@@ -269,6 +269,15 @@ def make_effort_v_performance(args):
         args,
         title,
     )
+
+
+def get_model_idx(args):
+    if args.model_idx:
+        return args.model_idx
+    idxs = []
+    for model_name in args.model_names:
+        idxs.append(re.search('.*v([1-9]+)', model_name)[1])
+    return idxs
 
 
 def get_dim(args):
