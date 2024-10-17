@@ -262,7 +262,7 @@ def make_effort_v_performance_bm(model_idxs, xlabel):
 
 
 def make_effort_v_performance(args):
-    title = get_title(args.model_names[0])
+    title = get_title(args)
     for model_name in args.model_names:
         process_performance_data(model_name)
     plot_effort_v_performance(
@@ -271,13 +271,22 @@ def make_effort_v_performance(args):
     )
 
 
-def get_title(model_prefix):
-    GAUSSIAN = 'Gaussian Performance vs. Effort'
-    BM = 'BrownianMotion Performance vs. Effort'
+def get_dim(args):
+    if args.dim:
+        return args.dim
+    return re.search('.*dim_([0-9]+)_.*', args.model_names[0])[1]
+
+
+def get_title(args):
+    model_prefix = args.model_names[0]
+    dim = get_dim(args)
+    PVE = 'Performance vs. Effort (dim={})'.format(dim)
+    GAUSSIAN = 'Gaussian'
+    BM = 'BrownianMotion'
     if GAUSSIAN in model_prefix:
-        return GAUSSIAN
+        return ' '.join([GAUSSIAN, PVE])
     elif BM in model_prefix:
-        return BM
+        return ' '.join([BM, PVE])
     else:
         raise NotImplementedError
 
@@ -288,6 +297,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parser')
     parser.add_argument('--model_names', type=str, nargs='+')
     parser.add_argument('--model_idx', type=int, nargs='+')
+    parser.add_argument('--dim', type=int)
     parser.add_argument('--alphas', type=float, nargs='+')
     parser.add_argument('--xlabel', type=float, nargs='+')
     args = parser.parse_args()
