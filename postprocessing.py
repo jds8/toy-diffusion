@@ -176,46 +176,47 @@ def plot_effort_v_performance(args, title):
     alphas = args.alphas
     xlabel = args.xlabel
     for alpha in alphas:
-        target_means = []
-        target_upr = []
-        target_lwr = []
-        diffusion_means = []
-        diffusion_upr = []
-        diffusion_lwr = []
-        for model_name in model_names:
-            directory = 'figs/{}'.format(model_name)
-            target_file = '{}/{}'.format(
-                directory,
-                target_is_performance(alpha)
-            )
-            mean_quantiles = torch.load(target_file)
-            target_means.append(mean_quantiles[0].cpu())
-            target_lwr.append(mean_quantiles[1].cpu())
-            target_upr.append(mean_quantiles[2].cpu())
+        for dim in get_dims(args):
+            target_means = []
+            target_upr = []
+            target_lwr = []
+            diffusion_means = []
+            diffusion_upr = []
+            diffusion_lwr = []
+            for model_name in model_names:
+                directory = 'figs/{}'.format(model_name)
+                target_file = '{}/{}'.format(
+                    directory,
+                    target_is_performance(alpha)
+                )
+                mean_quantiles = torch.load(target_file)
+                target_means.append(mean_quantiles[0].cpu())
+                target_lwr.append(mean_quantiles[1].cpu())
+                target_upr.append(mean_quantiles[2].cpu())
 
-            diffusion_file = '{}/{}'.format(
-                directory,
-                diffusion_is_performance(alpha)
-            )
-            mean_quantiles = torch.load(diffusion_file)
-            diffusion_means.append(mean_quantiles[0].cpu())
-            diffusion_lwr.append(mean_quantiles[1].cpu())
-            diffusion_upr.append(mean_quantiles[2].cpu())
+                diffusion_file = '{}/{}'.format(
+                    directory,
+                    diffusion_is_performance(alpha)
+                )
+                mean_quantiles = torch.load(diffusion_file)
+                diffusion_means.append(mean_quantiles[0].cpu())
+                diffusion_lwr.append(mean_quantiles[1].cpu())
+                diffusion_upr.append(mean_quantiles[2].cpu())
 
-        fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1)
-        ax.set_yscale('log')
-        plt.ylim((1e-10, 1e-2))
-        plt.plot(model_idxs, target_means, color='darkblue', label='Against Target', marker='x')
-        plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
-        plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
-        plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-        true_file = '{}/{}'.format(
-            directory,
-            true_tail_prob(alpha)
-        )
-        true = [torch.load(true_file) for _ in model_idxs]
-        plt.plot(model_idxs, true, color='red')
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 1, 1)
+            ax.set_yscale('log')
+            plt.ylim((1e-10, 1e-2))
+            plt.plot(model_idxs, target_means, color='darkblue', label='Against Target', marker='x')
+            plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
+            plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
+            plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
+            true_file = '{}/{}'.format(
+                directory,
+                true_tail_prob(alpha)
+            )
+            true = [torch.load(true_file) for _ in model_idxs]
+            plt.plot(model_idxs, true, color='red', label='dim {}'.format(dim))
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel(f'Probability Estimate (alpha={alpha})')
@@ -280,16 +281,18 @@ def get_model_idx(args):
     return idxs
 
 
-def get_dim(args):
-    if args.dim:
-        return args.dim
-    return re.search('.*dim_([0-9]+)_.*', args.model_names[0])[1]
+def get_dims(args):
+    if args.dims:
+        return args.dims
+    dims = []
+    for model_name in args.model_names:
+        dims.append(re.search('.*dim_([0-9]+)_.*', model_name)[1])
+    return list(set(dims))
 
 
 def get_title(args):
     model_prefix = args.model_names[0]
-    dim = get_dim(args)
-    PVE = 'Performance vs. Effort (dim={})'.format(dim)
+    PVE = 'Performance vs. Effort'
     GAUSSIAN = 'Gaussian'
     BM = 'BrownianMotion'
     if GAUSSIAN in model_prefix:
@@ -306,7 +309,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parser')
     parser.add_argument('--model_names', type=str, nargs='+')
     parser.add_argument('--model_idx', type=int, nargs='+')
-    parser.add_argument('--dim', type=int)
+    parser.add_argument('--dims', type=int, nargs='+')
     parser.add_argument('--alphas', type=float, nargs='+')
     parser.add_argument('--xlabel', type=float, nargs='+')
     args = parser.parse_args()
