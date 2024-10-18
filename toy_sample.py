@@ -85,7 +85,6 @@ class ToyEvaluator:
     def load_model(self):
         model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
         path = Path(model_path)
-        import pdb; pdb.set_trace()
         if not os.path.isfile(model_path):
             # scp from ubcml
             os.system('ssh -t jsefas@remote.cs.ubc.ca "scp submit-ml:/ubc/cs/research/ubc_ml/jsefas/toy-diffusion/diffusion_models/{} ~"'.format(path.name))
