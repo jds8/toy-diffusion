@@ -169,24 +169,43 @@ class ToyTrainer:
         print('removing {}'.format(saved_model_path))
         os.remove(saved_model_path)
 
+    def get_params(self) -> str:
+        ex_cfg = OmegaConf.to_object(self.cfg).example
+        if isinstance(ex_cfg, GaussianExampleConfig):
+            return 'mu={}_sigma={}'.format(
+                self.cfg.example.mu,
+                self.cfg.example.sigma
+            )
+        elif isinstance(ex_cfg, BrownianMotionDiffExampleConfig):
+            return 'steps={}_drift={}_diffusion={}'.format(
+                self.cfg.example.sde_steps,
+                self.cfg.example.sde_drift,
+                self.cfg.example.sde_diffusion
+            )
+        elif isinstance(ex_cfg, StudentTExampleConfig):
+            return 'nu={}'.format(self.cfg.example.nu)
+        else:
+            raise NotImplementedError
+
     def construct_metadata(self):
         metadata = dict(self.cfg)
-        metadata['num_parameters'] = self.num_params
-        metadata['rarity'] = self.rarity
-        metadata['training_samples_thus_far'] = self.training_samples_thus_far
-        metadata['total_num_training_points'] = self.total_num_training_points
+        metadata['training_results'] = {}
+        metadata['training_results']['num_parameters'] = self.num_params
+        metadata['training_results']['rarity'] = self.rarity
+        metadata['training_results']['training_samples_thus_far'] = self.training_samples_thus_far
+        metadata['training_results']['dataset_size'] = self.dataset_size
+        metadata['training_results']['params'] = self.get_params()
+        metadata['training_results']['p_uncond'] = self.cfg.p_uncond
         return metadata
 
     def _save_model(self):
         self.num_saves += 1
         self.last_saved_epoch = self.num_epochs
-        rarity = '%.1f' % self.rarity
         save_version = self.num_saves
         if self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
             save_version = self.training_samples_thus_far
-        saved_model_path = '{}_rare{}_v{}'.format(
-            get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim),
-            rarity,
+        saved_model_path = '{}_v{}'.format(
+            get_model_path(self.cfg, self.cfg.diffusion.dim),
             save_version,
         )
         if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
@@ -197,7 +216,7 @@ class ToyTrainer:
                 'model_state_dict': self.diffusion_model.module.state_dict(),
                 'metadata': self.construct_metadata()
             }, saved_model_path)
-            print('saved model {}'.format(save_version))
+            print('saved model {}'.format(saved_model_path))
         except Exception as e:
             print('could not save model because {}'.format(e))
         return saved_model_path
@@ -209,54 +228,25 @@ class ToyTrainer:
             return self.num_epochs % self.cfg.epochs_before_save == 0 and \
                    self.last_saved_epoch < self.num_epochs
         elif self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
-            save = self.training_samples_since_last_save > \
+            save = self.training_samples_since_last_save >= \
                    self.cfg.training_samples_before_save
             return save
         else:
             raise NotImplementedError
 
     def train(self):
-        while True:
+        continue_training = True
+        while continue_training:
             self.train_batch()
             if self.should_save():
                 self.training_samples_thus_far += self.training_samples_since_last_save
                 self.training_samples_since_last_save = 0
                 saved_model_path = self._save_model()
-                # if isinstance(self.example, GaussianExampleConfig):
-                #     # score_function_heat_map(
-                #     #     lambda x, time: self.diffusion_model(
-                #     #         x=x.reshape(-1, 1),
-                #     #         time=time.reshape(-1, 1),
-                #     #     ),
-                #     #     self.num_saves,
-                #     #     t_eps=1e-5,
-                #     #     mu=self.cfg.example.mu,
-                #     #     sigma=self.cfg.example.sigma,
-                #     # )
-                #     try:
-                #         score_function_heat_map(
-                #             lambda x, time: self.sampler.get_sf_estimator(
-                #                 self.diffusion_model(
-                #                     x=x,
-                #                     time=time,
-                #                 ),
-                #                 xt=x.reshape(-1, 1, 1),
-                #                 t=time.reshape(-1)
-                #             ),
-                #             self.num_saves,
-                #             t_eps=1e-5,
-                #             # mu=self.cfg.example.mu,  # not including mu and sigma due to standardization
-                #             # sigma=self.cfg.example.sigma,
-                #         )
-                #         # create_gif('figs/heat_maps', '{}_training_scores'.format(
-                #         #     OmegaConf.to_object(self.cfg.sampler).name()
-                #         # ))
-                #     except Exception as e:
-                #         print(e)
-                #         pass
                 if not self.cfg.no_wandb:
                     self.log_artifact(saved_model_path, 'diffusion_model')
                     self.delete_model(saved_model_path)
+            continue_training = self.cfg.last_training_sample < 0 or \
+                                self.training_samples_thus_far < self.cfg.last_training_sample
 
     def train_batch(self):
         if self.cfg.use_fixed_dataset:
@@ -359,8 +349,12 @@ class ToyTrainer:
             dataset = torch.load('bm_dataset.pt', map_location=device)
         else:
             raise NotImplementedError
-        self.total_num_training_points = dataset.shape[0]
-        self.dl = DataLoader(dataset, batch_size=self.cfg.batch_size)
+        self.dataset_size = dataset.shape[0]
+        self.dl = DataLoader(
+            dataset,
+            batch_size=self.cfg.batch_size,
+            pin_memory=True,
+        )
         self.dl_iter = iter(self.dl)
 
     def get_batch(self):

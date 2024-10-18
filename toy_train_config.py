@@ -106,6 +106,7 @@ class TrainConfig(BaseConfig):
     epochs_before_save: int = 1
     save_paradigm: SaveParadigm = SaveParadigm.TrainingSamples
     training_samples_before_save: int = 100000
+    last_training_sample: int = -1
 
 
 def get_path(cfg: TrainConfig, model_name):
@@ -114,7 +115,7 @@ def get_path(cfg: TrainConfig, model_name):
         model_name,
     )
 
-def get_model_path(cfg: TrainConfig, num_params: int, dim: int):
+def get_model_path(cfg: TrainConfig, dim: int):
     if cfg.model_name:
         model_name = cfg.model_name
     else:
@@ -122,18 +123,11 @@ def get_model_path(cfg: TrainConfig, num_params: int, dim: int):
         sampler_name = cfg_obj.sampler.name()
         diffusion_name = cfg_obj.diffusion.name()
         example_name = cfg_obj.example.name()
-        p_uncond = cfg_obj.p_uncond
-        parameter_name = ''
-        if isinstance(cfg_obj.example, GaussianExampleConfig):
-            parameter_name = '_{}_{}'.format(cfg.example.mu, cfg.example.sigma)
-        model_name = "{}_{}_size_{}_dim_{}_{}{}_puncond_{}".format(
+        model_name = "{}_{}_dim_{}_{}".format(
             sampler_name,
             diffusion_name,
-            num_params,
             dim,
             example_name,
-            parameter_name,
-            p_uncond,
         )
     return get_path(cfg, model_name)
 

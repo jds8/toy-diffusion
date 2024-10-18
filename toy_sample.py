@@ -75,9 +75,17 @@ class ToyEvaluator:
         num_params = sum([np.prod(p.size()) for p in model_parameters])
         return num_params
 
+    def load_model_state_dict(self, model_path, map_location):
+        model = torch.load('{}'.format(model_path), map_location=map_location)
+        if 'model_state_dict' in model:
+            self.diffusion_model.load_state_dict(model['model_state_dict'])
+        else:
+            self.diffusion_model.load_state_dict(model)
+
     def load_model(self):
-        model_path = get_model_path(self.cfg, self.num_params, self.cfg.diffusion.dim)
+        model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
         path = Path(model_path)
+        import pdb; pdb.set_trace()
         if not os.path.isfile(model_path):
             # scp from ubcml
             os.system('ssh -t jsefas@remote.cs.ubc.ca "scp submit-ml:/ubc/cs/research/ubc_ml/jsefas/toy-diffusion/diffusion_models/{} ~"'.format(path.name))
@@ -87,15 +95,10 @@ class ToyEvaluator:
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
-            self.diffusion_model.load_state_dict(torch.load('{}'.format(model_path)))
+            self.load_model_state_dict(model_path)
         except Exception as e:
             try:
-                self.diffusion_model.load_state_dict(
-                    torch.load(
-                        '{}'.format(model_path),
-                        map_location='cpu'
-                    )
-                )
+                self.load_model_state_dict(model_path, map_location='cpu')
             except Exception as e:
                 print('FAILED to load model: {} because {}'.format(model_path, e))
                 raise e
