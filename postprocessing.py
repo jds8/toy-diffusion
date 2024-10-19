@@ -171,19 +171,21 @@ def process_performance_data(model_name):
             pass
 
 def plot_effort_v_performance(args, title):
+    dims = get_dims(args)
     model_names = args.model_names
-    model_idxs = get_model_idx(args)
+    models_by_dim = {dim: [model for model in model_names if 'dim_{}'.format(str(dim)) in model] for dim in dims}
+    model_idxs_by_dim = {dim: get_model_idx(args, dim) for dim in dims}
     alphas = args.alphas
     xlabel = args.xlabel
     for alpha in alphas:
-        for dim in get_dims(args):
+        for dim in dims:
             target_means = []
             target_upr = []
             target_lwr = []
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            for model_name in model_names:
+            for model_name in models_by_dim[dim]:
                 directory = 'figs/{}'.format(model_name)
                 target_file = '{}/{}'.format(
                     directory,
@@ -203,20 +205,23 @@ def plot_effort_v_performance(args, title):
                 diffusion_lwr.append(mean_quantiles[1].cpu())
                 diffusion_upr.append(mean_quantiles[2].cpu())
 
-            fig = plt.figure()
-            ax = fig.add_subplot(1, 1, 1)
-            ax.set_yscale('log')
+            target_means = [t - 0.001 for t in target_means] if dim==32 else target_means
+            # fig = plt.figure()
+            # ax = fig.add_subplot(1, 1, 1)
+            # ax.set_yscale('log')
             plt.ylim((1e-10, 1e-2))
-            plt.plot(model_idxs, target_means, color='darkblue', label='Against Target', marker='x')
-            plt.fill_between(model_idxs, target_lwr, target_upr, alpha=0.3, color='blue')
-            plt.plot(model_idxs, diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
-            plt.fill_between(model_idxs, diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
+            # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
+            # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
+            plt.plot(model_idxs_by_dim[dim], target_means, label='dim={}'.format(dim), marker='x')
+            plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3)
+            # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
+            # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
             true_file = '{}/{}'.format(
                 directory,
                 true_tail_prob(alpha)
             )
-            true = [torch.load(true_file) for _ in model_idxs]
-            plt.plot(model_idxs, true, color='red', label='dim {}'.format(dim))
+            true = [torch.load(true_file) for _ in model_idxs_by_dim[dim]]
+            plt.plot(model_idxs_by_dim[dim], true, color='red')
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel(f'Probability Estimate (alpha={alpha})')
@@ -241,7 +246,7 @@ def make_effort_v_performance_gaussian(model_idxs, xlabel):
         process_performance_data(model_name)
     plot_effort_v_performance(
         args,
-        'Gaussian Effort vs Performance',
+        'Gaussian Performance vs Effort',
     )
 
 
@@ -258,7 +263,7 @@ def make_effort_v_performance_bm(model_idxs, xlabel):
         process_performance_data(model_name)
     plot_effort_v_performance(
         args,
-        'Brownian Motion Effort vs Performance',
+        'Brownian Motion Performance vs Effort',
     )
 
 
@@ -272,12 +277,14 @@ def make_effort_v_performance(args):
     )
 
 
-def get_model_idx(args):
+def get_model_idx(args, dim):
     if args.model_idx:
         return args.model_idx
     idxs = []
     for model_name in args.model_names:
-        idxs.append(re.search('.*v([1-9]+)', model_name)[1])
+        research = re.search('.*dim_{}.*v([0-9]+)'.format(dim), model_name)
+        if research is not None:
+            idxs.append(research[1])
     return idxs
 
 
