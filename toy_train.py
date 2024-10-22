@@ -342,11 +342,11 @@ class ToyTrainer:
 
     def set_dl_iter(self):
         if isinstance(self.example, GaussianExampleConfig):
-            dataset = torch.load('gaussian_dataset.pt', map_location=device)
+            dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, StudentTExampleConfig):
-            dataset = torch.load('student_t_dataset.pt', map_location=device)
+            dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
-            dataset = torch.load('bm_dataset.pt', map_location=device)
+            dataset = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
         else:
             raise NotImplementedError
         self.dataset_size = dataset.shape[0]
