@@ -33,7 +33,7 @@ def plot_data(model_name, suffix):
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         if filename.endswith(torch_suffix):
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             mse_data = torch.stack([mse_data, data]) if mse_data else data
             alpha = pattern.search(filename).group(1)
             alphas.append(alpha)
@@ -90,17 +90,17 @@ def plot_is_vs_alpha(model_name):
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         if target_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             target_is.append(data[0])
             alpha = pattern.search(filename).group(1)
             target_alphas.append(float(alpha))
         elif diffusion_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             diffusion_is.append(data[0])
             alpha = pattern.search(filename).group(1)
             diffusion_alphas.append(float(alpha))
         elif true_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             trues.append(data)
             alpha = pattern.search(filename).group(1)
             true_alphas.append(float(alpha))
@@ -126,7 +126,7 @@ def process_performance_data(model_name):
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         if target_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             alpha = float(pattern.search(filename).group(1))
             target_alphas.append(alpha)
             if alpha in target_alpha_map:
@@ -134,7 +134,7 @@ def process_performance_data(model_name):
             else:
                 target_alpha_map[alpha] = [data[0]]
         elif diffusion_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             alpha = float(pattern.search(filename).group(1))
             diffusion_alphas.append(alpha)
             if alpha in diffusion_alpha_map:
@@ -142,7 +142,7 @@ def process_performance_data(model_name):
             else:
                 diffusion_alpha_map[alpha] = [data[0]]
         elif true_suffix in filename:
-            data = torch.load(file_path, map_location=device)
+            data = torch.load(file_path, map_location=device, weights_only=True)
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
     for alpha in true_alpha_map.keys():
@@ -185,13 +185,19 @@ def plot_effort_v_performance(args, title):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
+            directory = 'figs/{}'.format(models_by_dim[dim][0])
+            true_file = '{}/{}'.format(
+                directory,
+                true_tail_prob(alpha)
+            )
+            true = [torch.load(true_file, weights_only=True) for _ in model_idxs_by_dim[dim]]
             for model_name in models_by_dim[dim]:
                 directory = 'figs/{}'.format(model_name)
                 target_file = '{}/{}'.format(
                     directory,
                     target_is_performance(alpha)
                 )
-                mean_quantiles = torch.load(target_file)
+                mean_quantiles = torch.abs(torch.load(target_file) - true, weights_only=True)
                 target_means.append(mean_quantiles[0].cpu())
                 target_lwr.append(mean_quantiles[1].cpu())
                 target_upr.append(mean_quantiles[2].cpu())
@@ -200,7 +206,7 @@ def plot_effort_v_performance(args, title):
                     directory,
                     diffusion_is_performance(alpha)
                 )
-                mean_quantiles = torch.load(diffusion_file)
+                mean_quantiles = torch.load(diffusion_file, weights_only=True)
                 diffusion_means.append(mean_quantiles[0].cpu())
                 diffusion_lwr.append(mean_quantiles[1].cpu())
                 diffusion_upr.append(mean_quantiles[2].cpu())
@@ -216,11 +222,6 @@ def plot_effort_v_performance(args, title):
             plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3)
             # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-            true_file = '{}/{}'.format(
-                directory,
-                true_tail_prob(alpha)
-            )
-            true = [torch.load(true_file) for _ in model_idxs_by_dim[dim]]
             plt.plot(model_idxs_by_dim[dim], true, color='red')
         plt.legend()
         plt.xlabel(xlabel)
