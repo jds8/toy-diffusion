@@ -82,7 +82,7 @@ class ToyTrainer:
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 
-        self.diffusion_model = nn.DataParallel(diffusion_model).to(device)
+        self.diffusion_model = nn.DistributedDataParallel(diffusion_model).to(device)
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
@@ -353,7 +353,7 @@ class ToyTrainer:
         self.dl = DataLoader(
             dataset,
             batch_size=self.cfg.batch_size,
-            pin_memory=True,
+            pin_memory=False,
         )
         self.dl_iter = iter(self.dl)
 
