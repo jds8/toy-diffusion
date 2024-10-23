@@ -35,7 +35,7 @@ class GaussianExampleConfig(ExampleConfig):
 class BrownianMotionExampleConfig(ExampleConfig):
     sde_drift: float = 0.
     sde_diffusion: float = 1.
-    sde_steps: int = 1000
+    sde_steps: int = 104
 
     def name(self):
         return 'BrownianMotionExampleConfig'
