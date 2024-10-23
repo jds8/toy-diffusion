@@ -112,6 +112,15 @@ def plot_is_vs_alpha(model_name):
     trues = torch.tensor(trues)[idx]
     plot_is_estimates2(sorted_true_alphas, target_is, diffusion_is, trues, model_name, 'is_vs_alpha')
 
+def get_true_tail_prob(model, alpha):
+    directory = 'figs/{}'.format(model)
+    true_file = '{}/{}'.format(
+        directory,
+        true_tail_prob(alpha)
+    )
+    true = torch.load(true_file, weights_only=True)
+    return true, directory
+
 def process_performance_data(model_name):
     target_suffix = 'target_is_stats'
     diffusion_suffix = 'diffusion_is_stats'
@@ -147,13 +156,20 @@ def process_performance_data(model_name):
             true_alpha_map[alpha] = data
     for alpha in true_alpha_map.keys():
         try:
+            true, _ = get_true_tail_prob(model_name, alpha)
             target = torch.stack(target_alpha_map[alpha])
+            target_abs_errors = torch.abs(target - true)
             target_performance_data = torch.stack([
-                target.mean(), target.quantile(0.05), target.quantile(0.95)
+                target_abs_errors.mean(),
+                target_abs_errors.quantile(0.05),
+                target_abs_errors.quantile(0.95)
             ])
             diffusion = torch.stack(diffusion_alpha_map[alpha])
+            diffusion_abs_errors = torch.abs(diffusion - true)
             diffusion_performance_data = torch.stack([
-                diffusion.mean(), diffusion.quantile(0.05), diffusion.quantile(0.95)
+                diffusion_abs_errors.mean(),
+                diffusion_abs_errors.quantile(0.05),
+                diffusion_abs_errors.quantile(0.95)
             ])
             target_path = '{}/{}'.format(
                 directory,
@@ -185,19 +201,14 @@ def plot_effort_v_performance(args, title):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            directory = 'figs/{}'.format(models_by_dim[dim][0])
-            true_file = '{}/{}'.format(
-                directory,
-                true_tail_prob(alpha)
-            )
-            true = [torch.load(true_file, weights_only=True) for _ in model_idxs_by_dim[dim]]
+            true, _ = get_true_tail_prob(models_by_dim[dim][0])
             for model_name in models_by_dim[dim]:
                 directory = 'figs/{}'.format(model_name)
                 target_file = '{}/{}'.format(
                     directory,
                     target_is_performance(alpha)
                 )
-                mean_quantiles = torch.abs(torch.load(target_file) - true, weights_only=True)
+                mean_quantiles = torch.load(target_file, weights_only=True)
                 target_means.append(mean_quantiles[0].cpu())
                 target_lwr.append(mean_quantiles[1].cpu())
                 target_upr.append(mean_quantiles[2].cpu())
