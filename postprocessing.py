@@ -154,10 +154,10 @@ def process_performance_data(model_name):
             data = torch.load(file_path, map_location=device, weights_only=True)
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
-    for alpha in true_alpha_map.keys():
+    for alpha, target in true_alpha_map.items():
         try:
             true, _ = get_true_tail_prob(model_name, alpha)
-            target = torch.stack(target_alpha_map[alpha])
+            target = torch.stack(target)
             target_abs_errors = torch.abs(target - true)
             target_performance_data = torch.stack([
                 target_abs_errors.mean(),
@@ -238,6 +238,8 @@ def plot_effort_v_performance(args, title):
         plt.xlabel(xlabel)
         plt.ylabel(f'Probability Estimate (alpha={alpha})')
         plt.title(title)
+        ax = plt.gca()
+        ax.ticklabel_format(axis='x', style='sci')
         directory = 'figs/effort_v_performance'
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
