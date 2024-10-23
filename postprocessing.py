@@ -233,11 +233,11 @@ def plot_effort_v_performance(args, title):
             plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3)
             # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-            model_idxs = model_idxs_by_dim[dim]
-            plt.plot(model_idxs, [true for _ in model_idxs], color='red')
+            # model_idxs = model_idxs_by_dim[dim]
+            # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
         plt.legend()
         plt.xlabel(xlabel)
-        plt.ylabel(f'Probability Estimate (alpha={alpha})')
+        plt.ylabel(f'Abs. Error of Prob. Est. (alpha={alpha})')
         plt.title(title)
         directory = 'figs/effort_v_performance'
         os.makedirs(directory, exist_ok=True)
