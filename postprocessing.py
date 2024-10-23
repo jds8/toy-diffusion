@@ -239,8 +239,6 @@ def plot_effort_v_performance(args, title):
         plt.xlabel(xlabel)
         plt.ylabel(f'Probability Estimate (alpha={alpha})')
         plt.title(title)
-        ax = plt.gca()
-        ax.ticklabel_format(axis='x', style='sci')
         directory = 'figs/effort_v_performance'
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
