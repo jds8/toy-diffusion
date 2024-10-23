@@ -154,37 +154,34 @@ def process_performance_data(model_name):
             data = torch.load(file_path, map_location=device, weights_only=True)
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
-    for alpha, target in true_alpha_map.items():
-        try:
-            true, _ = get_true_tail_prob(model_name, alpha)
-            target = torch.stack(target)
-            target_abs_errors = torch.abs(target - true)
-            target_performance_data = torch.stack([
-                target_abs_errors.mean(),
-                target_abs_errors.quantile(0.05),
-                target_abs_errors.quantile(0.95)
-            ])
-            diffusion = torch.stack(diffusion_alpha_map[alpha])
-            diffusion_abs_errors = torch.abs(diffusion - true)
-            diffusion_performance_data = torch.stack([
-                diffusion_abs_errors.mean(),
-                diffusion_abs_errors.quantile(0.05),
-                diffusion_abs_errors.quantile(0.95)
-            ])
-            target_path = '{}/{}'.format(
-                directory,
-                target_is_performance(
-                    alpha
-                )
+    for alpha in true_alpha_map.keys():
+        true, _ = get_true_tail_prob(model_name, alpha)
+        target = torch.stack(target_alpha_map[alpha])
+        target_abs_errors = torch.abs(target - true)
+        target_performance_data = torch.stack([
+            target_abs_errors.mean(),
+            target_abs_errors.quantile(0.05),
+            target_abs_errors.quantile(0.95)
+        ])
+        diffusion = torch.stack(diffusion_alpha_map[alpha])
+        diffusion_abs_errors = torch.abs(diffusion - true)
+        diffusion_performance_data = torch.stack([
+            diffusion_abs_errors.mean(),
+            diffusion_abs_errors.quantile(0.05),
+            diffusion_abs_errors.quantile(0.95)
+        ])
+        target_path = '{}/{}'.format(
+            directory,
+            target_is_performance(
+                alpha
             )
-            diffusion_path = '{}/{}'.format(
-                directory,
-                diffusion_is_performance(alpha)
-            )
-            torch.save(target_performance_data, target_path)
-            torch.save(diffusion_performance_data, diffusion_path)
-        except:
-            pass
+        )
+        diffusion_path = '{}/{}'.format(
+            directory,
+            diffusion_is_performance(alpha)
+        )
+        torch.save(target_performance_data, target_path)
+        torch.save(diffusion_performance_data, diffusion_path)
 
 def plot_effort_v_performance(args, title):
     dims = get_dims(args)
