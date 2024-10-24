@@ -223,7 +223,7 @@ def plot_effort_v_performance(args, title):
             # fig = plt.figure()
             # ax = fig.add_subplot(1, 1, 1)
             # ax.set_yscale('log')
-            # plt.ylim((1e-10, 1e-1))
+            plt.ylim((0., 0.07))
             # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
             plt.plot(model_idxs_by_dim[dim], target_means, label='dim={}'.format(dim), marker='x')
