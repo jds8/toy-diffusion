@@ -519,8 +519,18 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
     plt.savefig('figs/scatter.pdf')
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
+    exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
+    prop_exited = exited.mean() * 100
+    print('{}% of {} samples outside [-{}, {}]'.format(
+        prop_exited,
+        sample_trajs.shape[0],
+        std.likelihood.alpha,
+        std.likelihood.alpha,
+    ))
+
     cond = std.cond if std.cond else torch.tensor([-1.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
+
     alpha = torch.tensor([std.likelihood.alpha]) if cond == 1. else torch.tensor([0.])
     datapoints_left = torch.linspace(
         cfg.example.mu-6*cfg.example.sigma,

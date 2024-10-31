@@ -32,11 +32,12 @@ def importance_estimate(
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
     phis = test_fn(saps_raw, saps).squeeze()
+    num_saps_not_in_region = (1-phis).sum()
     expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
     logN = torch.tensor(log_ws.shape[0]).log()
     log_std = (torch.logsumexp((phis * w_bars - expectation) ** 2, dim=0) - logN)/2
     std = log_std.exp()
-    return expectation, std
+    return expectation, std, num_saps_not_in_region
 
 def iterative_importance_estimate(
         test_fn: Callable,
@@ -51,11 +52,12 @@ def iterative_importance_estimate(
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
     phis = test_fn(saps_raw, saps).squeeze()
+    num_saps_not_in_region = (1-phis).sum()
     new_expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
     total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
     total_N = cur_N + log_probs.nelement()
     total_expectation = total_sum / total_N
-    return total_expectation, total_N
+    return total_expectation, total_N, num_saps_not_in_region
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
@@ -102,6 +104,7 @@ def importance_sample(cfg):
             target_estimate = torch.tensor([0.], device=device)
             diffusion_estimate = torch.tensor([0.], device=device)
             target_N = 0
+            total_num_saps_not_in_region = 0
             for j in range(num_full_splits + int(num_leftover > 0)):
                 proposal = get_proposal(cfg_obj.example, std)
                 std.cfg.num_samples = num_samples_list[j]
@@ -111,7 +114,7 @@ def importance_sample(cfg):
                 diffusion_target = get_proposal(cfg_obj.example, std)
                 log_drobs = diffusion_target.log_prob(saps).squeeze()
                 true_log_probs = target.log_prob(saps_raw).squeeze()
-                target_estimate, _ = iterative_importance_estimate(
+                target_estimate, _, num_saps_not_in_region = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
                     saps=saps,
@@ -123,7 +126,7 @@ def importance_sample(cfg):
                 ##################################################
                 # IS estimate using unconditional diffusion model
                 ##################################################
-                diffusion_estimate, target_N = iterative_importance_estimate(
+                diffusion_estimate, target_N, _ = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
                     saps=saps,
@@ -133,6 +136,16 @@ def importance_sample(cfg):
                     cur_N=target_N,
                 )
                 std.cfg.guidance = old_guidance
+                total_num_saps_not_in_region += num_saps_not_in_region
+
+            pct_saps_not_in_region = torch.tensor([100 * total_num_saps_not_in_region / target_N])
+            logger.info(f'pct saps not in region: {pct_saps_not_in_region}')
+            torch.save(pct_saps_not_in_region, \
+            '{}/alpha={}_pct_saps_not_in_region_round_{}.pt'.format(
+                save_dir,
+                alpha,
+                cfg.start_round+i
+            ))
 
             finish_sample = time.time()
             logger.info(f'total sample+eval time: {finish_sample-start_sample}')
