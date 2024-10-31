@@ -105,14 +105,50 @@ def importance_sample(cfg):
             diffusion_estimate = torch.tensor([0.], device=device)
             target_N = 0
             total_num_saps_not_in_region = 0
+            saps_idx = 1
             for j in range(num_full_splits + int(num_leftover > 0)):
                 proposal = get_proposal(cfg_obj.example, std)
                 std.cfg.num_samples = num_samples_list[j]
                 saps_raw, saps = proposal.sample()
+                saps_new_idx = saps_idx + len(saps)
+                saps_filename = '{}/alpha={}_saps_{}_{}_round_{}'.format(
+                    save_dir,
+                    alpha,
+                    saps_idx,
+                    saps_new_idx,
+                    cfg.start_round+i
+                )
+                torch.save(
+                    saps,
+                    saps_filename
+                )
                 log_qrobs = proposal.log_prob(saps).squeeze()
+                log_qrobs_filename = '{}/alpha={}_log_qrobs_{}_{}_round_{}'.format(
+                    save_dir,
+                    alpha,
+                    saps_idx,
+                    saps_new_idx,
+                    cfg.start_round+i
+                )
+                torch.save(
+                    log_qrobs,
+                    log_qrobs_filename
+                )
                 old_guidance = std.set_no_guidance()
                 diffusion_target = get_proposal(cfg_obj.example, std)
                 log_drobs = diffusion_target.log_prob(saps).squeeze()
+                log_drobs_filename = '{}/alpha={}_log_drobs_{}_{}_round_{}'.format(
+                    save_dir,
+                    alpha,
+                    saps_idx,
+                    saps_new_idx,
+                    cfg.start_round+i
+                )
+                torch.save(
+                    log_drobs,
+                    log_drobs_filename
+                )
+                saps_idx = saps_new_idx
                 true_log_probs = target.log_prob(saps_raw).squeeze()
                 target_estimate, _, num_saps_not_in_region = iterative_importance_estimate(
                     test_fn=test_fn,
