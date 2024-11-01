@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
@@ -180,6 +180,11 @@ class ISConfig(SampleConfig):
         num_full_splits = self.num_samples // self.split_size
         num_leftover = self.num_samples % self.split_size
         return num_full_splits, num_leftover
+
+
+@dataclass
+class MSEPlotConfig(SampleConfig):
+    models: List[str] = field(default_factory=list)
 
 
 def get_target(cfg):

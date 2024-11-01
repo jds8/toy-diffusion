@@ -926,7 +926,6 @@ def viz_trajs(cfg, std, out_trajs, end_time):
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, clf=False)
 
-
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
     logger = logging.getLogger("main")
