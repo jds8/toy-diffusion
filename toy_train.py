@@ -4,7 +4,7 @@ import logging
 import warnings
 import wandb
 import os
-import pathlib
+from pathlib import Path
 
 from typing_extensions import Tuple
 
@@ -91,6 +91,8 @@ class ToyTrainer:
         self.rarity = torch.tensor(0.)
         self.total_num_training_points = 0
 
+        self.dataset_size = 0
+
         self.dl = None
         self.dl_iter = None
         self.initialize_optimizer()
@@ -107,7 +109,7 @@ class ToyTrainer:
         num_params = sum([np.prod(p.size()) for p in model_parameters])
         return num_params
 
-    def load_model(self):
+    def old_load_model(self):
         model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
         try:
             # load softmax model
@@ -116,6 +118,34 @@ class ToyTrainer:
             print('successfully loaded diffusion model')
         except Exception as e:
             print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
+
+    def load_model_state_dict(self, model_path, map_location):
+        model = torch.load('{}'.format(model_path), map_location=map_location)
+        if 'model_state_dict' in model:
+            self.diffusion_model.module.load_state_dict(model['model_state_dict'])
+        else:
+            self.diffusion_model.module.load_state_dict(model)
+
+    def load_model(self):
+        model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
+        path = Path(model_path)
+        if not os.path.isfile(model_path):
+            # scp from ubcml
+            os.system('ssh -t jsefas@remote.cs.ubc.ca "scp submit-ml:/ubc/cs/research/ubc_ml/jsefas/toy-diffusion/diffusion_models/{} ~"'.format(path.name))
+            os.system('scp jsefas@remote.cs.ubc.ca:~/{} {}'.format(path.name, model_path))
+            if not os.path.isfile(model_path):
+                raise Exception('cannot find file: {}'.format(model_path))
+        try:
+            # load softmax model
+            print('attempting to load diffusion model: {}'.format(model_path))
+            self.load_model_state_dict(model_path)
+        except Exception as e:
+            try:
+                self.load_model_state_dict(model_path, map_location='cpu')
+            except Exception as e:
+                print('FAILED to load model: {} because {}'.format(model_path, e))
+                raise e
+        print('successfully loaded diffusion model')
 
     def initialize_optimizer(self):
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
@@ -211,7 +241,7 @@ class ToyTrainer:
         if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
-            pathlib.Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
+            Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
             torch.save({
                 'model_state_dict': self.diffusion_model.module.state_dict(),
                 'metadata': self.construct_metadata()

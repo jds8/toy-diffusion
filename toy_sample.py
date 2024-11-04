@@ -560,21 +560,27 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
     datapoint_center_llk = -torch.ones(2) * torch.inf
     datapoint_llk = torch.hstack([datapoint_left_llk, datapoint_center_llk, datapoint_right_llk])
-    analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
+    analytical_llk_w_nan = torch.where(
+        torch.abs(traj - cfg.example.mu) > alpha * cfg.example.sigma,
+        datapoint_dist.log_prob(traj) - tail.log(),
+        torch.nan
+    )
+    non_nan_idx = ~torch.any(analytical_llk_w_nan.isnan(), dim=1)
+    analytical_llk = analytical_llk_w_nan[non_nan_idx]
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0].exp() / cfg.example.sigma
+    ode_lk = ode_llk[0].exp()[non_nan_idx.squeeze()] / cfg.example.sigma
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(
-        a_lk,
-        ode_lk,
-    )
+    mse_llk = torch.nn.MSELoss()(a_lk, ode_lk)
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(traj, ode_lk, plot_type='scatter')
-    plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
+    try:
+        plt_llk(traj, ode_llk[0].exp(), plot_type='scatter')
+        plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
+    except Exception as e:
+        print(f'error: {e}')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
