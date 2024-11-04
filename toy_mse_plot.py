@@ -13,7 +13,7 @@ import torch.distributions as dist
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
-from toy_train_config import MSEPlotConfig
+from toy_train_config import MSEPlotConfig, BrownianMotionDiffExampleConfig, GaussianExampleConfig
 from models.toy_diffusion_models_config import GuidanceType
 
 
@@ -33,14 +33,25 @@ def sample_models(cfg):
             alpha=std.likelihood.alpha.reshape(-1, 1),
         )
         sample_trajs = sample_traj_out.samples[-1]
-        all_mses.append(compute_mse(cfg, sample_trajs, std))
+        mse = compute_mse(cfg, sample_trajs, std)
+        print(f'model_{model}_mse_{mse}')
+        all_mses.append(mse)
     return all_mses
 
 def compute_mse(cfg, sample_trajs, std):
+    if isinstance(std.example, BrownianMotionDiffExampleConfig):
+        return compute_bm_mse(std, sample_trajs, std)
+    elif isinstance(std.example, GaussianExampleConfig):
+        return compute_gaussian_mse(std, sample_trajs, std)
+    else:
+        raise NotImplementedError
+
+def compute_bm_mse(cfg, sample_trajs, std):
+    alpha = torch.tensor([std.likelihood.alpha])
     ode_llk = std.ode_log_likelihood(
         sample_trajs,
-        cond=std.cond,
-        alpha=std.likelihood.alpha.reshape(-1)
+        cond=0,
+        alpha=alpha
     )
     end_time = torch.tensor(1., device=device)
     dt = end_time / (cfg.example.sde_steps-1)
@@ -49,9 +60,28 @@ def compute_mse(cfg, sample_trajs, std):
     mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
     return mse_llk
 
+def compute_gaussian_mse(cfg, sample_trajs, std):
+    alpha = torch.tensor([0.])
+    ode_llk = std.ode_log_likelihood(
+        sample_trajs,
+        cond=0,
+        alpha=alpha
+    )[0] - torch.tensor(cfg.example.sigma).log()
+
+    datapoint_dist = torch.distributions.Normal(
+        cfg.example.mu, cfg.example.sigma
+    )
+    tail = 2 * datapoint_dist.cdf(torch.tensor(cfg.example.mu))
+    traj = sample_trajs * cfg.example.sigma + cfg.example.mu
+    analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
+    a_llk = analytical_llk.exp().squeeze()
+
+    mse_llk = torch.nn.MSELoss()(a_llk, ode_llk)
+    return mse_llk
+
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_mse_plot_config")
 def make_mse_plot(cfg):
-    assert cfg.guidance == GuidanceType.NoGuidance
+    assert cfg.guidance == GuidanceType.NoGuidance and cfg.cond == 0.
 
     logger = logging.getLogger("main")
     logger.info('run type: mse plot')
@@ -64,7 +94,7 @@ def make_mse_plot(cfg):
     with torch.no_grad():
         all_pcts = sample_models(cfg)
         plt.plot(training_sample_list, torch.stack(all_pcts))
-        plt.title('Mean Squared Error vs. Computational Effort')
+        plt.title('Mean Squared Error of Log-Likelihood vs. Computational Effort')
         plt.xlabel('Num. Training Samples')
         plt.ylabel('MSE with ground truth density')
 
