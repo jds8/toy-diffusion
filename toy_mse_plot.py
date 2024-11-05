@@ -4,6 +4,7 @@ import os
 import logging
 import matplotlib.pyplot as plt
 import re
+from datetime import datetime
 
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -35,7 +36,7 @@ def sample_models(cfg):
         )
         sample_trajs = sample_traj_out.samples[-1]
         mse, prop_exited = compute_mse(cfg, sample_trajs, std)
-        print(f'model_{model}_mse_{mse}')
+        print(f'\nmodel: {model}\nmse: {mse}\nprop_exited: {prop_exited}\n')
         all_mses.append(mse)
         all_prop_exiteds.append(prop_exited)
     return all_mses, all_prop_exiteds
@@ -58,7 +59,7 @@ def compute_bm_mse(cfg, sample_trajs, std):
         trajs.cumsum(dim=-2)
     ], dim=1)
     exited = (bm_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
-    prop_exited = exited.mean() * 100
+    prop_exited = exited.mean()
 
     alpha = torch.tensor([std.likelihood.alpha])
     ode_llk = std.ode_log_likelihood(
@@ -73,7 +74,7 @@ def compute_bm_mse(cfg, sample_trajs, std):
 
 def compute_gaussian_mse(cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
-    prop_exited = exited.mean() * 100
+    prop_exited = exited.mean()
     alpha = torch.tensor([0.])
     pre_ode_llk = std.ode_log_likelihood(
         sample_trajs,
@@ -117,7 +118,7 @@ def make_mse_plot(cfg):
         plt.xlabel('Num. Training Samples')
         plt.ylabel('MSE with ground truth density')
 
-        save_dir = 'figs/{}'.format(cfg.model_name)
+        save_dir = 'figs/mse_plots/{}'.format(datetime.now().isoformat())
         os.makedirs(save_dir, exist_ok=True)
         alpha = torch.tensor([cfg.likelihood.alpha])
         plt.savefig('{}/alpha={}_mse_vs_effort.pdf'.format(
@@ -128,11 +129,11 @@ def make_mse_plot(cfg):
         plt.clf()
 
         plt.plot(training_sample_list, torch.stack(all_prop_exiteds))
-        plt.title('Pct. Samples in Tail vs. Computational Effort')
+        plt.title('Prop. Samples in Tail vs. Computational Effort')
         plt.xlabel('Num. Training Samples')
-        plt.ylabel('Percentage')
+        plt.ylabel('Proportion')
+        plt.ylim((0., 1.))
 
-        save_dir = 'figs/{}'.format(cfg.model_name)
         os.makedirs(save_dir, exist_ok=True)
         alpha = torch.tensor([cfg.likelihood.alpha])
         plt.savefig('{}/alpha={}_pct_in_tail_vs_effort.pdf'.format(
@@ -140,6 +141,9 @@ def make_mse_plot(cfg):
             alpha.item(),
         ))
 
+        plt.clf()
+
+    import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     with warnings.catch_warnings():

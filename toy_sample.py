@@ -566,18 +566,20 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
         torch.nan
     )
     non_nan_idx = ~torch.any(analytical_llk_w_nan.isnan(), dim=1)
-    analytical_llk = analytical_llk_w_nan[non_nan_idx]
-    a_lk = analytical_llk.exp().squeeze()
-    print('analytical_llk: {}'.format(a_lk))
+    non_nan_analytical_llk = analytical_llk_w_nan[non_nan_idx]
+    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
+    print('analytical_llk: {}'.format(non_nan_a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0].exp()[non_nan_idx.squeeze()] / cfg.example.sigma
+    ode_lk = ode_llk[0].exp() / cfg.example.sigma
+    non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(a_lk, ode_lk)
+    mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
+    import pdb; pdb.set_trace()
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
     try:
-        plt_llk(traj, ode_llk[0].exp(), plot_type='scatter')
+        plt_llk(traj, ode_lk, plot_type='scatter')
         plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
     except Exception as e:
         print(f'error: {e}')

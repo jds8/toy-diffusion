@@ -332,10 +332,10 @@ class ToyTrainer:
                 scaled_x0.cumsum(dim=1)
             ], dim=1)
         elif isinstance(self.example, GaussianExampleConfig):
-            x0_raw = torch.randn(
+            x0 = torch.randn(
                 self.cfg.batch_size, 1, 1, device=device
             )
-            x0 = x0_raw
+            x0_raw = x0 * self.cfg.example.sigma + self.cfg.example.mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
