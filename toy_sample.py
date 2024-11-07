@@ -574,7 +574,6 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
-    import pdb; pdb.set_trace()
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
@@ -670,7 +669,9 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ))
 
     # compute (discretized) "analytical" log likelihood
-    analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
+    uncond_analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
+    tail = 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2) if alpha else 1.
+    analytical_llk = uncond_analytical_llk - tail.log()
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model

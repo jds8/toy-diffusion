@@ -67,7 +67,7 @@ def compute_bm_mse(cfg, sample_trajs, std):
         cond=0,
         alpha=alpha
     )
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    scaled_ode_llk = (ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)).squeeze()
     analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
     mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
     return mse_llk, prop_exited
@@ -75,17 +75,17 @@ def compute_bm_mse(cfg, sample_trajs, std):
 def compute_gaussian_mse(cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean()
-    alpha = torch.tensor([0.])
+    alpha = torch.tensor([std.likelihood.alpha])
     pre_ode_llk = std.ode_log_likelihood(
         sample_trajs,
-        cond=0,
+        cond=std.cond,
         alpha=alpha
     )[0] - torch.tensor(cfg.example.sigma).log()
 
     datapoint_dist = torch.distributions.Normal(
         cfg.example.mu, cfg.example.sigma
     )
-    tail = 2 * datapoint_dist.cdf(torch.tensor(cfg.example.mu))
+    tail = 2 * datapoint_dist.cdf(cfg.example.mu-alpha*cfg.example.sigma)
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
     analytical_llk_w_nan = torch.where(
         torch.abs(traj - cfg.example.mu) > alpha * cfg.example.sigma,
@@ -93,15 +93,15 @@ def compute_gaussian_mse(cfg, sample_trajs, std):
         torch.nan
     )
     non_nan_idx = ~torch.any(analytical_llk_w_nan.isnan(), dim=1)
-    a_llk = analytical_llk_w_nan[non_nan_idx]
-    ode_llk = pre_ode_llk[non_nan_idx.squeeze()]
+    a_llk = analytical_llk_w_nan[non_nan_idx].squeeze()
+    ode_llk = pre_ode_llk[non_nan_idx.squeeze()].squeeze()
 
     mse_llk = torch.nn.MSELoss()(a_llk, ode_llk)
     return mse_llk, prop_exited
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_mse_plot_config")
 def make_mse_plot(cfg):
-    assert cfg.guidance == GuidanceType.NoGuidance and cfg.cond == 0.
+    # assert cfg.guidance == GuidanceType.NoGuidance and cfg.cond == 0.
 
     logger = logging.getLogger("main")
     logger.info('run type: mse plot')
@@ -113,7 +113,7 @@ def make_mse_plot(cfg):
     training_sample_list = [int(pattern.search(model).group(1)) for model in cfg.models]
     with torch.no_grad():
         all_pcts, all_prop_exiteds = sample_models(cfg)
-        plt.plot(training_sample_list, torch.stack(all_pcts))
+        plt.plot(training_sample_list, torch.stack(all_pcts), marker='*')
         plt.title('Mean Squared Error of Log-Likelihood vs. Computational Effort')
         plt.xlabel('Num. Training Samples')
         plt.ylabel('MSE with ground truth density')
@@ -128,7 +128,7 @@ def make_mse_plot(cfg):
 
         plt.clf()
 
-        plt.plot(training_sample_list, torch.stack(all_prop_exiteds))
+        plt.plot(training_sample_list, torch.stack(all_prop_exiteds), marker='*')
         plt.title('Prop. Samples in Tail vs. Computational Effort')
         plt.xlabel('Num. Training Samples')
         plt.ylabel('Proportion')
@@ -142,6 +142,9 @@ def make_mse_plot(cfg):
         ))
 
         plt.clf()
+
+        model_name_csv = ','.join(cfg.models)
+        torch.save(model_name_csv, f'{save_dir}/models.csv')
 
     import pdb; pdb.set_trace()
 

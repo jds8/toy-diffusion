@@ -233,7 +233,7 @@ def plot_effort_v_performance(args, title, xlabel):
             # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
         plt.legend()
         plt.xlabel(xlabel)
-        plt.ylabel('Abs. Error of Prob. Est.')
+        plt.ylabel('Relative Error of Prob. Est.')
         plt.title(title+f' (alpha={alpha})')
         directory = 'figs/effort_v_performance'
         os.makedirs(directory, exist_ok=True)
@@ -286,11 +286,13 @@ def make_effort_v_performance(args):
         xlabel='Training Samples'
     )
     title = get_pct_not_in_region_title(args)
-    plot_pct_not_in_region(
+    save_dir = plot_pct_not_in_region(
         args,
         title,
         xlabel='Training Samples',
     )
+    model_csv = ','.join(args.model_names)
+    torch.save(model_csv, f'{save_dir}/models.csv')
     os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
     os.system('cp figs/effort_v_performance.tar.gz ~')
 
@@ -397,6 +399,7 @@ def plot_pct_not_in_region(args, title, xlabel):
         fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
+    return directory
 
 
 if __name__ == '__main__':
