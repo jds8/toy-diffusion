@@ -240,6 +240,7 @@ def plot_effort_v_performance(args, title, xlabel):
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
+    return directory
 
 
 def make_effort_v_performance_gaussian(model_idxs, xlabel):
@@ -280,17 +281,20 @@ def make_effort_v_performance(args):
         process_performance_data(model_name)
         process_pct_saps_data(model_name)
     title = get_performance_v_effort_title(args)
-    plot_effort_v_performance(
+    save_dir = plot_effort_v_performance(
         args,
         title,
         xlabel='Training Samples'
     )
     title = get_pct_not_in_region_title(args)
-    save_dir = plot_pct_not_in_region(
-        args,
-        title,
-        xlabel='Training Samples',
-    )
+    try:
+        save_dir = plot_pct_not_in_region(
+            args,
+            title,
+            xlabel='Training Samples',
+        )
+    except:
+        pass
     model_csv = ','.join(args.model_names)
     torch.save(model_csv, f'{save_dir}/models.csv')
     os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
