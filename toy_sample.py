@@ -753,7 +753,6 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     analytical_llk = datapoint_dist.log_prob(traj) - tail_log
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
-    import pdb; pdb.set_trace()
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
     ode_lk = ode_llk[0].exp() / sigma
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))

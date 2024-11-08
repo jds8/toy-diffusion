@@ -114,16 +114,17 @@ def make_mse_plot(cfg):
     with torch.no_grad():
         all_pcts, all_prop_exiteds = sample_models(cfg)
         plt.plot(training_sample_list, torch.stack(all_pcts), marker='*')
-        plt.title('Mean Squared Error of Log-Likelihood vs. Computational Effort')
-        plt.xlabel('Num. Training Samples')
+        plt.title('Mean Squared Error of Log-Density vs. Computational Effort')
+        plt.xlabel('Model Trained on X Num. Training Samples')
         plt.ylabel('MSE with ground truth density')
 
         save_dir = 'figs/mse_plots/{}'.format(datetime.now().isoformat())
         os.makedirs(save_dir, exist_ok=True)
         alpha = torch.tensor([cfg.likelihood.alpha])
-        plt.savefig('{}/alpha={}_mse_vs_effort.pdf'.format(
+        plt.savefig('{}/alpha={}_num_saps_{}_mse_vs_effort.pdf'.format(
             save_dir,
             alpha.item(),
+            cfg.num_samples,
         ))
 
         plt.clf()
@@ -136,9 +137,10 @@ def make_mse_plot(cfg):
 
         os.makedirs(save_dir, exist_ok=True)
         alpha = torch.tensor([cfg.likelihood.alpha])
-        plt.savefig('{}/alpha={}_pct_in_tail_vs_effort.pdf'.format(
+        plt.savefig('{}/alpha={}_num_saps_{}_pct_in_tail_vs_effort.pdf'.format(
             save_dir,
             alpha.item(),
+            cfg.num_samples,
         ))
 
         plt.clf()
