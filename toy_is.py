@@ -44,7 +44,7 @@ class RoundData:
         self.total_num_saps_not_in_region = total_num_saps_not_in_region
 
     @staticmethod
-    def get_save_dir(save_dir: str, alpha: str, i: int) -> str:
+    def get_save_file(save_dir: str, alpha: str, i: int) -> str:
         return f'{save_dir}/alpha={alpha}_round={i}_data'
 
     def save(self, save_dir: str, alpha: str, i: int):
@@ -55,12 +55,12 @@ class RoundData:
             'target_N': self.target_N,
             'total_num_saps_not_in_region': self.total_num_saps_not_in_region,
         }
-        torch.save(data, RoundData.get_save_dir(save_dir, alpha, i))
+        torch.save(data, RoundData.get_save_file(save_dir, alpha, i))
 
     @staticmethod
     def load(save_dir: str, alpha: str, i: int):
         try:
-            data = torch.load(RoundData.get_save_dir(save_dir, alpha, i))
+            data = torch.load(RoundData.get_save_file(save_dir, alpha, i))
             return RoundData(
                 curr_sap=data.curr_sap,
                 target_estimate=data.target_estimate,
