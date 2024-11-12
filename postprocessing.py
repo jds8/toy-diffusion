@@ -401,7 +401,7 @@ def plot_pct_not_in_region(args, title, xlabel):
             plt.fill_between(model_idxs_by_dim[dim], pct_lwr, pct_upr, alpha=0.3)
             plt.legend()
             plt.xlabel(xlabel)
-            cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt')
+            cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
             pattern = re.compile('num_samples: ([0-9]+)')
             result = re.search(pattern, cfg_str)
             num_saps = int(result[1]) if result else 0

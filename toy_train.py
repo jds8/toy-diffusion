@@ -104,16 +104,6 @@ class ToyTrainer:
         num_params = sum([np.prod(p.size()) for p in model_parameters])
         return num_params
 
-    def old_load_model(self):
-        model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
-        try:
-            # load softmax model
-            print('attempting to load diffusion model: {}'.format(model_path))
-            self.diffusion_model.module.load_state_dict(torch.load('{}'.format(model_path)))
-            print('successfully loaded diffusion model')
-        except Exception as e:
-            print('FAILED to load model: {} because {}\ncreating it...'.format(model_path, e))
-
     def load_model_state_dict(self, model_path, map_location):
         model = torch.load('{}'.format(model_path), map_location=map_location)
         if 'model_state_dict' in model:
