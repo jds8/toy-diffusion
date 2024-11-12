@@ -572,7 +572,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
     ode_lk = ode_llk[0].exp() / cfg.example.sigma
     non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
-    print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
+    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
     print('\nmse_llk: {}'.format(mse_llk))
 

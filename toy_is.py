@@ -4,6 +4,8 @@ import os
 import logging
 from typing import Callable
 import time
+import re
+from collections import namedtuple
 
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -17,6 +19,57 @@ from toy_train_config import ISConfig, get_target, get_proposal
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+class RoundData:
+    def __init__(
+            self,
+            curr_sap=0,
+            target_estimate=0,
+            diffusion_estimate=0,
+            target_N=0,
+            total_num_saps_not_in_region=0
+    ):
+        self.curr_sap = curr_sap
+        self.target_estimate = torch.tensor(
+            [target_estimate],
+            dtype=torch.float32,
+            device=device
+        )
+        self.diffusion_estimate = torch.tensor(
+            [diffusion_estimate],
+            dtype=torch.float32,
+            device=device
+        )
+        self.target_N = target_N
+        self.total_num_saps_not_in_region = total_num_saps_not_in_region
+
+    @staticmethod
+    def get_save_dir(save_dir, alpha):
+        return f'{save_dir}/alpha={alpha}_round_data'
+
+    def save(self, save_dir, alpha):
+        data = {
+            'curr_sap': self.curr_sap,
+            'target_estimate': self.target_estimate,
+            'diffusion_estimate': self.diffusion_estimate,
+            'target_N': self.target_N,
+            'total_num_saps_not_in_region': self.total_num_saps_not_in_region,
+        }
+        torch.save(data, self.get_save_dir(save_dir, alpha))
+
+    @staticmethod
+    def load(save_dir, alpha):
+        try:
+            data = torch.load(RoundData.get_save_dir(save_dir, alpha))
+            return RoundData(
+                curr_sap=data.curr_sap,
+                target_estimate=data.target_estimate,
+                diffusion_estimate=data.diffusion_estimate,
+                target_N=data.target_N,
+                total_num_saps_not_in_region=data.total_num_saps_not_in_region
+            )
+        except Exception:
+            return RoundData()
 
 def suppresswarning():
     warnings.warn("user", UserWarning)
@@ -59,11 +112,13 @@ def iterative_importance_estimate(
     total_expectation = total_sum / total_N
     return total_expectation, total_N, num_saps_not_in_region
 
+
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
     logger = logging.getLogger("main")
     logger.info('run type: importance sampling')
-    logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
+    cfg_str = OmegaConf.to_yaml(cfg)
+    logger.info(f"CONFIG\n{cfg_str}")
 
     os.system('echo git commit: $(git rev-parse HEAD)')
 
@@ -75,12 +130,17 @@ def importance_sample(cfg):
         save_dir = 'figs/{}'.format(cfg.model_name)
         os.makedirs(save_dir, exist_ok=True)
 
+        # get alpha level
+        alpha = '%.1f' % cfg_obj.likelihood.alpha
+
+        # save config
+        torch.save(cfg_str, f'{save_dir}/alpha={alpha}_config.txt')
+
         ##################################################
         # true tail probability under target
         ##################################################
         target = get_target(cfg_obj)
         tail_prob = target.analytical_prob(torch.tensor(cfg_obj.likelihood.alpha))
-        alpha = '%.1f' % cfg_obj.likelihood.alpha
         torch.save(tail_prob, '{}/alpha={}_tail_prob.pt'.format(
             save_dir,
             alpha,
@@ -101,11 +161,12 @@ def importance_sample(cfg):
             num_full_splits, num_leftover = cfg_obj.num_splits()
             num_samples_list = [std.cfg.split_size] * num_full_splits + [num_leftover]
             test_fn = std.likelihood.get_condition
-            target_estimate = torch.tensor([0.], device=device)
-            diffusion_estimate = torch.tensor([0.], device=device)
-            target_N = 0
-            total_num_saps_not_in_region = 0
-            saps_idx = 1
+            round_data = RoundData.load(save_dir, alpha)
+            saps_idx = round_data.curr_sap
+            target_estimate = round_data.target_estimate
+            diffusion_estimate = round_data.diffusion_estimate
+            target_N = round_data.target_N
+            total_num_saps_not_in_region = round_data.total_num_saps_not_in_region
             for j in range(num_full_splits + int(num_leftover > 0)):
                 proposal = get_proposal(cfg_obj.example, std)
                 std.cfg.num_samples = num_samples_list[j]
@@ -174,6 +235,14 @@ def importance_sample(cfg):
                 std.cfg.guidance = old_guidance
                 total_num_saps_not_in_region += num_saps_not_in_region
 
+            round_data = RoundData(
+                curr_sap=saps_idx,
+                target_estimate=target_estimate,
+                diffusion_estimate=diffusion_estimate,
+                target_N=target_N,
+                total_num_saps_not_in_region=total_num_saps_not_in_region
+            )
+            round_data.save(save_dir, alpha)
             pct_saps_not_in_region = torch.tensor([100 * total_num_saps_not_in_region / target_N])
             logger.info(f'pct saps not in region: {pct_saps_not_in_region}')
             torch.save(pct_saps_not_in_region, \

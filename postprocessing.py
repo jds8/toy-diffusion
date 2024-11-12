@@ -339,7 +339,7 @@ def get_performance_v_effort_title(args):
 
 
 def get_pct_not_in_region_title(args):
-    POR = 'Pct. of Samples Outside Region'
+    POR = 'Pct. of Samples not in Tail'
     return get_title(args, POR)
 
 
@@ -362,7 +362,7 @@ def process_pct_saps_data(model_name):
         pct_all_saps_data = torch.stack([
             pct_saps.mean(),
             pct_saps.quantile(0.05),
-            pct_saps.quantile(0.95)
+            pct_saps.quantile(0.95),
         ])
         pct_saps_path = '{}/{}'.format(
             directory,
@@ -392,17 +392,25 @@ def plot_pct_not_in_region(args, title, xlabel):
                 pct_means.append(mean_quantiles[0].cpu())
                 pct_lwr.append(mean_quantiles[1].cpu())
                 pct_upr.append(mean_quantiles[2].cpu())
-            plt.plot(model_idxs_by_dim[dim], pct_means, label='dim={}'.format(dim), marker='x')
+            plt.plot(
+                model_idxs_by_dim[dim],
+                pct_means,
+                label='dim={}'.format(dim),
+                marker='x'
+            )
             plt.fill_between(model_idxs_by_dim[dim], pct_lwr, pct_upr, alpha=0.3)
-        plt.legend()
-        plt.xlabel(xlabel)
-        plt.ylabel('Percentage')
-        plt.title(title+f' alpha={alpha}')
-        directory = 'figs/effort_v_performance'
-        os.makedirs(directory, exist_ok=True)
-        fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
-        plt.savefig(fig_file)
-        plt.clf()
+            plt.legend()
+            plt.xlabel(xlabel)
+            cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt')
+            pattern = re.compile('num_samples: ([0-9]+)')
+            result = re.search(pattern, cfg_str)
+            num_saps = int(result[1]) if result else 0
+            plt.ylabel(f'Percentage out of {num_saps} Samples (alpha={alpha})')
+            directory = 'figs/effort_v_performance'
+            os.makedirs(directory, exist_ok=True)
+            fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
+            plt.savefig(fig_file)
+            plt.clf()
     return directory
 
 
