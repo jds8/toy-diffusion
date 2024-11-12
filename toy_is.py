@@ -44,10 +44,10 @@ class RoundData:
         self.total_num_saps_not_in_region = total_num_saps_not_in_region
 
     @staticmethod
-    def get_save_dir(save_dir, alpha):
-        return f'{save_dir}/alpha={alpha}_round_data'
+    def get_save_dir(save_dir: str, alpha: str, i: int) -> str:
+        return f'{save_dir}/alpha={alpha}_round={i}_data'
 
-    def save(self, save_dir, alpha):
+    def save(self, save_dir: str, alpha: str, i: int):
         data = {
             'curr_sap': self.curr_sap,
             'target_estimate': self.target_estimate,
@@ -55,12 +55,12 @@ class RoundData:
             'target_N': self.target_N,
             'total_num_saps_not_in_region': self.total_num_saps_not_in_region,
         }
-        torch.save(data, self.get_save_dir(save_dir, alpha))
+        torch.save(data, RoundData.get_save_dir(save_dir, alpha, i))
 
     @staticmethod
-    def load(save_dir, alpha):
+    def load(save_dir: str, alpha: str, i: int):
         try:
-            data = torch.load(RoundData.get_save_dir(save_dir, alpha))
+            data = torch.load(RoundData.get_save_dir(save_dir, alpha, i))
             return RoundData(
                 curr_sap=data.curr_sap,
                 target_estimate=data.target_estimate,
@@ -161,7 +161,7 @@ def importance_sample(cfg):
             num_full_splits, num_leftover = cfg_obj.num_splits()
             num_samples_list = [std.cfg.split_size] * num_full_splits + [num_leftover]
             test_fn = std.likelihood.get_condition
-            round_data = RoundData.load(save_dir, alpha)
+            round_data = RoundData.load(save_dir, alpha, i)
             saps_idx = round_data.curr_sap
             target_estimate = round_data.target_estimate
             diffusion_estimate = round_data.diffusion_estimate
@@ -242,7 +242,7 @@ def importance_sample(cfg):
                 target_N=target_N,
                 total_num_saps_not_in_region=total_num_saps_not_in_region
             )
-            round_data.save(save_dir, alpha)
+            round_data.save(save_dir, alpha, i)
             pct_saps_not_in_region = torch.tensor([100 * total_num_saps_not_in_region / target_N])
             logger.info(f'pct saps not in region: {pct_saps_not_in_region}')
             torch.save(pct_saps_not_in_region, \
