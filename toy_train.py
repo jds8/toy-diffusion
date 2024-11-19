@@ -242,7 +242,6 @@ class ToyTrainer:
             no_version_model_path,
             save_version,
         )
-        import pdb; pdb.set_trace()
         if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
