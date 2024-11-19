@@ -5,6 +5,7 @@ import warnings
 import wandb
 import os
 from pathlib import Path
+import re
 
 from typing_extensions import Tuple
 
@@ -104,6 +105,10 @@ class ToyTrainer:
         num_params = sum([np.prod(p.size()) for p in model_parameters])
         return num_params
 
+    def load_metadata(self, model_path, map_location):
+        model = torch.load('{}'.format(model_path), map_location=map_location)
+        return model['metadata'] if 'metadata' in model else None
+
     def load_model_state_dict(self, model_path, map_location):
         model = torch.load('{}'.format(model_path), map_location=map_location)
         if 'model_state_dict' in model:
@@ -123,13 +128,17 @@ class ToyTrainer:
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
-            self.load_model_state_dict(model_path)
+            self.load_model_state_dict(model_path, map_location='cuda')
+            metadata = self.load_metadata(model_path, map_location='cuda')
         except Exception as e:
             try:
                 self.load_model_state_dict(model_path, map_location='cpu')
+                metadata = self.load_metadata(model_path, map_location='cpu')
             except Exception as e:
                 print('FAILED to load model: {} because {}'.format(model_path, e))
                 raise e
+        if metadata is not None:
+            self.training_samples_thus_far = metadata['training_results']['training_samples_thus_far']
         print('successfully loaded diffusion model')
 
     def initialize_optimizer(self):
@@ -211,7 +220,15 @@ class ToyTrainer:
         metadata['training_results']['dataset_size'] = self.dataset_size
         metadata['training_results']['params'] = self.get_params()
         metadata['training_results']['p_uncond'] = self.cfg.p_uncond
+        metadata['training_results']['last_saved_epoch'] = self.last_saved_epoch
         return metadata
+
+    @staticmethod
+    def remove_load_version_number(model_path):
+        pattern = re.compile(r'_v[0-9]+')
+        loaded_model_version = pattern.search(model_path).group(0)
+        version_substr_idx = model_path.find(loaded_model_version)
+        return model_path[:version_substr_idx]
 
     def _save_model(self):
         self.num_saves += 1
@@ -219,10 +236,13 @@ class ToyTrainer:
         save_version = self.num_saves
         if self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
             save_version = self.training_samples_thus_far
+        model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
+        no_version_model_path = self.remove_load_version_number(model_path)
         saved_model_path = '{}_v{}'.format(
-            get_model_path(self.cfg, self.cfg.diffusion.dim),
+            no_version_model_path,
             save_version,
         )
+        import pdb; pdb.set_trace()
         if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
