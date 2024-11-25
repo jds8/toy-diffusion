@@ -113,6 +113,10 @@ class ToyTrainer:
         model = torch.load('{}'.format(model_path), map_location=map_location)
         if 'model_state_dict' in model:
             self.diffusion_model.module.load_state_dict(model['model_state_dict'])
+            if self.cfg.models_to_save:
+                while self.training_samples_thus_far > \
+                    self.cfg.models_to_save[self.next_model_to_save_idx]:
+                    self.next_model_to_save_idx += 1
         else:
             self.diffusion_model.module.load_state_dict(model)
 
@@ -148,6 +152,7 @@ class ToyTrainer:
         self.last_saved_epoch = 0
         self.training_samples_since_last_save = 0
         self.training_samples_thus_far = 0
+        self.next_model_to_save_idx = 0
 
     def clip_gradients(self):
         nn.utils.clip_grad_norm_(self.diffusion_model.module.parameters(), self.cfg.max_gradient)
@@ -217,6 +222,7 @@ class ToyTrainer:
         metadata['training_results']['num_parameters'] = self.num_params
         metadata['training_results']['rarity'] = self.rarity
         metadata['training_results']['training_samples_thus_far'] = self.training_samples_thus_far
+        metadata['training_results']['next_model_to_save_idx'] = self.next_model_to_save_idx
         metadata['training_results']['dataset_size'] = self.dataset_size
         metadata['training_results']['params'] = self.get_params()
         metadata['training_results']['p_uncond'] = self.cfg.p_uncond
@@ -226,9 +232,12 @@ class ToyTrainer:
     @staticmethod
     def remove_load_version_number(model_path):
         pattern = re.compile(r'_v[0-9]+')
-        loaded_model_version = pattern.search(model_path).group(0)
-        version_substr_idx = model_path.find(loaded_model_version)
-        return model_path[:version_substr_idx]
+        groups = pattern.search(model_path)
+        if groups:
+            loaded_model_version = groups.group(0)
+            version_substr_idx = model_path.find(loaded_model_version)
+            return model_path[:version_substr_idx]
+        return model_path
 
     def _save_model(self):
         self.num_saves += 1
@@ -255,16 +264,29 @@ class ToyTrainer:
             print('could not save model because {}'.format(e))
         return saved_model_path
 
+    def should_save_next_model(self):
+        if self.next_model_to_save_idx >= len(self.cfg.models_to_save):
+            self.cfg.last_training_sample = self.training_samples_thus_far
+            return False
+        if self.next_model_to_save_idx < len(self.cfg.models_to_save):
+            new_idx = self.next_model_to_save_idx
+            while self.training_samples_since_last_save >= \
+                  self.cfg.models_to_save[new_idx]:
+                new_idx += 1
+            return self.next_model_to_save_idx != new_idx
+        return False
+
     def should_save(self) -> bool:
-        if self.cfg.save_paradigm == SaveParadigm.Iterations:
+        if self.cfg.models_to_save:
+            return self.should_save_next_model()
+        elif self.cfg.save_paradigm == SaveParadigm.Iterations:
             return self.num_steps % self.cfg.iterations_before_save == 0
         elif self.cfg.save_paradigm == SaveParadigm.Epochs:
             return self.num_epochs % self.cfg.epochs_before_save == 0 and \
                    self.last_saved_epoch < self.num_epochs
         elif self.cfg.save_paradigm == SaveParadigm.TrainingSamples:
-            save = self.training_samples_since_last_save >= \
+            return self.training_samples_since_last_save >= \
                    self.cfg.training_samples_before_save
-            return save
         else:
             raise NotImplementedError
 

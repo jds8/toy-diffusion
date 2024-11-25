@@ -94,7 +94,7 @@ class ToyEvaluator:
         try:
             # load softmax model
             print('attempting to load diffusion model: {}'.format(model_path))
-            self.load_model_state_dict(model_path)
+            self.load_model_state_dict(model_path, map_location='cuda')
         except Exception as e:
             try:
                 self.load_model_state_dict(model_path, map_location='cpu')

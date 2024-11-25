@@ -107,6 +107,7 @@ class TrainConfig(BaseConfig):
     save_paradigm: SaveParadigm = SaveParadigm.TrainingSamples
     training_samples_before_save: int = 100000
     last_training_sample: int = -1
+    models_to_save: List[int] = field(default_factory=list)
 
 
 def get_path(cfg: TrainConfig, model_name):
