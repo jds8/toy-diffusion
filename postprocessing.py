@@ -234,6 +234,7 @@ def plot_effort_v_performance(args, title, xlabel):
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel('Relative Error of Prob. Est.')
+        ax = plt.gca()
         ax.set_yscale('log')
         plt.title(title+f' (alpha={alpha})')
         directory = 'figs/effort_v_performance'
