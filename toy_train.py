@@ -264,14 +264,20 @@ class ToyTrainer:
             print('could not save model because {}'.format(e))
         return saved_model_path
 
+    def should_update_next_model_to_save_idx(self):
+        return self.next_model_to_save_idx < \
+               len(self.cfg.models_to_save) and \
+               self.training_samples_thus_far + \
+               self.training_samples_since_last_save >= \
+               self.cfg.models_to_save[self.next_model_to_save_idx]
+
     def should_save_next_model(self):
         if self.next_model_to_save_idx >= len(self.cfg.models_to_save):
             self.cfg.last_training_sample = self.training_samples_thus_far
             return False
         if self.next_model_to_save_idx < len(self.cfg.models_to_save):
             output = False
-            while self.training_samples_thus_far >= \
-                  self.cfg.models_to_save[self.next_model_to_save_idx]:
+            while self.should_update_next_model_to_save_idx():
                 self.next_model_to_save_idx += 1
                 output = True
             return output
