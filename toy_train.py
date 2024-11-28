@@ -269,11 +269,12 @@ class ToyTrainer:
             self.cfg.last_training_sample = self.training_samples_thus_far
             return False
         if self.next_model_to_save_idx < len(self.cfg.models_to_save):
-            new_idx = self.next_model_to_save_idx
-            while self.training_samples_since_last_save >= \
-                  self.cfg.models_to_save[new_idx]:
-                new_idx += 1
-            return self.next_model_to_save_idx != new_idx
+            output = False
+            while self.training_samples_thus_far >= \
+                  self.cfg.models_to_save[self.next_model_to_save_idx]:
+                self.next_model_to_save_idx += 1
+                output = True
+            return output
         return False
 
     def should_save(self) -> bool:
