@@ -94,6 +94,8 @@ class ToyTrainer:
         self.initialize_optimizer()
         self.num_params = self.get_num_params()
 
+        self.cfg.models_to_save = sorted(self.cfg.models_to_save)
+
         if self.cfg.model_name:
             self.load_model()
 
