@@ -669,9 +669,12 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ))
 
     # compute (discretized) "analytical" log likelihood
-    uncond_analytical_llk = (dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()).sum(1).squeeze()
-    tail = 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2) if alpha else 1.
-    analytical_llk = uncond_analytical_llk - tail.log()
+    uncond_analytical_llk = (
+        dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()
+    ).sum(1).squeeze()
+    tail = 2 * np.sqrt(2)/(alpha.numpy() * np.sqrt(np.pi)) * \
+        np.exp(-alpha.numpy()**2/2) if alpha.numpy() else 1.
+    analytical_llk = uncond_analytical_llk - np.log(tail.item())
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
