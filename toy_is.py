@@ -127,7 +127,7 @@ def importance_sample(cfg):
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
 
-        save_dir = 'figs/{}'.format(cfg.model_name)
+        save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
         os.makedirs(save_dir, exist_ok=True)
 
         # get alpha level

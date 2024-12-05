@@ -30,10 +30,10 @@ def effort_v_performance_plot_name(alpha):
 def pct_not_in_region_plot_name(alpha):
     return f'alpha={alpha}_pct_outside_region'
 
-def plot_data(model_name, suffix):
+def plot_data(figs_dir, model_name, suffix):
     torch_suffix = '{}.pt'.format(suffix)
     pattern = re.compile(r'\[(\d+(\.\d*)?)\]')
-    directory = 'figs/{}'.format(model_name)
+    directory = '{}/{}'.format(figs_dir, model_name)
     mse_data = []
     alphas = []
     for filename in os.listdir(directory):
@@ -45,26 +45,27 @@ def plot_data(model_name, suffix):
             alphas.append(alpha)
     means, stds = mse_data
     plt.errorbar(alphas, means, stds, ecolor='red')
-    save_dir = 'figs/{}'.format(model_name)
+    save_dir = '{}/{}'.format(figs_dir, model_name)
     plt.savefig('{}/{}.pdf'.format(save_dir, suffix))
 
-def plot_mse_llk(model_name):
+def plot_mse_llk(figs_dir, model_name):
     suffix = 'llk_stats'
-    plot_data(model_name, suffix)
+    plot_data(figs_dir, model_name, suffix)
 
-def plot_is_estimates(model_name):
+def plot_is_estimates(figs_dir, model_name):
     suffix = 'is_estimates'
-    plot_data(model_name, suffix)
+    plot_data(figs_dir, model_name, suffix)
 
 def plot_is_estimates2(
         alphas,
         target_is,
         diffusion_is,
         trues,
+        figs_dir,
         model_name,
         suffix
 ):
-    save_dir = 'figs/{}'.format(model_name)
+    save_dir = '{}/{}'.format(figs_dir, model_name)
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     ax.set_yscale('log')
@@ -81,12 +82,12 @@ def plot_is_estimates2(
     plt.legend()
     plt.savefig('{}/{}.pdf'.format(save_dir, suffix))
 
-def plot_is_vs_alpha(model_name):
+def plot_is_vs_alpha(figs_dir, model_name):
     target_suffix = 'target_is_stats.pt'
     diffusion_suffix = 'diffusion_is_stats.pt'
     true_suffix = 'tail_prob.pt'
     pattern = re.compile(r'(\d+(\.\d*)?)')
-    directory = 'figs/{}'.format(model_name)
+    directory = '{}/{}'.format(figs_dir, model_name)
     target_is = []
     diffusion_is = []
     trues = []
@@ -116,10 +117,18 @@ def plot_is_vs_alpha(model_name):
     diffusion_is = torch.tensor(diffusion_is)[idx]
     sorted_true_alphas, idx = torch.sort(torch.tensor(true_alphas))
     trues = torch.tensor(trues)[idx]
-    plot_is_estimates2(sorted_true_alphas, target_is, diffusion_is, trues, model_name, 'is_vs_alpha')
+    plot_is_estimates2(
+        sorted_true_alphas,
+        target_is,
+        diffusion_is,
+        trues,
+        figs_dir,
+        model_name,
+        'is_vs_alpha'
+    )
 
-def get_true_tail_prob(model, alpha):
-    directory = 'figs/{}'.format(model)
+def get_true_tail_prob(figs_dir, model, alpha):
+    directory = '{}/{}'.format(figs_dir, model)
     true_file = '{}/{}'.format(
         directory,
         true_tail_prob(alpha)
@@ -127,12 +136,12 @@ def get_true_tail_prob(model, alpha):
     true = torch.load(true_file, weights_only=True)
     return true, directory
 
-def process_performance_data(model_name, args):
+def process_performance_data(figs_dir, model_name, args):
     target_suffix = 'target_is_stats'
     diffusion_suffix = 'diffusion_is_stats'
     true_suffix = 'tail_prob.pt'
     pattern = re.compile(r'(\d+(\.\d*)?)')
-    directory = 'figs/{}'.format(model_name)
+    directory = '{}/{}'.format(figs_dir, model_name)
     target_alpha_map = {}
     diffusion_alpha_map = {}
     true_alpha_map = {}
@@ -157,7 +166,7 @@ def process_performance_data(model_name, args):
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
     for alpha in args.alphas:
-        true, _ = get_true_tail_prob(model_name, alpha)
+        true, _ = get_true_tail_prob(figs_dir, model_name, alpha)
         target = torch.stack(target_alpha_map[alpha])
         target_rel_errors = torch.abs(target - true) / true
         target_performance_data = torch.stack([
@@ -199,9 +208,9 @@ def plot_effort_v_performance(args, title, xlabel):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            true, _ = get_true_tail_prob(models_by_dim[dim][0], alpha)
+            true, _ = get_true_tail_prob(args.figs_dir, models_by_dim[dim][0], alpha)
             for model_name in models_by_dim[dim]:
-                directory = 'figs/{}'.format(model_name)
+                directory = '{}/{}'.format(args.figs_dir, model_name)
                 target_file = '{}/{}'.format(
                     directory,
                     target_is_performance(alpha)
@@ -237,7 +246,7 @@ def plot_effort_v_performance(args, title, xlabel):
         ax = plt.gca()
         ax.set_yscale('log')
         plt.title(title+f' (alpha={alpha})')
-        directory = 'figs/effort_v_performance'
+        directory = '{}/effort_v_performance'.format(args.figs_dir)
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
@@ -252,7 +261,7 @@ def make_effort_v_performance_gaussian(model_idxs, xlabel, args):
     ]
     alphas = [3., 4., 5.]
     for model_name in model_names:
-        process_performance_data(model_name, args)
+        process_performance_data(args.figs_dir, model_name, args)
     plot_effort_v_performance(
         args,
         'Gaussian Performance vs Effort',
@@ -270,7 +279,7 @@ def make_effort_v_performance_bm(model_idxs, xlabel, args):
     # alphas = [3., 4., 5.]
     alphas = [3., 4.]
     for model_name in model_names:
-        process_performance_data(model_name, args)
+        process_performance_data(args.figs_dir, model_name, args)
     plot_effort_v_performance(
         args,
         'Brownian Motion Performance vs Effort',
@@ -280,8 +289,8 @@ def make_effort_v_performance_bm(model_idxs, xlabel, args):
 
 def make_effort_v_performance(args):
     for model_name in args.model_names:
-        process_performance_data(model_name, args)
-        process_pct_saps_data(model_name)
+        process_performance_data(args.figs_dir, model_name, args)
+        process_pct_saps_data(args.figs_dir, model_name)
     title = get_performance_v_effort_title(args)
     save_dir = plot_effort_v_performance(
         args,
@@ -299,8 +308,11 @@ def make_effort_v_performance(args):
         pass
     model_csv = ','.join(args.model_names)
     torch.save(model_csv, f'{save_dir}/models.csv')
-    os.system('tar czf figs/effort_v_performance.tar.gz figs/effort_v_performance')
-    os.system('cp figs/effort_v_performance.tar.gz ~')
+    os.system('tar czf {}/effort_v_performance.tar.gz {}/effort_v_performance'.format(
+        args.figs_dir,
+        args.figs_dir
+    ))
+    os.system('cp {}/effort_v_performance.tar.gz ~'.format(args.figs_dir))
 
 
 def get_model_idx(args, dim):
@@ -345,10 +357,10 @@ def get_pct_not_in_region_title(args):
     return get_title(args, POR)
 
 
-def process_pct_saps_data(model_name):
+def process_pct_saps_data(figs_dir, model_name):
     pct_saps_infix = 'pct_saps_not_in_region'
     pattern = re.compile(r'(\d+(\.\d*)?)')
-    directory = 'figs/{}'.format(model_name)
+    directory = '{}/{}'.format(figs_dir, model_name)
     pct_saps_map = {}
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
@@ -385,7 +397,7 @@ def plot_pct_not_in_region(args, title, xlabel):
             pct_upr = []
             pct_lwr = []
             for model_name in models_by_dim[dim]:
-                directory = 'figs/{}'.format(model_name)
+                directory = '{}/{}'.format(args.figs_dir, model_name)
                 target_file = '{}/{}'.format(
                     directory,
                     pct_all_saps_not_in_region(alpha)
@@ -409,7 +421,7 @@ def plot_pct_not_in_region(args, title, xlabel):
             num_saps = int(result[1]) if result else 0
             plt.ylabel(f'Percentage out of {num_saps} Samples')
             plt.title(title+f' (alpha={alpha})')
-            directory = 'figs/effort_v_performance'
+            directory = '{}/effort_v_performance'.format(args.figs_dir)
             os.makedirs(directory, exist_ok=True)
             fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
             plt.savefig(fig_file)
@@ -421,6 +433,7 @@ if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
 
     parser = argparse.ArgumentParser(description='Parser')
+    parser.add_argument('--figs_dir', type=str)
     parser.add_argument('--model_names', type=str, nargs='+')
     parser.add_argument('--model_idx', type=int, nargs='+')
     parser.add_argument('--dims', type=int, nargs='+')
@@ -428,9 +441,9 @@ if __name__ == '__main__':
     parser.add_argument('--xlabel', type=float, nargs='+')
     args = parser.parse_args()
 
-    # plot_mse_llk(model_name)
-    # plot_is_estimates(model_name)
-    # plot_is_vs_alpha(model_name)
+    # plot_mse_llk(figs_dir, model_name)
+    # plot_is_estimates(figs_dir, model_name)
+    # plot_is_vs_alpha(figs_dir, model_name)
 
     make_effort_v_performance(args)
     # make_effort_v_performance_bm(args)

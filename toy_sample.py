@@ -112,12 +112,12 @@ class ToyEvaluator:
         else:
             return self.likelihood.grad_log_lik(cond, xt, x0_hat)
 
-    def viz_trajs(self, traj, end_time, idx, clf=True, clr='green'):
+    def viz_trajs(self, traj, end_time, idx, figs_dir, clf=True, clr='green'):
         full_state_pred = traj.detach().squeeze(0).cpu().numpy()
 
         plt.plot(torch.linspace(0, end_time, full_state_pred.shape[0]), full_state_pred, color=clr)
 
-        plt.savefig('figs/sample_{}.pdf'.format(idx))
+        plt.savefig('{}/sample_{}.pdf'.format(figs_dir, idx))
 
         if clf:
             plt.clf()
@@ -483,7 +483,7 @@ class ContinuousEvaluator(ToyEvaluator):
         return ll_output, {'fevals': fevals}
 
 
-def plt_llk(traj, lik, plot_type='scatter', ax=None):
+def plt_llk(traj, lik, figs_dir, plot_type='scatter', ax=None):
     full_state_pred = traj.detach().squeeze().cpu().numpy()
     full_state_lik = lik.detach().squeeze().cpu().numpy()
 
@@ -516,7 +516,7 @@ def plt_llk(traj, lik, plot_type='scatter', ax=None):
             zs = np.array(lik).repeat(full_state_pred.shape[1])
             ax.plot(xs=xs, ys=ys, zs=zs, color='red')
 
-    plt.savefig('figs/scatter.pdf')
+    plt.savefig('{}/scatter.pdf'.format(figs_dir))
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
@@ -578,8 +578,8 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     try:
-        plt_llk(traj, ode_lk, plot_type='scatter')
-        plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
+        plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
+        plt_llk(datapoints, datapoint_llk.exp(), cfg.figs_dir, plot_type='line')
     except Exception as e:
         print(f'error: {e}')
     import pdb; pdb.set_trace()
@@ -606,11 +606,11 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     if sample_trajs.shape[1] > 1:
-        ax = plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='3d_scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='3d_line', ax=ax)
+        ax = plt_llk(sample_trajs, ode_llk[0].exp(), cfg.figs_dir, plot_type='3d_scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), cfg.figs_dir, plot_type='3d_line', ax=ax)
     else:
-        plt_llk(sample_trajs, ode_llk[0].exp(), plot_type='scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), plot_type='line')
+        plt_llk(sample_trajs, ode_llk[0].exp(), cfg.figs_dir, plot_type='scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), cfg.figs_dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
@@ -623,7 +623,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
-    save_dir = 'figs/{}'.format(cfg.model_name)
+    save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
     os.makedirs(save_dir, exist_ok=True)
     alpha = torch.tensor([std.likelihood.alpha])
     alpha_str = '%.1f' % alpha.item()
@@ -716,8 +716,8 @@ def test_uniform(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(traj, ode_lk, plot_type='scatter')
-    plt_llk(traj, a_lk, plot_type='line')
+    plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
+    plt_llk(traj, a_lk, cfg.figs_dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_student_t(end_time, cfg, sample_trajs, std):
@@ -766,8 +766,8 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(traj, ode_lk, plot_type='scatter')
-    plt_llk(datapoints, datapoint_llk.exp(), plot_type='line')
+    plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
+    plt_llk(datapoints, datapoint_llk.exp(), cfg.figs_dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_student_t_diff(end_time, cfg, sample_trajs, std):
@@ -780,7 +780,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of Student T state diffs')
-    save_dir = 'figs/{}'.format(cfg.model_name)
+    save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
     alpha = std.likelihood.alpha
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -871,7 +871,7 @@ def test_transformer_bm(end_time, std):
         # plt.clf()
         # plt.hist(data, bins=30, edgecolor='black')
         # plt.title('Histogram of brownian motion state diffs')
-        save_dir = 'figs/{}'.format(std.cfg.model_name)
+        save_dir = '{}/{}'.format(std.cfg.figs_dir, std.cfg.model_name)
         # alpha = '%.1f' % std.likelihood.alpha.item()
         # plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         #     save_dir,
@@ -936,7 +936,7 @@ def viz_trajs(cfg, std, out_trajs, end_time):
             undiffed_trajs
         ], dim=1)
     for idx, out_traj in enumerate(out_trajs):
-        std.viz_trajs(out_traj, end_time, idx, clf=False)
+        std.viz_trajs(out_traj, end_time, idx, cfg.figs_dir, clf=False)
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):

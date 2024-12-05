@@ -78,7 +78,7 @@ class BaseConfig:
     sampler: BaseSamplerConfig = field(default_factory=BaseSamplerConfig)
     diffusion: ModelConfig = field(default_factory=ModelConfig)
     likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
-    model_dir: str = 'diffusion_models/'
+    model_dir: str = 'diffusion_models'
     model_name: str = ''
     example: ExampleConfig = field(default_factory=ExampleConfig)
 
@@ -159,6 +159,7 @@ class IntegratorType(Enum):
 class SampleConfig(BaseConfig):
     num_samples: int = 100
     cond: Optional[float] = None
+    figs_dir: str = 'figs'
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow

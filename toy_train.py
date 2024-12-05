@@ -31,7 +31,6 @@ from models.toy_sampler import ForwardSample, AbstractSampler, \
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-SAVED_MODEL_DIR = 'diffusion_models'
 
 def suppresswarning():
     warnings.warn("user", UserWarning)
@@ -256,7 +255,7 @@ class ToyTrainer:
         if self.last_saved_epoch and self.cfg.save_paradigm == SaveParadigm.Epochs:
             saved_model_path += '_epoch{}'.format(self.last_saved_epoch)
         try:
-            Path(SAVED_MODEL_DIR).mkdir(parents=True, exist_ok=True)
+            Path(self.cfg.model_dir).mkdir(parents=True, exist_ok=True)
             torch.save({
                 'model_state_dict': self.diffusion_model.module.state_dict(),
                 'metadata': self.construct_metadata()
