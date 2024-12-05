@@ -304,7 +304,8 @@ def make_effort_v_performance(args):
             title,
             xlabel='Training Samples',
         )
-    except:
+    except Exception as e:
+        print('Error: {}'.format(e))
         pass
     model_csv = ','.join(args.model_names)
     torch.save(model_csv, f'{save_dir}/models.csv')
