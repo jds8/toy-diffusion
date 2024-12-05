@@ -414,19 +414,19 @@ def plot_pct_not_in_region(args, title, xlabel):
                 marker='x'
             )
             plt.fill_between(model_idxs_by_dim[dim], pct_lwr, pct_upr, alpha=0.3)
-            plt.legend()
-            plt.xlabel(xlabel)
-            cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
-            pattern = re.compile('num_samples: ([0-9]+)')
-            result = re.search(pattern, cfg_str)
-            num_saps = int(result[1]) if result else 0
-            plt.ylabel(f'Percentage out of {num_saps} Samples')
-            plt.title(title+f' (alpha={alpha})')
-            directory = '{}/effort_v_performance'.format(args.figs_dir)
-            os.makedirs(directory, exist_ok=True)
-            fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
-            plt.savefig(fig_file)
-            plt.clf()
+        plt.legend()
+        plt.xlabel(xlabel)
+        cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
+        pattern = re.compile('num_samples: ([0-9]+)')
+        result = re.search(pattern, cfg_str)
+        num_saps = int(result[1]) if result else 0
+        plt.ylabel(f'Percentage out of {num_saps} Samples')
+        plt.title(title+f' (alpha={alpha})')
+        directory = '{}/effort_v_performance'.format(args.figs_dir)
+        os.makedirs(directory, exist_ok=True)
+        fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
+        plt.savefig(fig_file)
+        plt.clf()
     return directory
 
 
