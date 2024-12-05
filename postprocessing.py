@@ -234,8 +234,9 @@ def plot_effort_v_performance(args, title, xlabel):
             # plt.ylim((0., 0.07))
             # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
-            plt.plot(model_idxs_by_dim[dim], target_means, label='dim={}'.format(dim), marker='x')
-            plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3)
+            models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
+            plt.plot(models_as_num, target_means, label='dim={}'.format(dim), marker='x')
+            plt.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
             # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
             # model_idxs = model_idxs_by_dim[dim]
@@ -407,26 +408,27 @@ def plot_pct_not_in_region(args, title, xlabel):
                 pct_means.append(mean_quantiles[0].cpu())
                 pct_lwr.append(mean_quantiles[1].cpu())
                 pct_upr.append(mean_quantiles[2].cpu())
+            models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
             plt.plot(
-                model_idxs_by_dim[dim],
+                models_as_num,
                 pct_means,
                 label='dim={}'.format(dim),
                 marker='x'
             )
-            plt.fill_between(model_idxs_by_dim[dim], pct_lwr, pct_upr, alpha=0.3)
-            plt.legend()
-            plt.xlabel(xlabel)
-            cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
-            pattern = re.compile('num_samples: ([0-9]+)')
-            result = re.search(pattern, cfg_str)
-            num_saps = int(result[1]) if result else 0
-            plt.ylabel(f'Percentage out of {num_saps} Samples')
-            plt.title(title+f' (alpha={alpha})')
-            directory = '{}/effort_v_performance'.format(args.figs_dir)
-            os.makedirs(directory, exist_ok=True)
-            fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
-            plt.savefig(fig_file)
-            plt.clf()
+            plt.fill_between(models_as_num, pct_lwr, pct_upr, alpha=0.3)
+        plt.legend()
+        plt.xlabel(xlabel)
+        cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
+        pattern = re.compile('num_samples: ([0-9]+)')
+        result = re.search(pattern, cfg_str)
+        num_saps = int(result[1]) if result else 0
+        plt.ylabel(f'Percentage out of {num_saps} Samples')
+        plt.title(title+f' (alpha={alpha})')
+        directory = '{}/effort_v_performance'.format(args.figs_dir)
+        os.makedirs(directory, exist_ok=True)
+        fig_file = '{}/{}.pdf'.format(directory, pct_not_in_region_plot_name(alpha))
+        plt.savefig(fig_file)
+        plt.clf()
     return directory
 
 
