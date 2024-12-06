@@ -170,14 +170,14 @@ def process_performance_data(figs_dir, model_name, args):
         target = torch.stack(target_alpha_map[alpha])
         target_rel_errors = torch.abs(target - true) / true
         target_performance_data = torch.stack([
-            target_rel_errors.mean(),
+            target_rel_errors.quantile(0.5),
             target_rel_errors.quantile(0.05),
             target_rel_errors.quantile(0.95)
         ])
         diffusion = torch.stack(diffusion_alpha_map[alpha])
         diffusion_rel_errors = torch.abs(diffusion - true)
         diffusion_performance_data = torch.stack([
-            diffusion_rel_errors.mean(),
+            diffusion_rel_errors.quantile(0.5),
             diffusion_rel_errors.quantile(0.05),
             diffusion_rel_errors.quantile(0.95)
         ])
