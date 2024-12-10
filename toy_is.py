@@ -62,11 +62,11 @@ class RoundData:
         try:
             data = torch.load(RoundData.get_save_file(save_dir, alpha, i))
             return RoundData(
-                curr_sap=data.curr_sap,
-                target_estimate=data.target_estimate,
-                diffusion_estimate=data.diffusion_estimate,
-                target_N=data.target_N,
-                total_num_saps_not_in_region=data.total_num_saps_not_in_region
+                curr_sap=data['curr_sap'],
+                target_estimate=data['target_estimate'],
+                diffusion_estimate=data['diffusion_estimate'],
+                target_N=data['target_N'],
+                total_num_saps_not_in_region=data['total_num_saps_not_in_region'],
             )
         except Exception:
             return RoundData()
