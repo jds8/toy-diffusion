@@ -241,6 +241,22 @@ def plot_effort_v_performance(args, title, xlabel):
             # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
             # model_idxs = model_idxs_by_dim[dim]
             # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
+        empirical_error = torch.load('empirical_errors.pt')
+        run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
+        for saps, error in empirical_error[run_type][alpha].items():
+            plt.plot(
+                2*models_as_num[-1],
+                error[1],
+                label='empirical error ({} samples)'.format(saps),
+                marker='o',
+                color='red'
+            )
+            plt.fill_between(
+                2*models_as_num[-1],
+                error[0],
+                error[2],
+                alpha=0.3
+            )
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel('Relative Error of Prob. Est.')
