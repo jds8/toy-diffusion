@@ -243,16 +243,18 @@ def plot_effort_v_performance(args, title, xlabel):
             # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
         empirical_error = torch.load('empirical_errors.pt')
         run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
-        for saps, error in empirical_error[run_type][alpha].items():
+        colors = ['gray', 'brown', 'black']
+        coefs = [1.1, 1.2, 1.3]
+        for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
             plt.plot(
-                2*models_as_num[-1],
+                coefs[idx]*models_as_num[-1],
                 error[1],
-                label='empirical error ({} samples)'.format(saps),
+                label='Naive MC (N={})'.format(saps),
                 marker='o',
-                color='red'
+                color=colors[idx],
             )
             plt.fill_between(
-                2*models_as_num[-1],
+                coefs[idx]*models_as_num[-1],
                 [error[0]],
                 [error[2]],
                 alpha=0.3
