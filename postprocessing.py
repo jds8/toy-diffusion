@@ -253,8 +253,8 @@ def plot_effort_v_performance(args, title, xlabel):
             )
             plt.fill_between(
                 2*models_as_num[-1],
-                error[0],
-                error[2],
+                [error[0]],
+                [error[2]],
                 alpha=0.3
             )
         plt.legend()
