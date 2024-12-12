@@ -235,30 +235,17 @@ def plot_effort_v_performance(args, title, xlabel):
             # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
             models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
-            plt.plot(models_as_num, target_means, label='dim={}'.format(dim), marker='x')
+            plt.plot(
+                models_as_num,
+                target_means,
+                label='params={}'.format(dim_to_param(dim, model_name)),
+                marker='x'
+            )
             plt.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
             # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
             # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
             # model_idxs = model_idxs_by_dim[dim]
             # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
-        empirical_error = torch.load('empirical_errors.pt')
-        run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
-        colors = ['gray', 'brown', 'black']
-        coefs = [1.1, 1.2, 1.3]
-        for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
-            plt.plot(
-                coefs[idx]*models_as_num[-1],
-                error[1],
-                label='Naive MC (N={})'.format(saps),
-                marker='o',
-                color=colors[idx],
-            )
-            plt.fill_between(
-                coefs[idx]*models_as_num[-1],
-                [error[0]],
-                [error[2]],
-                alpha=0.3
-            )
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel('Relative Error of Prob. Est.')
@@ -405,6 +392,20 @@ def process_pct_saps_data(figs_dir, model_name):
         )
         torch.save(pct_all_saps_data, pct_saps_path)
 
+def dim_to_param(dim, model_name):
+    gaussian_dict = {
+        32: 3996833,
+        40: 6238601,
+        64: 15946049
+    }
+    bm_dict = {
+        32: 4147809,
+        40: 6474361,
+        64: 16549057
+    }
+    if 'gaussian' in model_name.lower():
+        return gaussian_dict[dim]
+    return bm_dict[dim]
 
 def plot_pct_not_in_region(args, title, xlabel):
     dims = get_dims(args)
@@ -431,7 +432,7 @@ def plot_pct_not_in_region(args, title, xlabel):
             plt.plot(
                 models_as_num,
                 pct_means,
-                label='dim={}'.format(dim),
+                label='params={}'.format(dim_to_param(dim, model_name), model_name),
                 marker='x'
             )
             plt.fill_between(models_as_num, pct_lwr, pct_upr, alpha=0.3)
@@ -452,6 +453,86 @@ def plot_pct_not_in_region(args, title, xlabel):
         plt.clf()
     return directory
 
+def make_performance_v_samples(args):
+    """
+    1) Load saps and log_qrobs data
+    2) invoke target.log_prob(saps_raw) to get true_log_probs
+    3) calculate importance estimate using iterative_importance_estimate from toy_is
+    4) add Naive MC error bars where applicable
+    """
+    alphas = args.alphas
+    model_size = int(args.best_model[args.best_model.find('_v')+2:])
+    for alpha in alphas:
+        target_means = []
+        target_upr = []
+        target_lwr = []
+        diffusion_means = []
+        diffusion_upr = []
+        diffusion_lwr = []
+        true, _ = get_true_tail_prob(args.figs_dir, args.best_model, alpha)
+        directory = '{}/{}'.format(args.figs_dir, args.best_model)
+        target_file = '{}/{}'.format(
+            directory,
+            target_is_performance(alpha)
+        )
+        mean_quantiles = torch.load(target_file, weights_only=True)
+        target_means.append(mean_quantiles[0].cpu())
+        target_lwr.append(mean_quantiles[1].cpu())
+        target_upr.append(mean_quantiles[2].cpu())
+
+        diffusion_file = '{}/{}'.format(
+            directory,
+            diffusion_is_performance(alpha)
+        )
+        mean_quantiles = torch.load(diffusion_file, weights_only=True)
+        diffusion_means.append(mean_quantiles[0].cpu())
+        diffusion_lwr.append(mean_quantiles[1].cpu())
+        diffusion_upr.append(mean_quantiles[2].cpu())
+        # fig = plt.figure()
+        # ax = fig.add_subplot(1, 1, 1)
+        # ax.set_yscale('log')
+        # plt.ylim((0., 0.07))
+        # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
+        # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
+        plt.plot(args.samples, target_means, label=f'model={model_size}', marker='x')
+        plt.fill_between(args.samples, target_lwr, target_upr, alpha=0.3)
+        # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
+        # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
+        # model_idxs = model_idxs_by_dim[dim]
+        # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
+        empirical_error = torch.load('empirical_errors.pt')
+        run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
+        colors = ['gray', 'brown', 'black']
+        coefs = [1.0, 1.1, 1.2, 1.3]
+        for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
+            plt.plot(
+                coefs[idx]*models_as_num[-1],
+                error[1],
+                label='Naive MC (N={})'.format(saps),
+                marker='o',
+                color=colors[idx],
+            )
+            plt.axhspan(
+                [error[0]],
+                [error[2]],
+                xmin=coefs[idx]*models_as_num[-1],
+                xmax=coefs[idx+1]*models_as_num[-1],
+                alpha=0.3
+            )
+        plt.legend()
+        plt.xlabel('Monte Carlo Samples')
+        plt.ylabel('Relative Error of Prob. Est.')
+        ax = plt.gca()
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
+        directory = '{}/effort_v_performance'.format(args.figs_dir)
+        os.makedirs(directory, exist_ok=True)
+        fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
+        plt.savefig(fig_file)
+        plt.clf()
+    return directory
+
 
 if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
@@ -463,6 +544,8 @@ if __name__ == '__main__':
     parser.add_argument('--dims', type=int, nargs='+')
     parser.add_argument('--alphas', type=float, nargs='+')
     parser.add_argument('--xlabel', type=float, nargs='+')
+    parser.add_argument('--best_model', type=str)
+    parser.add_argument('--samples', int, nargs='+')
     args = parser.parse_args()
 
     # plot_mse_llk(figs_dir, model_name)
@@ -470,5 +553,6 @@ if __name__ == '__main__':
     # plot_is_vs_alpha(figs_dir, model_name)
 
     make_effort_v_performance(args)
+    make_performance_v_samples(args)
     # make_effort_v_performance_bm(args)
     # make_effort_v_performance_gaussian(args)
