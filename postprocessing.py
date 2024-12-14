@@ -20,6 +20,8 @@ from toy_is import iterative_importance_estimate
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+def performance_v_samples(alpha):
+    return f'alpha={alpha}_performance_v_samples.pt'
 
 def pct_all_saps_not_in_region(alpha):
     return f'alpha={alpha}_pct_all_saps_not_in_region.pt'
@@ -481,6 +483,12 @@ def get_saps_raw(saps, cfg):
     else:
         raise NotImplementedError
 
+def plot_error_bars(error_bars, xmins, filename):
+    for error_bar, xmin in zip(error_bars, xmins):
+        plt.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
+    plt.savefig(filename)
+    plt.clf()
+
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def make_performance_v_samples(cfg):
@@ -559,28 +567,16 @@ def make_performance_v_samples(cfg):
             quantiles = torch.stack(target_estimates).quantile([0.05, 0.5, 0.95])
             quantile_map[num_samples] = quantiles
 
-        diffusion_file = '{}/{}'.format(
+        error_bar_file = '{}/{}'.format(
             directory,
-            diffusion_is_performance(alpha)
+            performance_v_samples(alpha)
         )
-        mean_quantiles = torch.load(diffusion_file, weights_only=True)
-        diffusion_means.append(mean_quantiles[0].cpu())
-        diffusion_lwr.append(mean_quantiles[1].cpu())
-        diffusion_upr.append(mean_quantiles[2].cpu())
-        plt.plot(args.samples, target_means, label=f'model={model_size}', marker='x')
-        plt.fill_between(args.samples, target_lwr, target_upr, alpha=0.3)
+        plot_error_bars(quantiles, arg.samples, error_bar_file)
+
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
-        colors = ['gray', 'brown', 'black']
         coefs = [1.0, 1.1, 1.2, 1.3]
         for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
-            plt.plot(
-                coefs[idx]*models_as_num[-1],
-                error[1],
-                label='Naive MC (N={})'.format(saps),
-                marker='o',
-                color=colors[idx],
-            )
             plt.axhspan(
                 [error[0]],
                 [error[2]],
@@ -590,10 +586,9 @@ def make_performance_v_samples(cfg):
             )
         plt.legend()
         plt.xlabel('Monte Carlo Samples')
-        plt.ylabel('Relative Error of Prob. Est.')
+        plt.ylabel('Relative Error of Estimate')
         ax = plt.gca()
         ax.set_yscale('log')
-        ax.set_xscale('log')
         plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
         directory = '{}/effort_v_performance'.format(args.figs_dir)
         os.makedirs(directory, exist_ok=True)
@@ -601,12 +596,6 @@ def make_performance_v_samples(cfg):
         plt.savefig(fig_file)
         plt.clf()
     return directory
-
-def plot_error_bars(error_bars, xmins, filename):
-    for error_bar, xmin in zip(error_bars, xmins):
-        plt.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
-    plt.savefig(filename)
-    plt.clf()
 
 
 if __name__ == '__main__':
