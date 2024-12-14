@@ -7,6 +7,15 @@ import numpy as np
 
 import argparse
 import torch
+import hydra
+from hydra.core.config_store import ConfigStore
+from omegaconf import OmegaConf
+
+from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig
+from toy_configs import register_configs
+from toy_sample import ContinuousEvaluator
+from toy_train_config import PostProcessingConfig, get_target, get_proposal
+from toy_is import iterative_importance_estimate
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -453,7 +462,28 @@ def plot_pct_not_in_region(args, title, xlabel):
         plt.clf()
     return directory
 
-def make_performance_v_samples(args):
+def get_round(filename):
+    suffix = 'round_'
+    return filename[filename.find(suffix)+len(suffix):]
+
+def get_model_size(model):
+    return int(model[model.find('_v')+2:])
+
+def get_saps_raw(saps, cfg):
+    if type(cfg.example) == GaussianExampleConfig:
+        return saps * cfg.example.sigma + cfg.example.mu
+    elif type(args.example) == BrownianMotionDiffExampleConfig:
+        saps_raw = torch.cat([
+            torch.zeros(saps.shape[0], 1, 1, device=device),
+            saps.cumsum(dim=1)
+        ], dim=1)
+        return saps_raw
+    else:
+        raise NotImplementedError
+
+
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
+def make_performance_v_samples(cfg):
     """
     1) Load saps and log_qrobs data
     2) invoke target.log_prob(saps_raw) to get true_log_probs
@@ -461,7 +491,7 @@ def make_performance_v_samples(args):
     4) add Naive MC error bars where applicable
     """
     alphas = args.alphas
-    model_size = int(args.best_model[args.best_model.find('_v')+2:])
+    model_size = get_model_size(args.best_model)
     for alpha in alphas:
         target_means = []
         target_upr = []
@@ -475,10 +505,59 @@ def make_performance_v_samples(args):
             directory,
             target_is_performance(alpha)
         )
-        mean_quantiles = torch.load(target_file, weights_only=True)
-        target_means.append(mean_quantiles[0].cpu())
-        target_lwr.append(mean_quantiles[1].cpu())
-        target_upr.append(mean_quantiles[2].cpu())
+
+        # collect all sample data for each round
+        sample_data = [None] * cfg.total_rounds
+        sample_log_qrobs = [None] * cfg.total_rounds
+        for filename in os.listdir(directory):
+            file_path = os.path.join(directory, filename)
+            if 'saps' in file_path:
+                data = torch.load(file_path, map_location=device, weights_only=True)
+                rnd = get_round(file_path)
+                if sample_data[rnd] is not None:
+                    sample_data = torch.cat([sample_data[rnd], data])
+                else:
+                    sample_data[rnd] = data
+            if 'log_qrobs' in file_path:
+                data = torch.load(file_path, map_location=device, weights_only=True)
+                rnd = get_round(file_path)
+                if sample_log_qrobs[rnd] is not None:
+                    sample_log_qrobs = torch.cat([sample_log_qrobs[rnd], data])
+                else:
+                    sample_log_qrobs[rnd] = data
+
+        std = ContinuousEvaluator(cfg=cfg)
+        cfg_obj = OmegaConf.to_object(cfg)
+        target = get_proposal(cfg_obj.example, std)
+        target_estimates = [torch.tensor(0.)] * cfg.total_rounds
+        target_Ns = [torch.tensor(0)] * cfg.total_rounds
+        num_saps_not_in_region_list = [torch.tensor(0)] * cfg.total_rounds
+        test_fn = std.likelihood.get_condition
+        quantile_map = {}
+        for sample_idx, num_samples in enumerate([0]+args.samples[:-1]):
+            # for each sample size, construct error bars
+            for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
+                # for each subsample of data, compute IS estimate
+                saps = data[num_samples:args.samples[sample_idx]]
+                saps_raw = get_saps_raw(saps, args.best_model)
+                log_probs = target.log_prob(saps_raw).squeeze()
+
+                target_estimate, target_N, num_saps_not_in_region = \
+                    iterative_importance_estimate(
+                        test_fn=test_fn,
+                        saps_raw=saps_raw,
+                        saps=saps,
+                        log_probs=log_probs,
+                        log_qrobs=log_qrobs,
+                        cur_expectation=target_estimates[i],
+                        cur_N=target_Ns[i],
+                    )
+                target_estimates[i] = target_estimate
+                target_Ns[i] = target_N
+                num_saps_not_in_region_list[i] += num_saps_not_in_region
+            # construct error bar
+            quantiles = torch.stack(target_estimates).quantile([0.05, 0.5, 0.95])
+            quantile_map[num_samples] = quantiles
 
         diffusion_file = '{}/{}'.format(
             directory,
@@ -488,19 +567,9 @@ def make_performance_v_samples(args):
         diffusion_means.append(mean_quantiles[0].cpu())
         diffusion_lwr.append(mean_quantiles[1].cpu())
         diffusion_upr.append(mean_quantiles[2].cpu())
-        # fig = plt.figure()
-        # ax = fig.add_subplot(1, 1, 1)
-        # ax.set_yscale('log')
-        # plt.ylim((0., 0.07))
-        # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
-        # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
         plt.plot(args.samples, target_means, label=f'model={model_size}', marker='x')
         plt.fill_between(args.samples, target_lwr, target_upr, alpha=0.3)
-        # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
-        # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-        # model_idxs = model_idxs_by_dim[dim]
-        # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
-        empirical_error = torch.load('empirical_errors.pt')
+        empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
         colors = ['gray', 'brown', 'black']
         coefs = [1.0, 1.1, 1.2, 1.3]
@@ -533,6 +602,12 @@ def make_performance_v_samples(args):
         plt.clf()
     return directory
 
+def plot_error_bars(error_bars, xmins, filename):
+    for error_bar, xmin in zip(error_bars, xmins):
+        plt.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
+    plt.savefig(filename)
+    plt.clf()
+
 
 if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
@@ -553,6 +628,12 @@ if __name__ == '__main__':
     # plot_is_vs_alpha(figs_dir, model_name)
 
     make_effort_v_performance(args)
-    make_performance_v_samples(args)
     # make_effort_v_performance_bm(args)
     # make_effort_v_performance_gaussian(args)
+
+    cs = ConfigStore.instance()
+    cs.store(name="postprocessing_config", node=PostProcessingConfig)
+    register_configs()
+
+    with torch.no_grad():
+        make_performance_v_samples()

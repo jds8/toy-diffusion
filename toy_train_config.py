@@ -189,6 +189,11 @@ class MSEPlotConfig(SampleConfig):
     models: List[str] = field(default_factory=list)
 
 
+@dataclass
+class PostProcessingConfig(SampleConfig):
+    total_rounds: int = 100
+
+
 def get_target(cfg):
     if isinstance(cfg.example, GaussianExampleConfig):
         return GaussianTarget(cfg)
