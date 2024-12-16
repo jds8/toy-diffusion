@@ -11,10 +11,10 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 
-from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig
+from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
+                             PostProcessingConfig, get_target, get_proposal
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
-from toy_train_config import PostProcessingConfig, get_target, get_proposal
 from toy_is import iterative_importance_estimate
 
 
@@ -490,8 +490,7 @@ def plot_error_bars(error_bars, xmins, filename):
     plt.clf()
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
-def make_performance_v_samples(cfg):
+def make_performance_v_samples(cfg, args):
     """
     1) Load saps and log_qrobs data
     2) invoke target.log_prob(saps_raw) to get true_log_probs
@@ -499,7 +498,7 @@ def make_performance_v_samples(cfg):
     4) add Naive MC error bars where applicable
     """
     alphas = args.alphas
-    model_size = get_model_size(args.best_model)
+    model_size = get_model_size(cfg.best_model)
     for alpha in alphas:
         target_means = []
         target_upr = []
@@ -507,8 +506,8 @@ def make_performance_v_samples(cfg):
         diffusion_means = []
         diffusion_upr = []
         diffusion_lwr = []
-        true, _ = get_true_tail_prob(args.figs_dir, args.best_model, alpha)
-        directory = '{}/{}'.format(args.figs_dir, args.best_model)
+        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.best_model, alpha)
+        directory = '{}/{}'.format(cfg.figs_dir, cfg.best_model)
         target_file = '{}/{}'.format(
             directory,
             target_is_performance(alpha)
@@ -534,7 +533,8 @@ def make_performance_v_samples(cfg):
                 else:
                     sample_log_qrobs[rnd] = data
 
-        std = ContinuousEvaluator(cfg=cfg)
+        # std = ContinuousEvaluator(cfg=cfg)
+        std = None
         cfg_obj = OmegaConf.to_object(cfg)
         target = get_proposal(cfg_obj.example, std)
         target_estimates = [torch.tensor(0.)] * cfg.total_rounds
@@ -542,12 +542,12 @@ def make_performance_v_samples(cfg):
         num_saps_not_in_region_list = [torch.tensor(0)] * cfg.total_rounds
         test_fn = std.likelihood.get_condition
         quantile_map = {}
-        for sample_idx, num_samples in enumerate([0]+args.samples[:-1]):
+        for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
             for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
                 # for each subsample of data, compute IS estimate
-                saps = data[num_samples:args.samples[sample_idx]]
-                saps_raw = get_saps_raw(saps, args.best_model)
+                saps = data[num_samples:cfg.samples[sample_idx]]
+                saps_raw = get_saps_raw(saps, cfg.best_model)
                 log_probs = target.log_prob(saps_raw).squeeze()
 
                 target_estimate, target_N, num_saps_not_in_region = \
@@ -590,39 +590,26 @@ def make_performance_v_samples(cfg):
         ax = plt.gca()
         ax.set_yscale('log')
         plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
-        directory = '{}/effort_v_performance'.format(args.figs_dir)
+        directory = '{}/effort_v_performance'.format(cfg.figs_dir)
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
     return directory
 
+@hydra.main(version_base=None, config_path="conf", config_name="postprocessing_config")
+def main():
+    # make_effort_v_performance(args)
+    import pdb; pdb.set_trace()
+    make_performance_v_samples(args)
+
 
 if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
 
-    parser = argparse.ArgumentParser(description='Parser')
-    parser.add_argument('--figs_dir', type=str)
-    parser.add_argument('--model_names', type=str, nargs='+')
-    parser.add_argument('--model_idx', type=int, nargs='+')
-    parser.add_argument('--dims', type=int, nargs='+')
-    parser.add_argument('--alphas', type=float, nargs='+')
-    parser.add_argument('--xlabel', type=float, nargs='+')
-    parser.add_argument('--best_model', type=str)
-    parser.add_argument('--samples', int, nargs='+')
-    args = parser.parse_args()
-
-    # plot_mse_llk(figs_dir, model_name)
-    # plot_is_estimates(figs_dir, model_name)
-    # plot_is_vs_alpha(figs_dir, model_name)
-
-    make_effort_v_performance(args)
-    # make_effort_v_performance_bm(args)
-    # make_effort_v_performance_gaussian(args)
-
     cs = ConfigStore.instance()
-    cs.store(name="postprocessing_config", node=PostProcessingConfig)
+    cs.store(name="vpsde_postprocessing_config", node=PostProcessingConfig)
     register_configs()
 
     with torch.no_grad():
-        make_performance_v_samples()
+        main()
