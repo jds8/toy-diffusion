@@ -524,14 +524,14 @@ def make_performance_v_samples(cfg):
         sample_log_qrobs = [None] * cfg.total_rounds
         for filename in os.listdir(directory):
             file_path = os.path.join(directory, filename)
-            if re.search('alpha=.*_saps_[0-9]+_[0-9]+_round', file_path) is not None:
+            if re.search(f'alpha={alpha}_saps_[0-9]+_[0-9]+_round', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_data[rnd] is not None:
                     sample_data = torch.cat([sample_data[rnd], data])
                 else:
                     sample_data[rnd] = data
-            if re.search('.*log_qrobs.*', file_path) is not None:
+            if re.search(f'alpha={alpha}.*log_qrobs.*', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_log_qrobs[rnd] is not None:
@@ -547,7 +547,6 @@ def make_performance_v_samples(cfg):
         num_saps_not_in_region_list = [torch.tensor(0)] * cfg.total_rounds
         test_fn = std.likelihood.get_condition
         quantile_map = {}
-        import pdb; pdb.set_trace()
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
             for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
