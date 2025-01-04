@@ -466,8 +466,8 @@ def plot_pct_not_in_region(args, title, xlabel):
 
 def get_round(filename) -> int:
     round_ = 'round_'
-    file_suffix = '.pt'
-    return int(filename[filename.find(round_)+len(round_):-len(file_suffix)])
+    suffix_idx = filename.find('.')
+    return int(filename[filename.find(round_)+len(round_):suffix_idx+1])
 
 def get_model_size(model) -> int:
     return int(model[model.find('_v')+2:])
