@@ -478,9 +478,9 @@ def get_model_size(model) -> int:
 
 def get_saps_raw(saps, cfg) -> torch.Tensor:
     omega_cfg = OmegaConf.to_object(cfg)
-    if isinstance(omega_cfg, GaussianExampleConfig):
+    if isinstance(omega_cfg.example, GaussianExampleConfig):
         return saps * cfg.example.sigma + cfg.example.mu
-    elif isinstance(omega_cfg, BrownianMotionDiffExampleConfig):
+    elif isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
         saps_raw = torch.cat([
             torch.zeros(saps.shape[0], 1, 1, device=device),
             saps.cumsum(dim=1)
