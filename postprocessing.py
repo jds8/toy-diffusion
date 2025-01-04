@@ -544,7 +544,7 @@ def make_performance_v_samples(cfg):
 
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
-        target = get_target(cfg_obj.example, std)
+        target = get_target(std)
         target_estimates = [torch.tensor(0., device=device)] * cfg.total_rounds
         target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
         num_saps_not_in_region_list = [torch.tensor(0., device=device)] * cfg.total_rounds
