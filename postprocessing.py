@@ -474,7 +474,7 @@ def get_model_size(model):
 def get_saps_raw(saps, cfg):
     if type(cfg.example) == GaussianExampleConfig:
         return saps * cfg.example.sigma + cfg.example.mu
-    elif type(args.example) == BrownianMotionDiffExampleConfig:
+    elif type(cfg.example) == BrownianMotionDiffExampleConfig:
         saps_raw = torch.cat([
             torch.zeros(saps.shape[0], 1, 1, device=device),
             saps.cumsum(dim=1)
@@ -483,22 +483,23 @@ def get_saps_raw(saps, cfg):
     else:
         raise NotImplementedError
 
-def plot_error_bars(error_bars, xmins, filename):
-    for error_bar, xmin in zip(error_bars, xmins):
-        plt.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
-    plt.savefig(filename)
-    plt.clf()
+def plot_error_bars(error_bar_map, filename, ax):
+    for error_bar, xmin in error_bar_map.items():
+        ax.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
 
-
-def make_performance_v_samples(cfg, args):
+def make_performance_v_samples(cfg):
     """
     1) Load saps and log_qrobs data
     2) invoke target.log_prob(saps_raw) to get true_log_probs
     3) calculate importance estimate using iterative_importance_estimate from toy_is
     4) add Naive MC error bars where applicable
+    The plot shows IS error (with error bars) versus sample size.
+    I also want to plot empirical error (with error bars) for comparison.
+    The IS plots will be for a particular (the best?) model and the empirical plots
+    will be for sample sizes 10x and 100x larger than the smallest IS sample size.
     """
-    alphas = args.alphas
-    model_size = get_model_size(cfg.best_model)
+    alphas = cfg.alphas
+    model_size = get_model_size(cfg.model_name)
     for alpha in alphas:
         target_means = []
         target_upr = []
@@ -506,8 +507,8 @@ def make_performance_v_samples(cfg, args):
         diffusion_means = []
         diffusion_upr = []
         diffusion_lwr = []
-        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.best_model, alpha)
-        directory = '{}/{}'.format(cfg.figs_dir, cfg.best_model)
+        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+        directory = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
         target_file = '{}/{}'.format(
             directory,
             target_is_performance(alpha)
@@ -533,8 +534,7 @@ def make_performance_v_samples(cfg, args):
                 else:
                     sample_log_qrobs[rnd] = data
 
-        # std = ContinuousEvaluator(cfg=cfg)
-        std = None
+        std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
         target = get_proposal(cfg_obj.example, std)
         target_estimates = [torch.tensor(0.)] * cfg.total_rounds
@@ -542,12 +542,13 @@ def make_performance_v_samples(cfg, args):
         num_saps_not_in_region_list = [torch.tensor(0)] * cfg.total_rounds
         test_fn = std.likelihood.get_condition
         quantile_map = {}
+        import pdb; pdb.set_trace()
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
             for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
                 # for each subsample of data, compute IS estimate
                 saps = data[num_samples:cfg.samples[sample_idx]]
-                saps_raw = get_saps_raw(saps, cfg.best_model)
+                saps_raw = get_saps_raw(saps, cfg)
                 log_probs = target.log_prob(saps_raw).squeeze()
 
                 target_estimate, target_N, num_saps_not_in_region = \
@@ -565,50 +566,84 @@ def make_performance_v_samples(cfg, args):
                 num_saps_not_in_region_list[i] += num_saps_not_in_region
             # construct error bar
             quantiles = torch.stack(target_estimates).quantile([0.05, 0.5, 0.95])
-            quantile_map[num_samples] = quantiles
+            quantile_map[cfg.samples[sample_idx]] = quantiles
 
+        f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
         error_bar_file = '{}/{}'.format(
             directory,
             performance_v_samples(alpha)
         )
-        plot_error_bars(quantiles, arg.samples, error_bar_file)
+        plot_error_bars(quantile_map, error_bar_file, ax)
+        # plot_error_bars(quantile_map, error_bar_file, ax2)
 
+        # plot empirical errors
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
-        run_type = 'Gaussian' if 'Gaussian' in title else 'BrownianMotionDiff'
-        coefs = [1.0, 1.1, 1.2, 1.3]
+        run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
+        # coefs = [1.0, 1.1, 1.2, 1.3]
+        # models_as_num = [int(x) for dim in get_dims(cfg) for x in get_model_idx(cfg, dim)]
         for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
-            plt.axhspan(
+            # ax.axhspan(
+            #     [error[0]],
+            #     [error[2]],
+            #     xmin=saps,
+            #     xmax=saps*1.001,
+            #     alpha=0.3
+            # )
+            # ax.scatter(saps, error[1], marker='o')
+            ax2.axhspan(
                 [error[0]],
                 [error[2]],
-                xmin=coefs[idx]*models_as_num[-1],
-                xmax=coefs[idx+1]*models_as_num[-1],
+                xmin=saps,
+                xmax=saps*1.001,
                 alpha=0.3
             )
+            ax2.scatter(saps, error[1], marker='o')
         plt.legend()
         plt.xlabel('Monte Carlo Samples')
         plt.ylabel('Relative Error of Estimate')
-        ax = plt.gca()
         ax.set_yscale('log')
+        ax2.set_yscale('log')
         plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
+
+        ax.set_xlim(0, cfg.samples[-1])
+        ax2.set_xlim(cfg.samples[-1], saps)
+
+        # hide the spines between ax and ax2
+        ax.spines['right'].set_visible(False)
+        ax2.spines['left'].set_visible(False)
+        ax.yaxis.tick_left()
+        ax.tick_params(labelright='off')
+        ax2.yaxis.tick_right()
+
+        # plot break lines
+        d = .015  # how big to make the diagonal lines in axes coordinates
+        # arguments to pass plot, just so we don't keep repeating them
+        kwargs = dict(transform=ax.transAxes, color='k', clip_on=False)
+        ax.plot((1-d, 1+d), (-d, +d), **kwargs)
+        ax.plot((1-d, 1+d), (1-d, 1+d), **kwargs)
+
+        kwargs.update(transform=ax2.transAxes)  # switch to the bottom axes
+        ax2.plot((-d, +d), (1-d, 1+d), **kwargs)
+        ax2.plot((-d, +d), (-d, +d), **kwargs)
+
         directory = '{}/effort_v_performance'.format(cfg.figs_dir)
         os.makedirs(directory, exist_ok=True)
         fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
         plt.savefig(fig_file)
         plt.clf()
-    return directory
 
-@hydra.main(version_base=None, config_path="conf", config_name="postprocessing_config")
-def main():
-    # make_effort_v_performance(args)
-    import pdb; pdb.set_trace()
-    make_performance_v_samples(args)
+
+@hydra.main(version_base=None, config_path="conf", config_name="pp_config")
+def main(cfg):
+    # make_effort_v_performance(cfg)
+    make_performance_v_samples(cfg)
 
 
 if __name__ == '__main__':
     os.system('echo git commit: $(git rev-parse HEAD)')
 
     cs = ConfigStore.instance()
-    cs.store(name="vpsde_postprocessing_config", node=PostProcessingConfig)
+    cs.store(name="vpsde_pp_config", node=PostProcessingConfig)
     register_configs()
 
     with torch.no_grad():

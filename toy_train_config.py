@@ -196,7 +196,6 @@ class PostProcessingConfig(SampleConfig):
     dims: List[int] = field(default_factory=list)
     alphas: List[float] = field(default_factory=list)
     xlabel: str = ''
-    best_model: str = ''
     samples: List[int] = field(default_factory=list)
     total_rounds: int = 100
 
