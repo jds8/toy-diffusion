@@ -467,9 +467,9 @@ def plot_pct_not_in_region(args, title, xlabel):
 def get_round(filename) -> int:
     round_ = 'round_'
     output = filename[filename.find(round_)+len(round_):]
-    suffix_idx = output.find('.')
+    suffix_idx = output.find('.')  # sometimes files end in '.pt'
     if suffix_idx > 0:
-        output = output[:suffix_idx]
+        output = output[:suffix_idx]  # if they do, then truncate the '.pt' part
     int_output = int(output)
     return int_output
 
@@ -524,14 +524,14 @@ def make_performance_v_samples(cfg):
         sample_log_qrobs = [None] * cfg.total_rounds
         for filename in os.listdir(directory):
             file_path = os.path.join(directory, filename)
-            if 'saps' in file_path:
+            if re.search('alpha=.*_saps_[0-9]+_[0-9]+_round', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_data[rnd] is not None:
                     sample_data = torch.cat([sample_data[rnd], data])
                 else:
                     sample_data[rnd] = data
-            if 'log_qrobs' in file_path:
+            if re.search('.*log_qrobs.*', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_log_qrobs[rnd] is not None:
