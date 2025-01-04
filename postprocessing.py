@@ -543,9 +543,9 @@ def make_performance_v_samples(cfg):
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
         target = get_proposal(cfg_obj.example, std)
-        target_estimates = [torch.tensor(0.)] * cfg.total_rounds
-        target_Ns = [torch.tensor(0)] * cfg.total_rounds
-        num_saps_not_in_region_list = [torch.tensor(0)] * cfg.total_rounds
+        target_estimates = [torch.tensor(0., device=device)] * cfg.total_rounds
+        target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
+        num_saps_not_in_region_list = [torch.tensor(0, device=device)] * cfg.total_rounds
         test_fn = std.likelihood.get_condition
         quantile_map = {}
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
