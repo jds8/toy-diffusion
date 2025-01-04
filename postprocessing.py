@@ -464,14 +464,14 @@ def plot_pct_not_in_region(args, title, xlabel):
         plt.clf()
     return directory
 
-def get_round(filename):
+def get_round(filename) -> int:
     suffix = 'round_'
-    return filename[filename.find(suffix)+len(suffix):]
+    return int(filename[filename.find(suffix)+len(suffix):])
 
-def get_model_size(model):
+def get_model_size(model) -> int:
     return int(model[model.find('_v')+2:])
 
-def get_saps_raw(saps, cfg):
+def get_saps_raw(saps, cfg) -> torch.Tensor:
     if type(cfg.example) == GaussianExampleConfig:
         return saps * cfg.example.sigma + cfg.example.mu
     elif type(cfg.example) == BrownianMotionDiffExampleConfig:
