@@ -12,7 +12,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 
 from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
-                             PostProcessingConfig, get_target, get_proposal
+                             PostProcessingConfig, get_target
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
 from toy_is import iterative_importance_estimate
@@ -481,9 +481,11 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     if isinstance(omega_cfg.example, GaussianExampleConfig):
         return saps * cfg.example.sigma + cfg.example.mu
     elif isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
+        dt = torch.tensor(1. / saps.shape[1])
+        scaled_saps = saps * dt.sqrt()
         saps_raw = torch.cat([
             torch.zeros(saps.shape[0], 1, 1, device=device),
-            saps.cumsum(dim=1)
+            scaled_saps.cumsum(dim=1)
         ], dim=1)
         return saps_raw
     else:
@@ -542,7 +544,7 @@ def make_performance_v_samples(cfg):
 
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
-        target = get_proposal(cfg_obj.example, std)
+        target = get_target(cfg_obj.example, std)
         target_estimates = [torch.tensor(0., device=device)] * cfg.total_rounds
         target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
         num_saps_not_in_region_list = [torch.tensor(0., device=device)] * cfg.total_rounds
