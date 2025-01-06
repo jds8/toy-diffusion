@@ -21,7 +21,7 @@ from toy_is import iterative_importance_estimate
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def performance_v_samples(alpha):
-    return f'alpha={alpha}_performance_v_samples.pt'
+    return f'alpha={alpha}_performance_v_samples'
 
 def pct_all_saps_not_in_region(alpha):
     return f'alpha={alpha}_pct_all_saps_not_in_region.pt'
@@ -491,7 +491,7 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     else:
         raise NotImplementedError
 
-def plot_error_bars(error_bar_map, filename, ax):
+def plot_error_bars(error_bar_map, ax):
     for xmin, error_bar in error_bar_map.items():
         errors = error_bar.cpu()
         ax.axhspan(errors[0], errors[2], xmin=xmin, xmax=xmin*1.1)
@@ -583,8 +583,8 @@ def make_performance_v_samples(cfg):
             directory,
             performance_v_samples(alpha)
         )
-        plot_error_bars(quantile_map, error_bar_file, ax)
-        # plot_error_bars(quantile_map, error_bar_file, ax2)
+        plot_error_bars(quantile_map, ax)
+        # plot_error_bars(quantile_map, ax2)
 
         # plot empirical errors
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
@@ -601,13 +601,13 @@ def make_performance_v_samples(cfg):
             # )
             # ax.scatter(saps, error[1], marker='o')
             ax2.axhspan(
-                [error[0]],
-                [error[2]],
+                error[0],
+                error[2],
                 xmin=saps,
                 xmax=saps*1.001,
                 alpha=0.3
             )
-            ax2.scatter(saps, error[1], marker='o')
+            ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
         plt.legend()
         plt.xlabel('Monte Carlo Samples')
         plt.ylabel('Relative Error of Estimate')
@@ -638,7 +638,7 @@ def make_performance_v_samples(cfg):
 
         directory = '{}/effort_v_performance'.format(cfg.figs_dir)
         os.makedirs(directory, exist_ok=True)
-        fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
+        fig_file = '{}/{}.pdf'.format(directory, error_bar_file)
         plt.savefig(fig_file)
         plt.clf()
 
