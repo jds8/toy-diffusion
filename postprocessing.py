@@ -494,7 +494,13 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
 def plot_error_bars(error_bar_map, ax):
     for xmin, error_bar in error_bar_map.items():
         errors = error_bar.cpu()
-        ax.axhspan(errors[0], errors[2], xmin=xmin, xmax=xmin*1.1)
+        ax.axhspan(
+            errors[0],
+            errors[2],
+            xmin=xmin,
+            xmax=xmin*1.1,
+            label=f'DM (N={xmin})'
+        )
 
 def make_performance_v_samples(cfg):
     """
@@ -608,11 +614,13 @@ def make_performance_v_samples(cfg):
                 alpha=0.3
             )
             ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
-        plt.legend()
-        plt.xlabel('Monte Carlo Samples')
-        plt.ylabel('Relative Error of Estimate')
+        ax.legend()
+        ax2.legend()
+        ax.xlabel('Monte Carlo Samples')
+        ax.ylabel('Relative Error of Estimate')
         ax.set_yscale('log')
         ax2.set_yscale('log')
+        ax2.set_xscale('log')
         plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
 
         ax.set_xlim(0, cfg.samples[-1])
