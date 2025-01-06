@@ -493,7 +493,8 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
 
 def plot_error_bars(error_bar_map, filename, ax):
     for xmin, error_bar in error_bar_map.items():
-        ax.axhspan(error_bar[0], error_bar[2], xmin=xmin, xmax=xmin*1.1)
+        errors = error_bar.cpu()
+        ax.axhspan(errors[0], errors[2], xmin=xmin, xmax=xmin*1.1)
 
 def make_performance_v_samples(cfg):
     """
