@@ -492,8 +492,8 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
         raise NotImplementedError
 
 def plot_error_bars(error_bar_map, filename, ax):
-    for error_bar, xmin in error_bar_map.items():
-        ax.axhspan(error_bar[1], error_bar[2], xmin=xmin, xmax=xmin*1.1)
+    for xmin, error_bar in error_bar_map.items():
+        ax.axhspan(error_bar[0], error_bar[2], xmin=xmin, xmax=xmin*1.1)
 
 def make_performance_v_samples(cfg):
     """
@@ -572,7 +572,9 @@ def make_performance_v_samples(cfg):
                 target_Ns[i] = target_N
                 num_saps_not_in_region_list[i] += num_saps_not_in_region
             # construct error bar
-            quantiles = torch.stack(target_estimates).quantile([0.05, 0.5, 0.95])
+            quantiles = torch.stack(target_estimates).quantile(
+                torch.tensor([0.05, 0.5, 0.95], device=device)
+            )
             quantile_map[cfg.samples[sample_idx]] = quantiles
 
         f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
