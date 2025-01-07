@@ -570,7 +570,7 @@ def make_performance_v_samples(cfg):
                 num_saps_not_in_region_list[i] += num_saps_not_in_region
             # construct error bar
             quantiles = torch.stack(target_estimates).quantile(
-                torch.tensor([0.05, 0.5, 0.95], device=device)
+                torch.tensor([0.05, 0.5, 0.95])
             )
             quantile_map[cfg.samples[sample_idx]] = quantiles
 
@@ -579,10 +579,9 @@ def make_performance_v_samples(cfg):
         # plot empirical errors
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
-        # coefs = [1.0, 1.1, 1.2, 1.3]
-        # models_as_num = [int(x) for dim in get_dims(cfg) for x in get_model_idx(cfg, dim)]
-        quantile_map.update(empirical_error[run_type][alpha])
-        for idx, (saps, error) in enumerate(quantile_map.items()):
+        sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
+        sap_error_pairs += [(sap, error) for sap, error in quantile_map.items()]
+        for saps, error in sap_error_pairs:
             ax.plot([saps, saps], [error[0], error[2]], alpha=0.3)
             ax.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
             ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3)
