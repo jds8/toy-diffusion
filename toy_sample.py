@@ -76,7 +76,11 @@ class ToyEvaluator:
         return num_params
 
     def load_model_state_dict(self, model_path, map_location):
-        model = torch.load('{}'.format(model_path), map_location=map_location)
+        model = torch.load(
+            '{}'.format(model_path),
+            map_location=map_location,
+            weights_only=True
+        )
         if 'model_state_dict' in model:
             self.diffusion_model.load_state_dict(model['model_state_dict'])
         else:
@@ -398,7 +402,7 @@ class ContinuousEvaluator(ToyEvaluator):
         #     (sol * dt.sqrt()).cumsum(dim=-2)
         # ], dim=2)
         # plt.plot(torch.arange(104), bm_trajs[-10].squeeze().cpu(), color='blue')
-        # gt = torch.load('bm_dataset.pt', map_location=device)
+        # gt = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
         # plt.plot(torch.arange(104), gt[0].squeeze().cpu(), color='red')
         # plt.show()
 
@@ -964,7 +968,7 @@ def sample(cfg):
             exit()
 
         # dt = 1 / torch.tensor(cfg.example.sde_steps-1)
-        # data = torch.load('bm_dataset.pt', map_location=device)
+        # data = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
         # trajs = data[:cfg.num_samples].diff(dim=1) / dt.sqrt()
         # max_idx = 0
         # observed_values = trajs[:, :max_idx]

@@ -623,12 +623,11 @@ def make_performance_v_samples(cfg):
 
         directory = '{}/effort_v_performance'.format(cfg.figs_dir)
         os.makedirs(directory, exist_ok=True)
-        error_bar_file = '{}/{}'.format(
+        error_bar_file = '{}/{}.pdf'.format(
             directory,
             performance_v_samples(alpha)
         )
-        fig_file = '{}/{}.pdf'.format(directory, error_bar_file)
-        plt.savefig(fig_file)
+        plt.savefig(error_bar_file)
         plt.clf()
 
 
