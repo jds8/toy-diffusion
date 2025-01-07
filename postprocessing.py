@@ -3,6 +3,7 @@
 import os
 import re
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 import numpy as np
 
 import argparse
@@ -491,17 +492,6 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     else:
         raise NotImplementedError
 
-def plot_error_bars(error_bar_map, ax):
-    for xmin, error_bar in error_bar_map.items():
-        errors = error_bar.cpu()
-        ax.axhspan(
-            errors[0],
-            errors[2],
-            xmin=xmin,
-            xmax=xmin*1.1,
-            label=f'DM (N={xmin})'
-        )
-
 def make_performance_v_samples(cfg):
     """
     1) Load saps and log_qrobs data
@@ -585,46 +575,34 @@ def make_performance_v_samples(cfg):
             quantile_map[cfg.samples[sample_idx]] = quantiles
 
         f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
-        error_bar_file = '{}/{}'.format(
-            directory,
-            performance_v_samples(alpha)
-        )
-        plot_error_bars(quantile_map, ax)
-        # plot_error_bars(quantile_map, ax2)
 
         # plot empirical errors
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
         # coefs = [1.0, 1.1, 1.2, 1.3]
         # models_as_num = [int(x) for dim in get_dims(cfg) for x in get_model_idx(cfg, dim)]
-        for idx, (saps, error) in enumerate(empirical_error[run_type][alpha].items()):
-            # ax.axhspan(
-            #     [error[0]],
-            #     [error[2]],
-            #     xmin=saps,
-            #     xmax=saps*1.001,
-            #     alpha=0.3
-            # )
-            # ax.scatter(saps, error[1], marker='o')
-            ax2.axhspan(
-                error[0],
-                error[2],
-                xmin=saps,
-                xmax=saps*1.001,
-                alpha=0.3
-            )
+        quantile_map.update(empirical_error[run_type][alpha])
+        for idx, (saps, error) in enumerate(quantile_map.items()):
+            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3)
+            ax.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
+            ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3)
             ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
-        ax.legend()
-        ax2.legend()
-        ax.xlabel('Monte Carlo Samples')
-        ax.ylabel('Relative Error of Estimate')
+
+        # f.legend()
+        f.supxlabel('Monte Carlo Samples')
+        f.supylabel('Relative Error of Estimate')
+        f.suptitle(f'Performance vs. Number of Samples (alpha={alpha})')
+
         ax.set_yscale('log')
         ax2.set_yscale('log')
         ax2.set_xscale('log')
-        plt.title(f'Performance vs. Number of Samples (alpha={alpha})')
+        # Format as whole numbers
+        ax2.xaxis.set_major_formatter(StrMethodFormatter("{x:.0f}"))
+        ax2.get_yaxis().set_visible(False)
+        ax2.set(yticklabels=[])
 
-        ax.set_xlim(0, cfg.samples[-1])
-        ax2.set_xlim(cfg.samples[-1], saps)
+        ax.set_xlim(0, cfg.samples[-1]+10)
+        ax2.set_xlim(cfg.samples[-1]+10, saps+10)
 
         # hide the spines between ax and ax2
         ax.spines['right'].set_visible(False)
@@ -646,6 +624,10 @@ def make_performance_v_samples(cfg):
 
         directory = '{}/effort_v_performance'.format(cfg.figs_dir)
         os.makedirs(directory, exist_ok=True)
+        error_bar_file = '{}/{}'.format(
+            directory,
+            performance_v_samples(alpha)
+        )
         fig_file = '{}/{}.pdf'.format(directory, error_bar_file)
         plt.savefig(fig_file)
         plt.clf()
