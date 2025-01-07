@@ -79,7 +79,7 @@ class ToyEvaluator:
         model = torch.load(
             '{}'.format(model_path),
             map_location=map_location,
-            weights_only=True
+            weights_only=False
         )
         if 'model_state_dict' in model:
             self.diffusion_model.load_state_dict(model['model_state_dict'])
