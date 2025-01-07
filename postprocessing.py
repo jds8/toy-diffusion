@@ -569,7 +569,7 @@ def make_performance_v_samples(cfg):
                 target_Ns[i] = target_N
                 num_saps_not_in_region_list[i] += num_saps_not_in_region
             # construct error bar
-            quantiles = torch.stack(target_estimates).quantile(
+            quantiles = torch.stack(target_estimates).to('cpu').quantile(
                 torch.tensor([0.05, 0.5, 0.95])
             )
             quantile_map[cfg.samples[sample_idx]] = quantiles
