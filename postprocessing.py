@@ -547,6 +547,24 @@ def make_performance_v_samples(cfg):
         num_saps_not_in_region_list = [torch.tensor(0., device=device)] * cfg.total_rounds
         test_fn = std.likelihood.get_condition
         quantile_map = {}
+
+        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+        true = true.to('cpu')
+
+        batch_size = 1690000
+        x0 = torch.randn(
+            batch_size,
+            cfg.example.sde_steps-1,
+            1,
+        )
+        dt = torch.tensor(1. / (cfg.example.sde_steps-1))
+        scaled_x0 = x0 * dt.sqrt()  # standardize data
+        sample_trajs = torch.cat([
+            torch.zeros(batch_size, 1, 1),
+            scaled_x0.cumsum(dim=1)
+        ], dim=1)
+        true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
+
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
             for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
@@ -565,23 +583,6 @@ def make_performance_v_samples(cfg):
                         cur_expectation=target_rel_errors[i],
                         cur_N=target_Ns[i],
                     )
-                true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
-                true = true.to('cpu')
-
-                batch_size = 1690000
-                x0 = torch.randn(
-                    batch_size,
-                    cfg.example.sde_steps-1,
-                    1,
-                )
-                dt = torch.tensor(1. / (cfg.example.sde_steps-1))
-                scaled_x0 = x0 * dt.sqrt()  # standardize data
-                sample_trajs = torch.cat([
-                    torch.zeros(batch_size, 1, 1),
-                    scaled_x0.cumsum(dim=1)
-                ], dim=1)
-                true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
-
                 target_rel_error = torch.abs(target_estimate - true) / true
                 target_rel_errors[i] = target_rel_error
                 target_Ns[i] = target_N
