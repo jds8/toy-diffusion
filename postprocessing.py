@@ -528,7 +528,10 @@ def make_performance_v_samples(cfg):
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_data[rnd] is not None:
-                    sample_data = torch.cat([sample_data[rnd], data])
+                    sample_data = torch.cat([
+                        sample_data[rnd],
+                        data.reshape(-1, 1, 1)
+                    ]).reshape(-1, 1, 1)
                 else:
                     sample_data[rnd] = data
             if re.search(f'alpha={alpha}.*log_qrobs.*', file_path) is not None:
