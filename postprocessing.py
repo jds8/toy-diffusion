@@ -3,7 +3,6 @@
 import os
 import re
 import matplotlib.pyplot as plt
-from matplotlib.ticker import StrMethodFormatter
 import numpy as np
 
 import argparse
@@ -576,38 +575,46 @@ def make_performance_v_samples(cfg):
 
         f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
 
-        # plot empirical errors
+        sap_error_pairs = [(sap, error) for sap, error in quantile_map.items()]
+        for saps, error in sap_error_pairs:
+            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='blue')
+            ax.scatter(saps, error[1], marker='o', label=f'Diffusion (N={saps})', color='blue')
+
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
         sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
-        sap_error_pairs += [(sap, error) for sap, error in quantile_map.items()]
         for saps, error in sap_error_pairs:
-            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3)
-            ax.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
-            ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3)
-            ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})')
+            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red')
+            ax.scatter(saps, error[1], marker='o', color='red')
+            ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red')
+            ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})', color='red')
 
-        # f.legend()
+        ax.legend()
+        ax2.legend()
         f.supxlabel('Monte Carlo Samples')
         f.supylabel('Relative Error of Estimate')
         f.suptitle(f'Performance vs. Number of Samples (alpha={alpha})')
 
-        ax.set_yscale('log')
-        ax2.set_yscale('log')
+        # ax.set_yscale('log')
+        # ax2.set_yscale('log')
         ax2.set_xscale('log')
         # Format as whole numbers
-        ax2.xaxis.set_major_formatter(StrMethodFormatter("{x:.0f}"))
-        ax2.get_yaxis().set_visible(False)
-        ax2.set(yticklabels=[])
+        # ax2.get_yaxis().set_visible(False)
+        # ax2.set(yticklabels=[])
+        ax.tick_params(axis='y', which='both', labelleft=True)
+
+        sorted_emp_saps = sorted(empirical_error[run_type][alpha].keys())
+        max_q_sap = sorted(quantile_map.keys())[-1]
+        min_emp_sap = min(sorted_emp_saps[0], max_q_sap) * 1.5
 
         ax.set_xlim(0, cfg.samples[-1]+10)
-        ax2.set_xlim(cfg.samples[-1]+10, saps+10)
+        ax2.set_xlim(min_emp_sap, sorted_emp_saps[-1]*10)
 
         # hide the spines between ax and ax2
         ax.spines['right'].set_visible(False)
         ax2.spines['left'].set_visible(False)
-        ax.yaxis.tick_left()
-        ax.tick_params(labelright='off')
+        # ax.yaxis.tick_left()
+        # ax.tick_params(labelright='off')
         ax2.yaxis.tick_right()
 
         # plot break lines
