@@ -131,7 +131,24 @@ class BrownianMotionDiffTarget(Target):
         # the elements of saps are dependent, but those of
         # saps.diff(dim=1) are independent increments
         return self.dist.log_prob(saps.diff(dim=1)).sum(dim=1)
+    def empirical_prob(self, alpha):
+        batch_size = 1690000
+        x0 = torch.randn(
+            batch_size,
+            self.cfg.example.sde_steps-1,
+            1,
+        )
+        dt = torch.tensor(1. / (self.cfg.example.sde_steps-1))
+        scaled_x0 = x0 * dt.sqrt()  # standardize data
+        sample_trajs = torch.cat([
+            torch.zeros(batch_size, 1, 1),
+            scaled_x0.cumsum(dim=1)
+        ], dim=1)
+        return (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
     def analytical_prob(self, alpha):
+        # no better solution known
+        return self.empirical_prob(alpha)
+    def analytical_lower_bound(self, alpha):
         # 0.0059 for alpha=3
         # https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
         return 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
