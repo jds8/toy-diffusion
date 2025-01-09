@@ -533,14 +533,17 @@ def make_performance_v_samples(cfg):
                         data.reshape(-1, 1, 1)
                     ]).reshape(-1, 1, 1)
                 else:
-                    sample_data[rnd] = data
+                    sample_data[rnd] = data.reshape(-1, 1, 1)
             if re.search(f'alpha={alpha}.*log_qrobs.*', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_log_qrobs[rnd] is not None:
-                    sample_log_qrobs = torch.cat([sample_log_qrobs[rnd], data])
+                    sample_log_qrobs[rnd] = torch.cat([
+                        sample_log_qrobs[rnd],
+                        data.reshape(-1, 1, 1)
+                    ]).reshape(-1, 1, 1)
                 else:
-                    sample_log_qrobs[rnd] = data
+                    sample_log_qrobs[rnd] = data.reshape(-1, 1, 1)
 
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
@@ -618,7 +621,8 @@ def make_performance_v_samples(cfg):
         ax2.legend()
         f.supxlabel('Monte Carlo Samples')
         f.supylabel('Relative Error of Estimate')
-        f.suptitle(f'Performance vs. Number of Samples (alpha={alpha}, dim={cfg.diffusion.dim})')
+        model = 'Gaussian' if run_type == 'Gaussian' else 'Brownian Motion'
+        f.suptitle(f'{model}\nPerformance vs. Number of Samples (alpha={alpha}, dim={cfg.diffusion.dim})')
 
         # ax.set_yscale('log')
         # ax2.set_yscale('log')
@@ -630,9 +634,9 @@ def make_performance_v_samples(cfg):
 
         sorted_emp_saps = sorted(empirical_error[run_type][alpha].keys())
         max_q_sap = sorted(quantile_map.keys())[-1]
-        min_emp_sap = min(sorted_emp_saps[0], max_q_sap) * 1.5
+        min_emp_sap = min(sorted_emp_saps[0], max_q_sap)*1.5
 
-        ax.set_xlim(0, cfg.samples[-1]+10)
+        ax.set_xlim(0, max_q_sap*1.1)
         ax2.set_xlim(min_emp_sap, sorted_emp_saps[-1]*10)
 
         # hide the spines between ax and ax2
