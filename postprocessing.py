@@ -565,7 +565,8 @@ def make_performance_v_samples(cfg):
                         cur_expectation=target_rel_errors[i],
                         cur_N=target_Ns[i],
                     )
-                true = torch.tensor(0.00225)
+                true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+                true = true.to('cpu')
                 target_rel_error = torch.abs(target_estimate - true) / true
                 target_rel_errors[i] = target_rel_error
                 target_Ns[i] = target_N
@@ -574,29 +575,29 @@ def make_performance_v_samples(cfg):
             quantiles = torch.stack(target_rel_errors).to('cpu').quantile(
                 torch.tensor([0.05, 0.5, 0.95])
             )
-            quantile_map[cfg.samples[sample_idx]] = quantiles
+            quantile_map[target_N.to('cpu')] = quantiles
 
         f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
 
         sap_error_pairs = [(sap, error) for sap, error in quantile_map.items()]
         for saps, error in sap_error_pairs:
-            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='blue')
+            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='blue', linewidth=2.5)
             ax.scatter(saps, error[1], marker='o', label=f'Diffusion (N={saps})', color='blue')
 
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
         sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
         for saps, error in sap_error_pairs:
-            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red')
+            ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red', linewidth=2.5)
             ax.scatter(saps, error[1], marker='o', color='red')
-            ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red')
+            ax2.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red', linewidth=2.5)
             ax2.scatter(saps, error[1], marker='o', label=f'Empirical (N={saps})', color='red')
 
         ax.legend()
         ax2.legend()
         f.supxlabel('Monte Carlo Samples')
         f.supylabel('Relative Error of Estimate')
-        f.suptitle(f'Performance vs. Number of Samples (alpha={alpha})')
+        f.suptitle(f'Performance vs. Number of Samples (alpha={alpha}, dim={cfg.diffusion.dim})')
 
         # ax.set_yscale('log')
         # ax2.set_yscale('log')
