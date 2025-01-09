@@ -599,6 +599,7 @@ def make_performance_v_samples(cfg):
             quantiles = torch.stack(target_rel_errors).to('cpu').quantile(
                 torch.tensor([0.05, 0.5, 0.95])
             )
+            print(quantiles)
             quantile_map[target_N.to('cpu')] = quantiles
 
         f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
@@ -622,7 +623,7 @@ def make_performance_v_samples(cfg):
         f.supxlabel('Monte Carlo Samples')
         f.supylabel('Relative Error of Estimate')
         model = 'Gaussian' if run_type == 'Gaussian' else 'Brownian Motion'
-        f.suptitle(f'{model}\nPerformance vs. Number of Samples (alpha={alpha}, dim={cfg.diffusion.dim})')
+        f.suptitle(f'{model} Performance vs. Number of Samples\n(alpha={alpha}, dim={cfg.diffusion.dim})')
 
         # ax.set_yscale('log')
         # ax2.set_yscale('log')
