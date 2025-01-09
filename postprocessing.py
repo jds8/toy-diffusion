@@ -548,22 +548,24 @@ def make_performance_v_samples(cfg):
         test_fn = std.likelihood.get_condition
         quantile_map = {}
 
-        # true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
-        # true = true.to('cpu')
-
-        batch_size = 1690000
-        x0 = torch.randn(
-            batch_size,
-            cfg.example.sde_steps-1,
-            1,
-        )
-        dt = torch.tensor(1. / (cfg.example.sde_steps-1))
-        scaled_x0 = x0 * dt.sqrt()  # standardize data
-        sample_trajs = torch.cat([
-            torch.zeros(batch_size, 1, 1),
-            scaled_x0.cumsum(dim=1)
-        ], dim=1)
-        true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
+        omega_cfg = OmegaConf.to_object(cfg)
+        if isinstance(omega_cfg.example, GaussianExampleConfig):
+            true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+            true = true.to('cpu')
+        else:
+            batch_size = 1690000
+            x0 = torch.randn(
+                batch_size,
+                cfg.example.sde_steps-1,
+                1,
+            )
+            dt = torch.tensor(1. / (cfg.example.sde_steps-1))
+            scaled_x0 = x0 * dt.sqrt()  # standardize data
+            sample_trajs = torch.cat([
+                torch.zeros(batch_size, 1, 1),
+                scaled_x0.cumsum(dim=1)
+            ], dim=1)
+            true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
 
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
