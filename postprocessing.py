@@ -567,6 +567,21 @@ def make_performance_v_samples(cfg):
                     )
                 true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
                 true = true.to('cpu')
+
+                batch_size = 1690000
+                x0 = torch.randn(
+                    batch_size,
+                    cfg.example.sde_steps-1,
+                    1,
+                )
+                dt = torch.tensor(1. / (cfg.example.sde_steps-1))
+                scaled_x0 = x0 * dt.sqrt()  # standardize data
+                sample_trajs = torch.cat([
+                    torch.zeros(batch_size, 1, 1),
+                    scaled_x0.cumsum(dim=1)
+                ], dim=1)
+                true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
+
                 target_rel_error = torch.abs(target_estimate - true) / true
                 target_rel_errors[i] = target_rel_error
                 target_Ns[i] = target_N
