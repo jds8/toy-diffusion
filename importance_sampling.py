@@ -148,7 +148,7 @@ class BrownianMotionDiffTarget(Target):
     def analytical_prob(self, alpha):
         # no better solution known
         return self.empirical_prob(alpha)
-    def analytical_lower_bound(self, alpha):
+    def analytical_upper_bound(self, alpha):
         # 0.0059 for alpha=3
         # https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
         return 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
