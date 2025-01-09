@@ -548,8 +548,8 @@ def make_performance_v_samples(cfg):
         test_fn = std.likelihood.get_condition
         quantile_map = {}
 
-        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
-        true = true.to('cpu')
+        # true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+        # true = true.to('cpu')
 
         batch_size = 1690000
         x0 = torch.randn(
