@@ -186,7 +186,7 @@ def process_performance_data(figs_dir, model_name, args):
             target_rel_errors.quantile(0.95)
         ])
         diffusion = torch.stack(diffusion_alpha_map[alpha])
-        diffusion_rel_errors = torch.abs(diffusion - true)
+        diffusion_rel_errors = torch.abs(diffusion - true) / true
         diffusion_performance_data = torch.stack([
             diffusion_rel_errors.quantile(0.5),
             diffusion_rel_errors.quantile(0.05),
@@ -504,20 +504,8 @@ def make_performance_v_samples(cfg):
     will be for sample sizes 10x and 100x larger than the smallest IS sample size.
     """
     alphas = cfg.alphas
-    model_size = get_model_size(cfg.model_name)
     for alpha in alphas:
-        target_means = []
-        target_upr = []
-        target_lwr = []
-        diffusion_means = []
-        diffusion_upr = []
-        diffusion_lwr = []
-        true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
         directory = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
-        target_file = '{}/{}'.format(
-            directory,
-            target_is_performance(alpha)
-        )
 
         # collect all sample data for each round
         sample_data = [None] * cfg.total_rounds
@@ -543,7 +531,6 @@ def make_performance_v_samples(cfg):
                     sample_log_qrobs[rnd] = data
 
         std = ContinuousEvaluator(cfg=cfg)
-        cfg_obj = OmegaConf.to_object(cfg)
         target = get_target(std)
         target_rel_errors = [torch.tensor(0., device=device)] * cfg.total_rounds
         target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
@@ -620,12 +607,8 @@ def make_performance_v_samples(cfg):
         f.supylabel('Relative Error of Estimate')
         f.suptitle(f'Performance vs. Number of Samples (alpha={alpha}, dim={cfg.diffusion.dim})')
 
-        # ax.set_yscale('log')
-        # ax2.set_yscale('log')
         ax2.set_xscale('log')
         # Format as whole numbers
-        # ax2.get_yaxis().set_visible(False)
-        # ax2.set(yticklabels=[])
         ax.tick_params(axis='y', which='both', labelleft=True)
 
         sorted_emp_saps = sorted(empirical_error[run_type][alpha].keys())
@@ -638,8 +621,6 @@ def make_performance_v_samples(cfg):
         # hide the spines between ax and ax2
         ax.spines['right'].set_visible(False)
         ax2.spines['left'].set_visible(False)
-        # ax.yaxis.tick_left()
-        # ax.tick_params(labelright='off')
         ax2.yaxis.tick_right()
 
         # plot break lines
