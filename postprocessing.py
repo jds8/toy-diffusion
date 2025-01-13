@@ -328,7 +328,10 @@ def plot_effort_v_performance(args, title, xlabel):
         # Format as whole numbers
         ax.tick_params(axis='y', which='both', labelleft=True)
 
-        ax2.set_xlim(models_as_num[-1]*5, models_as_num[-1]*model_idxs[-1]*10)
+        # ax2.set_xlim(models_as_num[-1]*5, models_as_num[-1]*model_idxs[-1]*10)
+        ax2.set_xticks([models_as_num[-1] * model_idx for model_idx in model_idxs])
+        ax2.set_xticklabels(["N={}".format(pair[0]) for pair in sap_error_pairs])
+        print(ax2.get_xticklabels())
 
         # hide the spines between ax and ax2
         ax.spines['right'].set_visible(False)
