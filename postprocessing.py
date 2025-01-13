@@ -4,6 +4,7 @@ import os
 import re
 import matplotlib.pyplot as plt
 import numpy as np
+from typing_extensions import List
 
 import argparse
 import torch
@@ -205,7 +206,7 @@ def process_performance_data(figs_dir, model_name, args):
         torch.save(target_performance_data, target_path)
         torch.save(diffusion_performance_data, diffusion_path)
 
-def plot_effort_v_performance(args, title, xlabel):
+def old_plot_effort_v_performance(args, title, xlabel):
     dims = get_dims(args)
     model_names = args.model_names
     models_by_dim = {dim: [model for model in model_names if 'dim_{}'.format(str(dim)) in model] for dim in dims}
@@ -239,12 +240,6 @@ def plot_effort_v_performance(args, title, xlabel):
                 diffusion_means.append(mean_quantiles[0].cpu())
                 diffusion_lwr.append(mean_quantiles[1].cpu())
                 diffusion_upr.append(mean_quantiles[2].cpu())
-            # fig = plt.figure()
-            # ax = fig.add_subplot(1, 1, 1)
-            # ax.set_yscale('log')
-            # plt.ylim((0., 0.07))
-            # plt.plot(model_idxs_by_dim[dim], target_means, color='darkblue', label='Against Target', marker='x')
-            # plt.fill_between(model_idxs_by_dim[dim], target_lwr, target_upr, alpha=0.3, color='blue')
             models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
             plt.plot(
                 models_as_num,
@@ -253,10 +248,6 @@ def plot_effort_v_performance(args, title, xlabel):
                 marker='x'
             )
             plt.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
-            # plt.plot(model_idxs_by_dim[dim], diffusion_means, color='darkgreen', label='Against Diffusion', marker='x')
-            # plt.fill_between(model_idxs_by_dim[dim], diffusion_lwr, diffusion_upr, alpha=0.3, color='green')
-            # model_idxs = model_idxs_by_dim[dim]
-            # plt.plot(model_idxs, [true for _ in model_idxs], color='red')
         plt.legend()
         plt.xlabel(xlabel)
         plt.ylabel('Relative Error of Prob. Est.')
@@ -271,6 +262,98 @@ def plot_effort_v_performance(args, title, xlabel):
         plt.clf()
     return directory
 
+def plot_effort_v_performance(args, title, xlabel):
+    dims = get_dims(args)
+    model_names = args.model_names
+    run_type = 'Gaussian' if 'Gaussian' in model_names[0] else 'BrownianMotionDiff'
+    models_by_dim = {dim: [model for model in model_names if 'dim_{}'.format(str(dim)) in model] for dim in dims}
+    model_idxs_by_dim = {dim: get_model_idx(args, dim) for dim in dims}
+    alphas = args.alphas
+    for alpha in alphas:
+        for dim in dims:
+            target_means = []
+            target_upr = []
+            target_lwr = []
+            diffusion_means = []
+            diffusion_upr = []
+            diffusion_lwr = []
+            true, _ = get_true_tail_prob(args.figs_dir, models_by_dim[dim][0], alpha)
+            for model_name in models_by_dim[dim]:
+                directory = '{}/{}'.format(args.figs_dir, model_name)
+                target_file = '{}/{}'.format(
+                    directory,
+                    target_is_performance(alpha)
+                )
+                mean_quantiles = torch.load(target_file, weights_only=True)
+                target_means.append(mean_quantiles[0].cpu())
+                target_lwr.append(mean_quantiles[1].cpu())
+                target_upr.append(mean_quantiles[2].cpu())
+
+                diffusion_file = '{}/{}'.format(
+                    directory,
+                    diffusion_is_performance(alpha)
+                )
+                mean_quantiles = torch.load(diffusion_file, weights_only=True)
+                diffusion_means.append(mean_quantiles[0].cpu())
+                diffusion_lwr.append(mean_quantiles[1].cpu())
+                diffusion_upr.append(mean_quantiles[2].cpu())
+            models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
+            f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
+            ax.plot(
+                models_as_num,
+                target_means,
+                label='params={}'.format(dim_to_param(dim, model_name)),
+                marker='x'
+            )
+            ax.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
+
+        empirical_error = torch.load('empirical_errors.pt', weights_only=True)
+        sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
+        model_idxs = [10, 100, 1000]
+        for idx, (saps, error) in enumerate(sap_error_pairs):
+            model_idx = models_as_num[-1] * model_idxs[idx]
+            ax2.plot([model_idx, model_idx], [error[0], error[2]], alpha=0.3, color='red', linewidth=2.5)
+            ax2.scatter(model_idx, error[1], marker='o', label=f'Empirical (N={saps})', color='red')
+
+        ax.legend()
+        ax2.legend()
+        f.supxlabel(xlabel)
+        f.supylabel('Relative Error of Prob. Est.')
+        f.suptitle(title+f' (alpha={alpha})')
+
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax2.set_xscale('log')
+
+        # Format as whole numbers
+        ax.tick_params(axis='y', which='both', labelleft=True)
+
+        ax2.set_xlim(models_as_num[-1]*5, models_as_num[-1]*model_idxs[-1]*10)
+
+        # hide the spines between ax and ax2
+        ax.spines['right'].set_visible(False)
+        ax2.spines['left'].set_visible(False)
+
+        # plot break lines
+        d = .015  # how big to make the diagonal lines in axes coordinates
+        # arguments to pass plot, just so we don't keep repeating them
+        kwargs = dict(transform=ax.transAxes, color='k', clip_on=False)
+        ax.plot((1-d, 1+d), (-d, +d), **kwargs)
+        ax.plot((1-d, 1+d), (1-d, 1+d), **kwargs)
+
+        kwargs.update(transform=ax2.transAxes)  # switch to the bottom axes
+        ax2.plot((-d, +d), (1-d, 1+d), **kwargs)
+        ax2.plot((-d, +d), (-d, +d), **kwargs)
+
+        directory = '{}/effort_v_performance'.format(args.figs_dir)
+        os.makedirs(directory, exist_ok=True)
+        error_bar_file = '{}/{}.pdf'.format(
+            directory,
+            performance_v_samples(alpha)
+        )
+        plt.savefig(error_bar_file)
+        plt.clf()
+    return directory
 
 def make_effort_v_performance_gaussian(model_idxs, xlabel, args):
     model_names = [
@@ -345,12 +428,13 @@ def get_model_idx(args, dim):
     return idxs
 
 
-def get_dims(args):
+def get_dims(args) -> List[int]:
     if args.dims:
-        return args.dims
+        return [int(x) for x in args.dims]
     dims = []
     for model_name in args.model_names:
-        dims.append(re.search('.*dim_([0-9]+)_.*', model_name)[1])
+        dim = int(re.search('.*dim_([0-9]+)_.*', model_name)[1])
+        dims.append(dim)
     return list(set(dims))
 
 
@@ -403,7 +487,7 @@ def process_pct_saps_data(figs_dir, model_name):
         )
         torch.save(pct_all_saps_data, pct_saps_path)
 
-def dim_to_param(dim, model_name):
+def dim_to_param(dim: int, model_name: str):
     gaussian_dict = {
         32: 3996833,
         40: 6238601,
@@ -651,8 +735,8 @@ def make_performance_v_samples(cfg):
 
 @hydra.main(version_base=None, config_path="conf", config_name="pp_config")
 def main(cfg):
-    # make_effort_v_performance(cfg)
-    make_performance_v_samples(cfg)
+    make_effort_v_performance(cfg)
+    # make_performance_v_samples(cfg)
 
 
 if __name__ == '__main__':
