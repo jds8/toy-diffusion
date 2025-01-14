@@ -24,7 +24,8 @@ from toy_configs import register_configs
 from toy_train_config import SampleConfig, SMCSampleConfig, \
     get_model_path, get_classifier_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
-    UniformExampleConfig, StudentTExampleConfig, TestType, IntegratorType
+    UniformExampleConfig, StudentTExampleConfig, TestType, IntegratorType, \
+    get_target
 from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
@@ -676,7 +677,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     uncond_analytical_llk = (
         dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()
     ).sum(1).squeeze()
-    tail = get_target(std).analytical_prob(alpha) else torch.tensor(1.)
+    tail = get_target(std).analytical_prob(alpha) if alpha.numpy() else torch.tensor(1.)
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
     print('analytical_llk: {}'.format(analytical_llk))
 
