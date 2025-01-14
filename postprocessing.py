@@ -268,8 +268,10 @@ def plot_effort_v_performance(args, title, xlabel):
     run_type = 'Gaussian' if 'Gaussian' in model_names[0] else 'BrownianMotionDiff'
     models_by_dim = {dim: [model for model in model_names if 'dim_{}'.format(str(dim)) in model] for dim in dims}
     model_idxs_by_dim = {dim: get_model_idx(args, dim) for dim in dims}
+    empirical_error = torch.load('empirical_errors.pt', weights_only=True)
     alphas = args.alphas
     for alpha in alphas:
+        f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
         for dim in dims:
             target_means = []
             target_upr = []
@@ -298,7 +300,6 @@ def plot_effort_v_performance(args, title, xlabel):
                 diffusion_lwr.append(mean_quantiles[1].cpu())
                 diffusion_upr.append(mean_quantiles[2].cpu())
             models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
-            f, (ax, ax2) = plt.subplots(1, 2, sharey=True, facecolor='w')
             ax.plot(
                 models_as_num,
                 target_means,
@@ -307,7 +308,6 @@ def plot_effort_v_performance(args, title, xlabel):
             )
             ax.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
 
-        empirical_error = torch.load('empirical_errors.pt', weights_only=True)
         sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
         model_idxs = [10, 100, 1000]
         for idx, (saps, error) in enumerate(sap_error_pairs):
@@ -317,7 +317,7 @@ def plot_effort_v_performance(args, title, xlabel):
 
         ax.legend()
         ax2.legend()
-        f.supxlabel(xlabel)
+        ax.set_xlabel(xlabel)
         f.supylabel('Relative Error of Prob. Est.')
         f.suptitle(title+f' (alpha={alpha})')
 
@@ -331,7 +331,6 @@ def plot_effort_v_performance(args, title, xlabel):
         # ax2.set_xlim(models_as_num[-1]*5, models_as_num[-1]*model_idxs[-1]*10)
         ax2.set_xticks([models_as_num[-1] * model_idx for model_idx in model_idxs])
         ax2.set_xticklabels(["N={}".format(pair[0]) for pair in sap_error_pairs])
-        print(ax2.get_xticklabels())
 
         # hide the spines between ax and ax2
         ax.spines['right'].set_visible(False)
