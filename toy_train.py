@@ -379,11 +379,18 @@ class ToyTrainer:
             x0_raw = x0 * self.cfg.example.sigma + self.cfg.example.mu
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
             x0 = torch.randn(
-                self.cfg.batch_size, self.cfg.example.d, 1, device=device
+                self.cfg.batch_size, 1, self.cfg.example.d, device=device
             )
-            mu = torch.tensor(self.cfg.example.mu).reshape(1, d)
-            sigma = torch.tensor(self.cfg.example.sigma).reshape(d, d)
-            x0_raw = torch.matmul(x0, self.cfg.example.sigma) + self.cfg.example.mu
+            d = self.cfg.example.d
+            if d == 5:
+                mu = torch.load('gaussian5_mean.pt')
+                sigma = torch.load('gaussian5_covariance.pt')
+            elif d == 50:
+                mu = torch.load('gaussian50_mean.pt')
+                sigma = torch.load('gaussian50_covariance.pt')
+            else:
+                raise NotImplementedError
+            x0_raw = torch.matmul(x0, sigma) + mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
@@ -456,8 +463,12 @@ class ToyTrainer:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
         elif type(self.example) == MultivariateGaussianExampleConfig:
             d = self.cfg.example.d
-            mu = torch.tensor(self.cfg.example.mu).reshape(1, d)
-            sigma = torch.tensor(self.cfg.example.sigma).reshape(-1, d, d)
+            if d == 5:
+                mu = torch.load('gaussian5_mean.pt')
+                sigma = torch.load('gaussian5_covariance.pt')
+            elif d == 50:
+                mu = torch.load('gaussian50_mean.pt')
+                sigma = torch.load('gaussian50_covariance.pt')
             x0 = torch.matmul((x0_raw - mu), sigma.pinverse())
         elif isinstance(self.example, StudentTExampleConfig):
             scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
