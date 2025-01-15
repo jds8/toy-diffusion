@@ -21,7 +21,7 @@ import numpy as np
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, MultivariateGaussianExampleConfig \
     UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig, \
-    SaveParadigm
+    SaveParadigm, MultivariateGaussianExampleConfig
 from toy_configs import register_configs
 from models.toy_temporal import TemporalTransformerUnet, TemporalUnet, \
     TemporalNNet, DiffusionModel, TemporalGaussianUnetAlpha, \
@@ -423,6 +423,12 @@ class ToyTrainer:
             dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
             dataset = torch.load('multivariate_gaussian_dataset.pt', map_location=device, weights_only=True)
+            if self.example.d == 5:
+                dataset = torch.load('gaussian5.pt', map_location=device, weights_only=True)
+            elif self.example.d == 50:
+                dataset = torch.load('gaussian50.pt', map_location=device, weights_only=True)
+            else:
+                raise NotImplementedError
         elif isinstance(self.example, StudentTExampleConfig):
             dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
