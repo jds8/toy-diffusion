@@ -92,6 +92,14 @@ class VPSDEGaussianScoreFunctionSamplerConfig(VPSDESamplerConfig):
 
 
 @dataclass
+class VPSDEMultivariateGaussianScoreFunctionSamplerConfig(VPSDESamplerConfig):
+    _target_: str = 'models.toy_sampler.VPSDEMultivariateGaussianScoreFunctionSampler'
+
+    def name(self):
+        return 'VPSDEMultivariateGaussianScoreFunctionSampler'
+
+
+@dataclass
 class VESDESamplerConfig(ContinuousSamplerConfig):
     sigma_min: float = 0.02
     sigma_max: float = 100

@@ -30,6 +30,15 @@ class GaussianExampleConfig(ExampleConfig):
     def name(self):
         return 'GaussianExampleConfig'
 
+@dataclass
+class MultivariateGaussianExampleConfig(ExampleConfig):
+    d: int = 1
+    mu: List[float] = [1.]
+    sigma: List[float] = [2.]
+
+    def name(self):
+        return 'MultivariateGaussianExampleConfig'
+
 
 @dataclass
 class BrownianMotionExampleConfig(ExampleConfig):

@@ -418,7 +418,28 @@ class VPSDEScoreFunctionSampler(VPSDESampler):
         return sf_pred
 
 
-class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
+# class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
+#     def get_ground_truth(self, eps, xt, x0, t, extras):
+#         """
+#         Note that this returns the *marginal* score function:
+#         \nabla log p_t(x_t|x_0).
+#         This assumes that the *ground truth distribution is a standard gaussian*
+#         """
+#         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
+#         f = log_mean_coeff.exp()
+#         var = extras['sigma'] ** 2 * f ** 2 + sigma_t ** 2
+#         score = (f * extras['mu'] - xt) / var
+#         return score
+
+#     def get_sf_estimator(self, sf_pred, xt, t):
+#         _, _, sigma_t = self.marginal_prob(
+#             torch.zeros_like(xt),
+#             t,
+#         )
+#         sf_estimate = -sf_pred * sigma_t
+#         return sf_estimate
+
+class VPSDEMultivariateGaussianScoreFunctionSampler(VPSDESampler):
     def get_ground_truth(self, eps, xt, x0, t, extras):
         """
         Note that this returns the *marginal* score function:
@@ -427,8 +448,11 @@ class VPSDEGaussianScoreFunctionSampler(VPSDESampler):
         """
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         f = log_mean_coeff.exp()
-        var = extras['sigma'] ** 2 * f ** 2 + sigma_t ** 2
-        score = (f * extras['mu'] - xt) / var
+        d = len(extras['mu'])
+        mu = torch.tensor(extras['mu']).reshape(-1, d)
+        sigma = torch.tensor(extras['sigmas']).reshape(-1, d, d)
+        var =  torch.matmul(sigma, sigma.T) * f ** 2 + sigma_t ** 2 * torch.eye(d)
+        score = torch.matmul(f * mu - xt, var.pinverse())
         return score
 
     def get_sf_estimator(self, sf_pred, xt, t):

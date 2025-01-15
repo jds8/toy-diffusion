@@ -9,6 +9,7 @@ from models.toy_diffusion_models_config import \
     VPSDEVelocitySamplerConfig, \
     VPSDEScoreFunctionSamplerConfig, \
     VPSDEGaussianScoreFunctionSamplerConfig, \
+    VPSDEMultivariateGaussianScoreFunctionSamplerConfig, \
     EpsilonSamplerConfig, MuSamplerConfig, \
     XstartSamplerConfig, ScoreFunctionSamplerConfig, VelocitySamplerConfig, \
     TemporalUnetConfig, TemporalGaussianUnetAlphaConfig, TemporalUnetAlphaConfig, TemporalNnetConfig, \
@@ -16,7 +17,7 @@ from models.toy_diffusion_models_config import \
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
     RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
     BrownianMotionDiffTailsLikelihoodConfig
-from toy_train_config import GaussianExampleConfig, \
+from toy_train_config import GaussianExampleConfig, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
     UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig
 
@@ -57,6 +58,11 @@ def register_configs() -> None:
         group='sampler',
         name='vpsde_gaussian_score_function_sampler',
         node=VPSDEGaussianScoreFunctionSamplerConfig,
+    )
+    cs.store(
+        group='sampler',
+        name='vpsde_gaussian_score_function_sampler',
+        node=VPSDEMultivariateGaussianScoreFunctionSamplerConfig,
     )
     cs.store(
         group='sampler',
@@ -147,6 +153,11 @@ def register_configs() -> None:
         group='example',
         name='gaussian_example',
         node=GaussianExampleConfig,
+    )
+    cs.store(
+        group='example',
+        name='multivariate_gaussian_example',
+        node=MultivariateGaussianExampleConfig,
     )
     cs.store(
         group='example',
