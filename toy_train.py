@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
-    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig,
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
     MultivariateGaussianExampleConfig, UniformExampleConfig, StudentTExampleConfig, \
     StudentTDiffExampleConfig, SaveParadigm, MultivariateGaussianExampleConfig
 from toy_configs import register_configs
@@ -504,7 +504,7 @@ class ToyTrainer:
             model_in = self.upsample(x0_in, model_in)
 
         extras = {}
-        if isinstance(self.example, GaussianExampleConfig) or \:
+        if isinstance(self.example, GaussianExampleConfig) or \
            isinstance(self.example, MultivariateGaussianExampleConfig):
             extras['mu'] = self.cfg.example.mu
             extras['sigma'] = self.cfg.example.sigma
