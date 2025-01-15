@@ -33,8 +33,8 @@ class GaussianExampleConfig(ExampleConfig):
 @dataclass
 class MultivariateGaussianExampleConfig(ExampleConfig):
     d: int = 1
-    mu: List[float] = [1.]
-    sigma: List[float] = [2.]
+    mu: List[float] = field(default_factory=list)
+    sigma: List[float] = field(default_factory=list)
 
     def name(self):
         return 'MultivariateGaussianExampleConfig'
