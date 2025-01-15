@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
-    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
+    GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, MultivariateGaussianExampleConfig \
     UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig, \
     SaveParadigm
 from toy_configs import register_configs
@@ -206,6 +206,13 @@ class ToyTrainer:
                 self.cfg.example.mu,
                 self.cfg.example.sigma
             )
+        elif isinstance(ex_cfg, MultivariateGaussianExampleConfig):
+            d = self.cfg.example.d
+            sigma_str = [self.cfg.example.sigma[i*d:(i+1)*d] for i in range(d)]
+            return 'mu={}_sigma={}'.format(
+                self.cfg.example.mu,
+                sigma_str,
+            )
         elif isinstance(ex_cfg, BrownianMotionDiffExampleConfig):
             return 'steps={}_drift={}_diffusion={}'.format(
                 self.cfg.example.sde_steps,
@@ -370,6 +377,13 @@ class ToyTrainer:
                 self.cfg.batch_size, 1, 1, device=device
             )
             x0_raw = x0 * self.cfg.example.sigma + self.cfg.example.mu
+        elif isinstance(self.example, MultivariateGaussianExampleConfig):
+            x0 = torch.randn(
+                self.cfg.batch_size, self.cfg.example.d, 1, device=device
+            )
+            mu = torch.tensor(self.cfg.example.mu).reshape(1, d)
+            sigma = torch.tensor(self.cfg.example.sigma).reshape(d, d)
+            x0_raw = torch.matmul(x0, self.cfg.example.sigma) + self.cfg.example.mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
@@ -407,6 +421,8 @@ class ToyTrainer:
     def set_dl_iter(self):
         if isinstance(self.example, GaussianExampleConfig):
             dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
+        elif isinstance(self.example, MultivariateGaussianExampleConfig):
+            dataset = torch.load('multivariate_gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, StudentTExampleConfig):
             dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
@@ -432,6 +448,11 @@ class ToyTrainer:
             x0_raw = next(self.dl_iter)
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
+        elif type(self.example) == MultivariateGaussianExampleConfig:
+            d = self.cfg.example.d
+            mu = torch.tensor(self.cfg.example.mu).reshape(1, d)
+            sigma = torch.tensor(self.cfg.example.sigma).reshape(-1, d, d)
+            x0 = torch.matmul((x0_raw - mu), sigma.pinverse())
         elif isinstance(self.example, StudentTExampleConfig):
             scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
             if self.cfg.example.nu > 2.:
@@ -477,7 +498,8 @@ class ToyTrainer:
             model_in = self.upsample(x0_in, model_in)
 
         extras = {}
-        if isinstance(self.example, GaussianExampleConfig):
+        if isinstance(self.example, GaussianExampleConfig) or \:
+           isinstance(self.example, MultivariateGaussianExampleConfig):
             extras['mu'] = self.cfg.example.mu
             extras['sigma'] = self.cfg.example.sigma
 
@@ -514,6 +536,7 @@ class ConditionTrainer(ToyTrainer):
 
     def compare_score(self, x, time, model_output):
         if isinstance(self.example, GaussianExampleConfig) and \
+           isinstance(self.example, MultivariateGaussianExampleConfig) and \
            isinstance(self.sampler, AbstractContinuousSampler):
             true_sf = self.analytical_gaussian_score(t=time, x=x)
             sf_estimate = self.sampler.get_sf_estimator(model_output, xt=x, t=time)
