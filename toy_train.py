@@ -379,18 +379,12 @@ class ToyTrainer:
             x0_raw = x0 * self.cfg.example.sigma + self.cfg.example.mu
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
             x0 = torch.randn(
-                self.cfg.batch_size, 1, self.cfg.example.d, device=device
+                self.cfg.batch_size, self.cfg.example.d, 1, device=device
             )
             d = self.cfg.example.d
-            if d == 5:
-                mu = torch.load('gaussian5_mean.pt')
-                sigma = torch.load('gaussian5_covariance.pt')
-            elif d == 50:
-                mu = torch.load('gaussian50_mean.pt')
-                sigma = torch.load('gaussian50_covariance.pt')
-            else:
-                raise NotImplementedError
-            x0_raw = torch.matmul(x0, sigma) + mu
+            mu = torch.tensor(self.cfg.example.mu)
+            sigma = torch.tensor(self.cfg.example.sigma)
+            x0_raw = torch.matmul(sigma, x0) + mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
