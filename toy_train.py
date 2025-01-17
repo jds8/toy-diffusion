@@ -642,7 +642,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
         return AlphaModelInput(x0_in, None, None)
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="continuous_train_config")
+@hydra.main(version_base=None, config_path="conf", config_name="continuous_multivariate_50_train_config")
 def train(cfg):
     logger = logging.getLogger("main")
     logger.info('run type: train')
