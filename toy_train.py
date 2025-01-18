@@ -423,13 +423,11 @@ class ToyTrainer:
         if isinstance(self.example, GaussianExampleConfig):
             dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
-            dataset = torch.load('multivariate_gaussian_dataset.pt', map_location=device, weights_only=True)
-            if self.example.d == 5:
-                dataset = torch.load('gaussian5.pt', map_location=device, weights_only=True)
-            elif self.example.d == 50:
-                dataset = torch.load('gaussian50.pt', map_location=device, weights_only=True)
-            else:
-                raise NotImplementedError
+            d = self.cfg.example.d
+            if d == 8:
+                dataset = torch.load('gaussian8.pt', map_location=device, weights_only=True)
+            elif d == 64:
+                dataset = torch.load('gaussian64.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, StudentTExampleConfig):
             dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
@@ -456,14 +454,9 @@ class ToyTrainer:
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
         elif type(self.example) == MultivariateGaussianExampleConfig:
-            d = self.cfg.example.d
-            if d == 5:
-                mu = torch.load('gaussian5_mean.pt')
-                sigma = torch.load('gaussian5_covariance.pt')
-            elif d == 50:
-                mu = torch.load('gaussian50_mean.pt')
-                sigma = torch.load('gaussian50_covariance.pt')
-            x0 = torch.matmul((x0_raw - mu), sigma.pinverse())
+            mu = torch.tensor(self.cfg.example.mu)
+            sigma = torch.tensor(self.cfg.example.sigma)
+            x0 = torch.matmul(sigma.pinverse(), x0_raw - mu)
         elif isinstance(self.example, StudentTExampleConfig):
             scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
             if self.cfg.example.nu > 2.:
