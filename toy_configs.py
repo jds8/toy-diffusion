@@ -16,7 +16,7 @@ from models.toy_diffusion_models_config import \
     TemporalTransformerUnetConfig, TemporalIDKConfig
 from toy_likelihood_configs import DistLikelihoodConfig, GeneralDistLikelihoodConfig, \
     RLAILikelihoodConfig, ClassifierLikelihoodConfig, GaussianTailsLikelihoodConfig, \
-    BrownianMotionDiffTailsLikelihoodConfig
+    MultivariateGaussianTailsLikelihoodConfig, BrownianMotionDiffTailsLikelihoodConfig
 from toy_train_config import GaussianExampleConfig, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, BrownianMotionExampleConfig, \
     UniformExampleConfig, StudentTExampleConfig, StudentTDiffExampleConfig
@@ -128,6 +128,11 @@ def register_configs() -> None:
         group="likelihood",
         name="gaussian_tails_likelihood",
         node=GaussianTailsLikelihoodConfig,
+    )
+    cs.store(
+        group="likelihood",
+        name="multivariate_gaussian_tails_likelihood",
+        node=MultivariateGaussianTailsLikelihoodConfig,
     )
     cs.store(
         group="likelihood",

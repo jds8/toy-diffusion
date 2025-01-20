@@ -25,6 +25,12 @@ class GaussianTailsLikelihoodConfig(LikelihoodConfig):
 
 
 @dataclass
+class MultivariateGaussianTailsLikelihoodConfig(LikelihoodConfig):
+    alpha: float = 3.
+    _target_: str = 'toy_likelihoods.MultivariateGaussianTailsLikelihood'
+
+
+@dataclass
 class BrownianMotionDiffTailsLikelihoodConfig(LikelihoodConfig):
     alpha: float = 3.
     _target_: str = 'toy_likelihoods.BrownianMotionDiffTailsLikelihood'

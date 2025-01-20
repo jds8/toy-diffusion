@@ -50,12 +50,11 @@ class GaussianTailsLikelihood(Likelihood):
 
 
 class MultivariateGaussianTailsLikelihood(Likelihood):
-    def __init__(self, alpha: float):
-        alphas = alpha[:, 0]
-        super().__init__(alphas)
+    def set_alpha(self, alpha: torch.Tensor):
+        self.alpha = alpha[:, 0]
 
-    def get_condition(self, x0_raw, _):
-        return (x0_raw.abs() > self.alpha).to(torch.float)
+    def get_condition(self, _, x0):
+        return ((x0 * x0).sum(dim=1) > self.alpha).to(torch.float)
 
 
 class BrownianMotionDiffTailsLikelihood(Likelihood):

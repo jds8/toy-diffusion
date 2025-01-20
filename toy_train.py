@@ -74,7 +74,7 @@ class ToyTrainer:
 
         self.sampler = hydra.utils.instantiate(cfg.sampler)
 
-        self.likelihood = hydra.utils.instantiate(cfg.likelihood, example=cfg.example)
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 
         self.diffusion_model = nn.parallel.DataParallel(diffusion_model).to(device)
@@ -584,10 +584,8 @@ class AlphaConditionTrainer(ConditionTrainer):
             x0_raw.device
         )
         self.likelihood.set_alpha(alphas)
-        cond = self.likelihood.get_condition(
-            x0_raw.squeeze(-1),
-            x0.squeeze(-1),
-        ).reshape(-1, 1)
+        cond = self.likelihood.get_condition( x0_raw.squeeze(-1),
+                                              x0.squeeze(-1), ).reshape(-1, 1)
         alpha = alphas[:, 0].reshape(-1, 1)
         return AlphaModelInput(x0_in, cond, alpha)
 
