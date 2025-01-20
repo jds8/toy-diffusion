@@ -74,7 +74,7 @@ class ToyTrainer:
 
         self.sampler = hydra.utils.instantiate(cfg.sampler)
 
-        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood, example=cfg.example)
         self.example = OmegaConf.to_object(cfg.example)
 
         self.diffusion_model = nn.parallel.DataParallel(diffusion_model).to(device)
@@ -384,7 +384,8 @@ class ToyTrainer:
             d = self.cfg.example.d
             mu = torch.tensor(self.cfg.example.mu)
             sigma = torch.tensor(self.cfg.example.sigma)
-            x0_raw = torch.matmul(sigma, x0) + mu
+            L = torch.linalg.cholesky(sigma)
+            x0_raw = torch.matmul(torch.linalg.inv(L), x0) + mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device
@@ -456,7 +457,8 @@ class ToyTrainer:
         elif type(self.example) == MultivariateGaussianExampleConfig:
             mu = torch.tensor(self.cfg.example.mu)
             sigma = torch.tensor(self.cfg.example.sigma)
-            x0 = torch.matmul(sigma.pinverse(), x0_raw - mu)
+            L = torch.linalg.cholesky(sigma)
+            x0 = torch.matmul(torch.linalg.inv(L), x0_raw - mu)
         elif isinstance(self.example, StudentTExampleConfig):
             scale = torch.tensor(35.9865)  # from dist.StudentT(1.5).sample([100000000]).var()
             if self.cfg.example.nu > 2.:

@@ -49,6 +49,15 @@ class GaussianTailsLikelihood(Likelihood):
         return (x0.abs() > self.alpha).to(torch.float)
 
 
+class MultivariateGaussianTailsLikelihood(Likelihood):
+    def __init__(self, alpha: float):
+        alphas = alpha[:, 0]
+        super().__init__(alphas)
+
+    def get_condition(self, x0_raw, _):
+        return (x0_raw.abs() > self.alpha).to(torch.float)
+
+
 class BrownianMotionDiffTailsLikelihood(Likelihood):
     def get_condition(self, x0_raw, _):
         # x0_raw is the brownian motion trajectory
