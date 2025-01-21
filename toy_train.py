@@ -209,7 +209,8 @@ class ToyTrainer:
         elif isinstance(ex_cfg, MultivariateGaussianExampleConfig):
             d = self.cfg.example.d
             sigma_str = [self.cfg.example.sigma[i*d:(i+1)*d] for i in range(d)]
-            return 'mu={}_sigma={}'.format(
+            return 'd={}_mu={}_sigma={}'.format(
+                d,
                 self.cfg.example.mu,
                 sigma_str,
             )
@@ -385,7 +386,7 @@ class ToyTrainer:
             mu = torch.tensor(self.cfg.example.mu)
             sigma = torch.tensor(self.cfg.example.sigma)
             L = torch.linalg.cholesky(sigma)
-            x0_raw = torch.matmul(torch.linalg.inv(L), x0) + mu
+            x0_raw = torch.matmul(L, x0) + mu
         elif isinstance(self.example, UniformExampleConfig):
             x0_raw = torch.rand(
                 self.cfg.batch_size, 1, 1, device=device

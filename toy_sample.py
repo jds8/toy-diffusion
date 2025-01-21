@@ -25,7 +25,7 @@ from toy_train_config import SampleConfig, SMCSampleConfig, \
     get_model_path, get_classifier_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
     UniformExampleConfig, StudentTExampleConfig, TestType, IntegratorType, \
-    get_target
+    get_target, MultivariateGaussianExampleConfig
 from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
@@ -145,6 +145,12 @@ class ToyEvaluator:
                 1,
                 1
             ])
+        elif type(self.example) == MultivariateGaussianExampleConfig:
+            d = self.cfg.example.d
+            x_min = dist.MultivariateNormal(
+                torch.zeros(d),
+                torch.eye(d),
+            ).sample([self.cfg.num_samples]).to(device).unsqueeze(-1)
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
                 self.cfg.num_samples,
@@ -589,6 +595,79 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
         print(f'error: {e}')
     import pdb; pdb.set_trace()
 
+def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
+    plt.clf()
+    exited = ((sample_trajs * sample_trajs).sum(dim=1) > std.likelihood.alpha).any(dim=1).to(float)
+    prop_exited = exited.mean() * 100
+    print('{}% of {} samples outside [-{}, {}]'.format(
+        prop_exited,
+        sample_trajs.shape[0],
+        std.likelihood.alpha,
+        std.likelihood.alpha,
+    ))
+
+    cond = std.cond if std.cond else torch.tensor([-1.])
+    mu = torch.tensor(cfg.example.mu)
+    sigma = torch.tensor(cfg.example.sigma)
+    L = torch.linalg.cholesky(sigma)
+    traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d)
+    import pdb; pdb.set_trace()
+
+    # Parameters
+    levels = [1, 2, 3]  # Level curve values (c values)
+
+    # Generate grid points
+    x = torch.linspace(-4, 6, 500)
+    y = torch.linspace(-5, 3, 500)
+    X, Y = torch.meshgrid(x, y, indexing="ij")
+    points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
+
+    # Compute the quadratic form (x - mean)^T P (x - mean)
+    diff = points - mu  # Shape: (500, 500, 2)
+    precision_matrix = sigma.pinverse()
+    Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
+
+    # Convert to NumPy for plotting
+    Z = Z.numpy()
+
+    # Plot the level curves
+    plt.figure(figsize=(8, 6))
+    contour = plt.contour(
+        X.numpy(),
+        Y.numpy(),
+        Z,
+        levels=levels,
+        colors='red'
+    )
+    plt.clabel(contour, inline=True, fontsize=8)
+
+    # Add labels, title, and styling
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Level Curves of Gaussian')
+    plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
+    plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
+    plt.grid(alpha=0.3)
+    plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
+    plt.scatter(traj[:, 0], traj[:, 1], color='blue')
+
+    datapoint_dist = torch.distributions.MultivariateNormal(mu, sigma)
+    alpha = torch.tensor([std.likelihood.alpha])
+    # alpha == r^2 as indicated by how the `exited` variable is defined
+    # at the top of this function
+    tail = torch.exp(-alpha / 2)
+    non_nan_analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
+    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
+    print('analytical_llk: {}'.format(non_nan_a_lk))
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
+    non_nan_ode_lk = torch.matmul(torch.linalg.inv(L), ode_llk[0].exp())
+    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
+    mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
+    print('\nmse_llk: {}'.format(mse_llk))
+
+    plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
+    import pdb; pdb.set_trace()
+
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.example.sde_steps-1)
     analytical_trajs = torch.cat([
@@ -923,6 +1002,8 @@ def test_transformer_bm(end_time, std):
 def test(end_time, cfg, out_trajs, std):
     if type(std.example) == GaussianExampleConfig:
         test_gaussian(end_time, cfg, out_trajs, std)
+    elif type(std.example) == MultivariateGaussianExampleConfig:
+        test_multivariate_gaussian(end_time, cfg, out_trajs, std)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         test_brownian_motion_diff(end_time, cfg, out_trajs, std)
     elif type(std.example) == UniformExampleConfig:
