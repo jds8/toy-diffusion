@@ -423,6 +423,7 @@ class ToyTrainer:
         return x0_raw, x0
 
     def set_dl_iter(self):
+        dataset = None
         if isinstance(self.example, GaussianExampleConfig):
             dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
@@ -437,6 +438,10 @@ class ToyTrainer:
             dataset = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
         else:
             raise NotImplementedError
+
+        if dataset is None:
+            raise ValueError('dataset is None')
+
         self.dataset_size = dataset.shape[0]
         self.dl = DataLoader(
             dataset,
@@ -457,8 +462,8 @@ class ToyTrainer:
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
         elif type(self.example) == MultivariateGaussianExampleConfig:
-            mu = torch.tensor(self.cfg.example.mu, device=device)
-            sigma = torch.tensor(self.cfg.example.sigma, device=device)
+            mu = torch.tensor(self.cfg.example.mu, device=x0_raw.device)
+            sigma = torch.tensor(self.cfg.example.sigma, device=x0_raw.device)
             L = torch.linalg.cholesky(sigma)
             x0 = torch.matmul(torch.linalg.inv(L), x0_raw - mu)
         elif isinstance(self.example, StudentTExampleConfig):

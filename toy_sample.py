@@ -607,18 +607,17 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     ))
 
     cond = std.cond if std.cond else torch.tensor([-1.])
-    mu = torch.tensor(cfg.example.mu)
+    mu = torch.tensor(cfg.example.mu).squeeze(-1)
     sigma = torch.tensor(cfg.example.sigma)
     L = torch.linalg.cholesky(sigma)
     traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d)
-    import pdb; pdb.set_trace()
 
     # Parameters
-    levels = [1, 2, 3]  # Level curve values (c values)
+    levels = [1, 2, 3, 4, 5]  # Level curve values (c values)
 
     # Generate grid points
-    x = torch.linspace(-4, 6, 500)
-    y = torch.linspace(-5, 3, 500)
+    x = torch.linspace(-7, 9, 500)
+    y = torch.linspace(-9, 7, 500)
     X, Y = torch.meshgrid(x, y, indexing="ij")
     points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
 
@@ -656,11 +655,11 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     # alpha == r^2 as indicated by how the `exited` variable is defined
     # at the top of this function
     tail = torch.exp(-alpha / 2)
-    non_nan_analytical_llk = datapoint_dist.log_prob(traj) - tail.log()
+    non_nan_analytical_llk = datapoint_dist.log_prob(traj).sum(dim=-1) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    non_nan_ode_lk = torch.matmul(torch.linalg.inv(L), ode_llk[0].exp())
+    non_nan_ode_lk = (ode_llk[0] - L.det().log()).exp()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
     print('\nmse_llk: {}'.format(mse_llk))
