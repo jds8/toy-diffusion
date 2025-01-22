@@ -18,6 +18,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 
+
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
     GaussianExampleConfig, BrownianMotionExampleConfig, BrownianMotionDiffExampleConfig, \
     MultivariateGaussianExampleConfig, UniformExampleConfig, StudentTExampleConfig, \
@@ -383,8 +384,8 @@ class ToyTrainer:
                 self.cfg.batch_size, self.cfg.example.d, 1, device=device
             )
             d = self.cfg.example.d
-            mu = torch.tensor(self.cfg.example.mu)
-            sigma = torch.tensor(self.cfg.example.sigma)
+            mu = torch.tensor(self.cfg.example.mu, device=device)
+            sigma = torch.tensor(self.cfg.example.sigma, device=device)
             L = torch.linalg.cholesky(sigma)
             x0_raw = torch.matmul(L, x0) + mu
         elif isinstance(self.example, UniformExampleConfig):
@@ -456,8 +457,8 @@ class ToyTrainer:
         if type(self.example) == GaussianExampleConfig:
             x0 = (x0_raw - self.cfg.example.mu) / self.cfg.example.sigma
         elif type(self.example) == MultivariateGaussianExampleConfig:
-            mu = torch.tensor(self.cfg.example.mu)
-            sigma = torch.tensor(self.cfg.example.sigma)
+            mu = torch.tensor(self.cfg.example.mu, device=device)
+            sigma = torch.tensor(self.cfg.example.sigma, device=device)
             L = torch.linalg.cholesky(sigma)
             x0 = torch.matmul(torch.linalg.inv(L), x0_raw - mu)
         elif isinstance(self.example, StudentTExampleConfig):
