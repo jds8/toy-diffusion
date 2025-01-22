@@ -37,7 +37,7 @@ class MultivariateGaussianExampleConfig(ExampleConfig):
     sigma: List[float] = field(default_factory=list)
 
     def name(self):
-        return 'MultivariateGaussianExampleConfig'
+        return 'MultivariateGaussian{}ExampleConfig'.format(self.d)
 
 
 @dataclass
