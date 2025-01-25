@@ -7,6 +7,7 @@ from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, G
 from toy_likelihood_configs import LikelihoodConfig
 from importance_sampling import \
     GaussianTarget, GaussianProposal, \
+    MultivariateGaussianTarget, MultivariateGaussianProposal, \
     BrownianMotionDiffTarget, BrownianMotionDiffProposal, \
     StudentTTarget, StudentTProposal \
 
@@ -212,6 +213,8 @@ class PostProcessingConfig(SampleConfig):
 def get_target(cfg):
     if isinstance(cfg.example, GaussianExampleConfig):
         return GaussianTarget(cfg)
+    elif isinstance(cfg.example, MultivariateGaussianExampleConfig):
+        return MultivariateGaussianTarget(cfg)
     elif isinstance(cfg.example, BrownianMotionDiffExampleConfig):
         return BrownianMotionDiffTarget(cfg)
     elif isinstance(cfg.example, StudentTExampleConfig):
@@ -222,6 +225,8 @@ def get_target(cfg):
 def get_proposal(example, std):
     if isinstance(example, GaussianExampleConfig):
         return GaussianProposal(std)
+    elif isinstance(example, MultivariateGaussianExampleConfig):
+        return MultivariateGaussianProposal(std)
     elif isinstance(example, BrownianMotionDiffExampleConfig):
         return BrownianMotionDiffProposal(std)
     elif isinstance(example, StudentTExampleConfig):

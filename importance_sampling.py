@@ -2,6 +2,7 @@
 
 from typing import Callable
 import torch
+import torch.distributions as dist
 import numpy as np
 import scipy.stats as stats
 
@@ -33,6 +34,31 @@ class GaussianProposal(Proposal):
             alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
+        self.ode_llk = raw_ode_llk - scale_factor
+        return self.ode_llk
+
+
+class MultivariateGaussianProposal(Proposal):
+    def sample(self):
+        sample_traj_out = self.std.sample_trajectories(
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+        )
+        self.sample_trajs = sample_traj_out.samples[-1]
+        mu = torch.tensor(self.std.cfg.example.mu)
+        sigma = torch.tensor(self.std.cfg.example.sigma)
+        L = torch.linalg.cholesky(sigma)
+        self.trajs = torch.matmul(L, self.sample_trajs) + mu
+        return self.trajs, self.sample_trajs
+
+    def log_prob(self, samples):
+        raw_ode_llk = self.std.ode_log_likelihood(
+            samples,
+            cond=self.std.cond.to(device),
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+        )[0]
+        L = torch.linalg.cholesky(torch.tensor(self.std.cfg.example.sigma))
+        scale_factor = L.det().log()
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
 
@@ -106,7 +132,7 @@ class Target:
 class GaussianTarget(Target):
     def __init__(self, cfg):
         super().__init__(cfg)
-        self.dist = torch.distributions.Normal(
+        self.dist = dist.Normal(
             cfg.example.mu,
             cfg.example.sigma
         )
@@ -119,11 +145,36 @@ class GaussianTarget(Target):
         )
 
 
+class MultivariateGaussianTarget(Target):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+        self.dist = dist.MultivariateNormal(
+            torch.tensor(cfg.example.mu).squeeze(-1),
+            torch.tensor(cfg.example.sigma)
+        )
+    def log_prob(self, saps):
+        return self.dist.log_prob(saps.squeeze(-1))
+    def empirical_prob(self, alpha):
+        dd = dist.MultivariateNormal(
+            torch.zeros_like(self.cfg.example.d),
+            torch.eye(self.cfg.example.d)
+        )
+        X = dd.sample([100000])
+        import pdb; pdb.set_trace()
+        ys = (X * X).sum(dim=[1, 2])
+        estimate = (ys > alpha).to(float).mean()
+        return estimate
+    def analytical_prob(self, alpha):
+        if self.cfg.example.d == 2:
+            return torch.exp(-alpha / 2)
+        return self.empirical_prob(alpha)
+
+
 class BrownianMotionDiffTarget(Target):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.dt = torch.tensor(1. / (cfg.example.sde_steps-1))
-        self.dist = torch.distributions.Normal(
+        self.dist = dist.Normal(
             0.,
             self.dt.sqrt(),
         )

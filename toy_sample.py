@@ -568,6 +568,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     )
     tail = 2 * datapoint_dist.cdf(cfg.example.mu-alpha*cfg.example.sigma)
     datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail.log()
+    import pdb; pdb.set_trace()
     datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
     datapoint_center_llk = -torch.ones(2) * torch.inf
     datapoint_llk = torch.hstack([datapoint_left_llk, datapoint_center_llk, datapoint_right_llk])
@@ -597,33 +598,54 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     plt.clf()
-    exited = ((sample_trajs * sample_trajs).sum(dim=1) > std.likelihood.alpha).any(dim=1).to(float)
+    alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+    sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
+    exited = (sample_levels > std.likelihood.alpha).to(float)
     prop_exited = exited.mean() * 100
-    print('{}% of {} samples outside [-{}, {}]'.format(
+    print('{}% of {} samples outside Level {}'.format(
         prop_exited,
         sample_trajs.shape[0],
-        std.likelihood.alpha,
         std.likelihood.alpha,
     ))
 
     cond = std.cond if std.cond else torch.tensor([-1.])
-    mu = torch.tensor(cfg.example.mu).squeeze(-1)
+    mu = torch.tensor(cfg.example.mu)
     sigma = torch.tensor(cfg.example.sigma)
     L = torch.linalg.cholesky(sigma)
-    traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d)
+    traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
 
-    # Parameters
-    levels = [1, 2, 3, 4, 5]  # Level curve values (c values)
+    # Find the largest level curve value for the samples
+    max_level = sample_levels.max().ceil().item()
+    levels = torch.arange(0, max_level + 1)
+
+    # Calculate the radius needed to contain the largest level curve
+    # For a given level value k, points (x,y) on the curve satisfy:
+    # (x-μ)^T Σ^(-1) (x-μ) = k
+    # For a 2D Gaussian, this forms an ellipse
+    # Get eigenvalues of covariance matrix to find major/minor axes
+    eigenvals = torch.linalg.eigvals(sigma).real
+    # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
+    max_radius = torch.sqrt(max_level * eigenvals.max())
+    
+    # Add buffer and round up to nearest integer
+    buffer = 2
+    plot_radius = torch.ceil(max_radius + buffer).item()
+    
+    # Calculate plot limits centered on mean
+    x_min = mu[0].item() - plot_radius
+    x_max = mu[0].item() + plot_radius
+    y_min = mu[1].item() - plot_radius 
+    y_max = mu[1].item() + plot_radius
 
     # Generate grid points
-    x = torch.linspace(-7, 9, 500)
-    y = torch.linspace(-9, 7, 500)
+    x = torch.linspace(x_min, x_max, 500)
+    y = torch.linspace(y_min, y_max, 500)
     X, Y = torch.meshgrid(x, y, indexing="ij")
     points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
 
     # Compute the quadratic form (x - mean)^T P (x - mean)
-    diff = points - mu  # Shape: (500, 500, 2)
-    precision_matrix = sigma.pinverse()
+    diff = points - mu[:2, 0]
+    precision_matrix = sigma.pinverse()[:2, :2]
     Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
 
     # Convert to NumPy for plotting
@@ -643,26 +665,26 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     # Add labels, title, and styling
     plt.xlabel('x')
     plt.ylabel('y')
-    plt.title('Level Curves of Gaussian')
+    plt.title('Level Curves of Gaussian and Diffusion Samples')
     plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
     plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
     plt.grid(alpha=0.3)
     plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
 
-    datapoint_dist = torch.distributions.MultivariateNormal(mu, sigma)
-    alpha = torch.tensor([std.likelihood.alpha])
+    datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
     # alpha == r^2 as indicated by how the `exited` variable is defined
     # at the top of this function
     tail = torch.exp(-alpha / 2)
-    non_nan_analytical_llk = datapoint_dist.log_prob(traj).sum(dim=-1) - tail.log()
+    non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha.unsqueeze(-1))
     non_nan_ode_lk = (ode_llk[0] - L.det().log()).exp()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
-    print('\nmse_llk: {}'.format(mse_llk))
+
+    avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
+    print('\naverage relative error: {}'.format(avg_rel_error))
 
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
     import pdb; pdb.set_trace()
