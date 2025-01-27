@@ -58,7 +58,7 @@ class MultivariateGaussianProposal(Proposal):
             alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )[0]
         L = torch.linalg.cholesky(torch.tensor(self.std.cfg.example.sigma))
-        scale_factor = L.det().log()
+        scale_factor = L.det().abs().log()
         self.ode_llk = raw_ode_llk - scale_factor
         return self.ode_llk
 
@@ -154,20 +154,8 @@ class MultivariateGaussianTarget(Target):
         )
     def log_prob(self, saps):
         return self.dist.log_prob(saps.squeeze(-1))
-    def empirical_prob(self, alpha):
-        dd = dist.MultivariateNormal(
-            torch.zeros_like(self.cfg.example.d),
-            torch.eye(self.cfg.example.d)
-        )
-        X = dd.sample([100000])
-        import pdb; pdb.set_trace()
-        ys = (X * X).sum(dim=[1, 2])
-        estimate = (ys > alpha).to(float).mean()
-        return estimate
     def analytical_prob(self, alpha):
-        if self.cfg.example.d == 2:
-            return torch.exp(-alpha / 2)
-        return self.empirical_prob(alpha)
+        return 1 - stats.chi2.cdf(alpha, self.cfg.example.d)
 
 
 class BrownianMotionDiffTarget(Target):

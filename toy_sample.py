@@ -680,7 +680,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha.unsqueeze(-1))
-    non_nan_ode_lk = (ode_llk[0] - L.det().log()).exp()
+    non_nan_ode_lk = (ode_llk[0] - L.det().abs().log()).exp()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
 
     avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
