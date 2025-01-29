@@ -27,7 +27,7 @@ class GaussianProposal(Proposal):
         self.trajs = self.sample_trajs * self.std.cfg.example.sigma + self.std.cfg.example.mu
         return self.trajs, self.sample_trajs
 
-    def log_prob(self, samples):
+    def log_prob(self, samples: torch.Tensor):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
@@ -52,7 +52,7 @@ class MultivariateGaussianProposal(Proposal):
         self.trajs = torch.matmul(L, self.sample_trajs) + mu
         return self.trajs, self.sample_trajs
 
-    def log_prob(self, samples):
+    def log_prob(self, samples: torch.Tensor):
         cond = torch.tensor([self.std.cfg.cond]).to(device)
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
@@ -86,7 +86,7 @@ class BrownianMotionDiffProposal(Proposal):
         ], dim=1)
         return self.trajs, self.sample_trajs
 
-    def log_prob(self, samples):
+    def log_prob(self, samples: torch.Tensor):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
@@ -112,7 +112,7 @@ class StudentTProposal(Proposal):
         self.trajs = self.sample_trajs * self.sigma
         return self.trajs, self.sample_trajs
 
-    def log_prob(self, samples):
+    def log_prob(self, samples: torch.Tensor):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
@@ -125,12 +125,16 @@ class StudentTProposal(Proposal):
 class Target:
     def __init__(self, cfg):
         self.cfg = cfg
-    def log_prob(self, saps):
+    def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
-    def analytical_prob(self):
-        return -1.
-    def analytical_conditional_log_prob(self, saps, alpha):
-        return self.dist.log_prob(saps) - self.analytical_prob(alpha).log()
+    def analytical_prob(self) -> torch.Tensor:
+        return torch.tensor(-1.)
+    def analytical_conditional_log_prob(
+        self, 
+        saps: torch.Tensor,
+        alpha: torch.Tensor
+    ) -> torch.Tensor:
+        return self.log_prob(saps) - self.analytical_prob(alpha).log()
 
 
 class GaussianTarget(Target):
@@ -140,9 +144,9 @@ class GaussianTarget(Target):
             cfg.example.mu,
             cfg.example.sigma
         )
-    def log_prob(self, saps):
+    def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         return self.dist.log_prob(saps)
-    def analytical_prob(self, alpha):
+    def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         # 0.0027 for self.cfg.cond=3
         return 2*self.dist.cdf(
             self.cfg.example.mu - alpha * self.cfg.example.sigma
@@ -156,10 +160,10 @@ class MultivariateGaussianTarget(Target):
             torch.tensor(cfg.example.mu).squeeze(-1),
             torch.tensor(cfg.example.sigma)
         )
-    def log_prob(self, saps):
+    def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         return self.dist.log_prob(saps.squeeze(-1))
-    def analytical_prob(self, alpha):
-        return 1 - stats.chi2.cdf(alpha, self.cfg.example.d)
+    def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor  :
+        return torch.tensor(1 - stats.chi2.cdf(alpha, self.cfg.example.d), dtype=alpha.dtype)
 
 
 class BrownianMotionDiffTarget(Target):
@@ -170,11 +174,11 @@ class BrownianMotionDiffTarget(Target):
             0.,
             self.dt.sqrt(),
         )
-    def log_prob(self, saps):
+    def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         # the elements of saps are dependent, but those of
         # saps.diff(dim=1) are independent increments
         return self.dist.log_prob(saps.diff(dim=1)).sum(dim=1)
-    def empirical_prob(self, alpha) -> torch.Tensor:
+    def empirical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         batch_size = 1690000
         x0 = torch.randn(
             batch_size,
@@ -188,14 +192,14 @@ class BrownianMotionDiffTarget(Target):
             scaled_x0.cumsum(dim=1)
         ], dim=1)
         return (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
-    def analytical_prob(self, alpha) -> torch.Tensor:
+    def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         # no better solution known
         if alpha == 2.5:
             return torch.tensor(0.0108)
         elif alpha == 3.0:
             return torch.tensor(0.00225)
         raise NotImplementedError
-    def analytical_upper_bound(self, alpha) -> torch.Tensor:
+    def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:
         # 0.0059 for alpha=3
         # https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
         val = 2 * np.sqrt(2)/(alpha * np.sqrt(np.pi)) * np.exp(-alpha**2/2)
@@ -213,7 +217,7 @@ class StudentTTarget(Target):
             stats.t.pdf(saps.cpu(), df=self.cfg.example.nu),
             device=saps.device
         ).log()
-    def analytical_prob(self, alpha):
+    def analytical_prob(self, alpha: torch.Tensor):
         # 0.0027 for self.cfg.cond=3
         return torch.tensor(2*stats.t.cdf(
             -alpha * self.sigma,

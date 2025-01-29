@@ -84,6 +84,10 @@ class ToyEvaluator:
         )
         if 'model_state_dict' in model:
             self.diffusion_model.load_state_dict(model['model_state_dict'])
+            model_parameters = filter(lambda p: p.requires_grad, self.diffusion_model.parameters())
+            num_params = sum([np.prod(p.size()) for p in model_parameters])
+            logger = logging.getLogger("main")
+            logger.info('loaded model with {} parameters'.format(num_params))
         else:
             self.diffusion_model.load_state_dict(model)
 
