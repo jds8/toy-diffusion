@@ -40,8 +40,9 @@ class GaussianProposal(Proposal):
 
 class MultivariateGaussianProposal(Proposal):
     def sample(self):
+        cond = torch.tensor([self.std.cfg.cond]).to(device)
         sample_traj_out = self.std.sample_trajectories(
-            cond=self.std.cond.to(device),
+            cond=cond,
             alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
         )
         self.sample_trajs = sample_traj_out.samples[-1]
@@ -52,9 +53,10 @@ class MultivariateGaussianProposal(Proposal):
         return self.trajs, self.sample_trajs
 
     def log_prob(self, samples):
+        cond = torch.tensor([self.std.cfg.cond]).to(device)
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
-            cond=self.std.cond.to(device),
+            cond=cond,
             alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
         )[0]
         L = torch.linalg.cholesky(torch.tensor(self.std.cfg.example.sigma))
@@ -127,6 +129,8 @@ class Target:
         raise NotImplementedError
     def analytical_prob(self):
         return -1.
+    def analytical_conditional_log_prob(self, saps, alpha):
+        return self.dist.log_prob(saps) - self.analytical_prob(alpha).log()
 
 
 class GaussianTarget(Target):
