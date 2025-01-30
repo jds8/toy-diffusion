@@ -543,6 +543,15 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
         std.likelihood.alpha,
     ))
 
+    # plot_histogram of sample_trajs under analytical distribution
+    plt.clf()
+    plt.hist(sample_trajs.squeeze().numpy(), bins=100, edgecolor='black', density=True)
+    x = np.linspace(-sample_trajs.max().item(), sample_trajs.max().item(), 1000)
+    pdf = stats.norm.pdf(x) / (1 - stats.norm.cdf(std.likelihood.alpha))
+    pdf[np.abs(x) < std.likelihood.alpha.numpy()] = 0
+    plt.plot(x, pdf, color='red', label='Analytical PDF')
+    plt.savefig('{}/gaussian_hist_w_analytical.pdf'.format(cfg.figs_dir))
+
     cond = std.cond if std.cond else torch.tensor([-1.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
 
@@ -598,6 +607,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
         plt_llk(datapoints, datapoint_llk.exp(), cfg.figs_dir, plot_type='line')
     except Exception as e:
         print(f'error: {e}')
+
     import pdb; pdb.set_trace()
 
 def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
@@ -619,9 +629,13 @@ def plot_rayleigh_from_sample_trajs(non_nan_ode_lk, cfg, sample_trajs, std):
     import scipy.stats as stats
     x = np.linspace(0, sample_levels.max().item(), 1000)
     alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
+    asdf = sample_trajs.squeeze()
+    covariance = torch.matmul(asdf.T, asdf) / asdf.shape[0]
+    sigma = covariance.sqrt()[0,0].item()
+    print('covariance: {}'.format(covariance))
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
+        pdf = stats.rayleigh.pdf(x, scale=sigma) / (1 - stats.rayleigh.cdf(alpha, scale=sigma))
         # Zero out values below alpha
         pdf[x < alpha] = 0
     else:

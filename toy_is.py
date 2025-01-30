@@ -90,7 +90,7 @@ def importance_estimate(
     logN = torch.tensor(log_ws.shape[0]).log()
     log_std = (torch.logsumexp((phis * w_bars - expectation) ** 2, dim=0) - logN)/2
     std = log_std.exp()
-    return expectation, std, num_saps_not_in_region
+    return expectation, std, num_saps_not_in_region, phis
 
 def iterative_importance_estimate(
         test_fn: Callable,
@@ -110,8 +110,59 @@ def iterative_importance_estimate(
     total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
     total_N = cur_N + log_probs.nelement()
     total_expectation = total_sum / total_N
-    return total_expectation, total_N, num_saps_not_in_region
+    return total_expectation, total_N, num_saps_not_in_region, phis
 
+def compute_is_diagnostics(
+    log_probs: torch.Tensor,
+    log_qrobs: torch.Tensor, 
+    phis: torch.Tensor = None
+):
+    """
+    Compute diagnostics for importance sampling
+    Args:
+        log_probs: log probabilities from target distribution
+        log_qrobs: log probabilities from proposal distribution
+        phis: indicator function values (optional)
+    Returns:
+        dict containing diagnostic metrics
+    """
+    # Compute importance weights
+    log_ws = log_probs - log_qrobs
+    max_log_w = log_ws.max()
+    w_bars = (log_ws - max_log_w).exp()
+    
+    diagnostics = {}
+    
+    # 1. Effective Sample Size (ESS)
+    ess = w_bars.sum() ** 2 / (w_bars ** 2).sum()
+    diagnostics['ess'] = ess
+    diagnostics['ess_ratio'] = ess / len(w_bars)
+    
+    # 2. Weight statistics
+    diagnostics['max_weight'] = w_bars.max()
+    diagnostics['min_weight'] = w_bars.min()
+    diagnostics['weight_range'] = diagnostics['max_weight'] / diagnostics['min_weight']
+    diagnostics['max_weight_over_sum'] = diagnostics['max_weight'] / w_bars.sum()
+    
+    # 3. Coefficient of Variation (CV) of weights
+    weight_mean = w_bars.mean()
+    weight_std = w_bars.std()
+    diagnostics['weight_cv'] = weight_std / weight_mean
+    
+    # 4. Perplexity (alternative measure of sample efficiency)
+    perplexity = torch.exp(-torch.sum(w_bars * torch.log(w_bars + 1e-10)))
+    diagnostics['perplexity'] = perplexity
+    
+    # 5. KL divergence estimate between q and p
+    kl_div = (w_bars * log_ws).sum()
+    diagnostics['kl_divergence'] = kl_div
+    
+    if phis is not None:
+        # 6. Region statistics
+        diagnostics['prop_samples_in_region'] = phis.mean()
+        diagnostics['effective_samples_in_region'] = (phis * w_bars).sum()
+    
+    return diagnostics
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def importance_sample(cfg):
@@ -140,7 +191,8 @@ def importance_sample(cfg):
         # true tail probability under target
         ##################################################
         target = get_target(cfg_obj)
-        tail_prob = target.analytical_prob(torch.tensor(cfg_obj.likelihood.alpha))
+        alpha_tensor = torch.tensor(cfg_obj.likelihood.alpha)
+        tail_prob = target.analytical_prob(alpha_tensor)
         torch.save(tail_prob, '{}/alpha={}_tail_prob.pt'.format(
             save_dir,
             alpha,
@@ -167,6 +219,9 @@ def importance_sample(cfg):
             diffusion_estimate = round_data.diffusion_estimate
             target_N = round_data.target_N
             total_num_saps_not_in_region = round_data.total_num_saps_not_in_region
+            all_log_qrobs = []
+            all_true_log_probs = []
+            all_q_phis = []
             for j in range(num_full_splits + int(num_leftover > 0)):
                 proposal = get_proposal(cfg_obj.example, std)
                 std.cfg.num_samples = num_samples_list[j]
@@ -200,8 +255,10 @@ def importance_sample(cfg):
                 log_qrobs_start = time.time()
                 log_qrobs = proposal.log_prob(saps)
                 log_qrobs_end = time.time()
+                conditional_log_probs = target.analytical_conditional_log_prob(saps_raw, alpha_tensor)
                 log_qrobs_time = log_qrobs_end - log_qrobs_start
                 log_qrobs = log_qrobs.squeeze()
+                all_log_qrobs.append(log_qrobs)
                 log_qrobs_filename = '{}/alpha={}_log_qrobs_{}_{}_round_{}'.format(
                     save_dir,
                     alpha,
@@ -224,38 +281,39 @@ def importance_sample(cfg):
                     log_qrobs_time,
                     log_qrobs_time_filename
                 )
-                old_guidance = std.set_no_guidance()
-                diffusion_target = get_proposal(cfg_obj.example, std)
-                log_drobs_start = time.time()
-                log_drobs = diffusion_target.log_prob(saps)
-                log_drobs_end = time.time()
-                log_drobs_time = log_drobs_end - log_drobs_start
-                log_drobs = log_drobs.squeeze()
-                log_drobs_filename = '{}/alpha={}_log_drobs_{}_{}_round_{}'.format(
-                    save_dir,
-                    alpha,
-                    saps_idx,
-                    saps_new_idx,
-                    cfg.start_round+i
-                )
-                torch.save(
-                    log_drobs,
-                    log_drobs_filename
-                )
-                log_drobs_time_filename = '{}/alpha={}_time_for_log_drobs_{}_{}_round_{}'.format(
-                    save_dir,
-                    alpha,
-                    saps_idx,
-                    saps_new_idx,
-                    cfg.start_round+i
-                )
-                torch.save(
-                    log_drobs_time,
-                    log_drobs_time_filename
-                )
+                # old_guidance = std.set_no_guidance()
+                # diffusion_target = get_proposal(cfg_obj.example, std)
+                # log_drobs_start = time.time()
+                # log_drobs = diffusion_target.log_prob(saps)
+                # log_drobs_end = time.time()
+                # log_drobs_time = log_drobs_end - log_drobs_start
+                # log_drobs = log_drobs.squeeze()
+                # log_drobs_filename = '{}/alpha={}_log_drobs_{}_{}_round_{}'.format(
+                #     save_dir,
+                #     alpha,
+                #     saps_idx,
+                #     saps_new_idx,
+                #     cfg.start_round+i
+                # )
+                # torch.save(
+                #     log_drobs,
+                #     log_drobs_filename
+                # )
+                # log_drobs_time_filename = '{}/alpha={}_time_for_log_drobs_{}_{}_round_{}'.format(
+                #     save_dir,
+                #     alpha,
+                #     saps_idx,
+                #     saps_new_idx,
+                #     cfg.start_round+i
+                # )
+                # torch.save(
+                #     log_drobs_time,
+                #     log_drobs_time_filename
+                # )
                 saps_idx = saps_new_idx
                 true_log_probs = target.log_prob(saps_raw).squeeze()
-                target_estimate, _, num_saps_not_in_region = iterative_importance_estimate(
+                all_true_log_probs.append(true_log_probs)
+                target_estimate, target_N, num_saps_not_in_region, q_phis = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
                     saps=saps,
@@ -264,20 +322,37 @@ def importance_sample(cfg):
                     cur_expectation=target_estimate,
                     cur_N=target_N,
                 )
+                all_q_phis.append(q_phis)
+                # target_estimate, _, num_saps_not_in_region, q_phis = iterative_importance_estimate(
+                #     test_fn=test_fn,
+                #     saps_raw=saps_raw,
+                #     saps=saps,
+                #     log_probs=true_log_probs,
+                #     log_qrobs=log_qrobs,
+                #     cur_expectation=target_estimate,
+                #     cur_N=target_N,
+                # )
                 ##################################################
                 # IS estimate using unconditional diffusion model
                 ##################################################
-                diffusion_estimate, target_N, _ = iterative_importance_estimate(
-                    test_fn=test_fn,
-                    saps_raw=saps_raw,
-                    saps=saps,
-                    log_probs=log_drobs,
-                    log_qrobs=log_qrobs,
-                    cur_expectation=diffusion_estimate,
-                    cur_N=target_N,
-                )
-                std.cfg.guidance = old_guidance
+                # diffusion_estimate, target_N, _, d_phis = iterative_importance_estimate(
+                #     test_fn=test_fn,
+                #     saps_raw=saps_raw,
+                #     saps=saps,
+                #     log_probs=log_drobs,
+                #     log_qrobs=log_qrobs,
+                #     cur_expectation=diffusion_estimate,
+                #     cur_N=target_N,
+                # )
+                # std.cfg.guidance = old_guidance
                 total_num_saps_not_in_region += num_saps_not_in_region
+
+            diagnostics = compute_is_diagnostics(
+                torch.cat(all_log_qrobs),
+                torch.cat(all_true_log_probs),
+                torch.cat(all_q_phis),
+            )
+            logger.info(f'IS diagnostics: {diagnostics}')
 
             round_data = RoundData(
                 curr_sap=saps_idx,
@@ -300,29 +375,29 @@ def importance_sample(cfg):
             logger.info(f'total sample+eval time: {finish_sample-start_sample}')
             zero_std = torch.tensor([0.], device=device)
             target_is_stats = torch.stack([target_estimate, zero_std])
+            logger.info('IS estimate with target: {} and std. dev.: {}'.format(
+                target_estimate,
+                zero_std,
+            ))
             torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
                 save_dir,
                 alpha,
                 cfg.start_round+i
             ))
-            logger.info('IS estimate with target: {} and std. dev.: {}'.format(
-                target_estimate,
-                zero_std,
-            ))
 
             finish = time.time()
             logger.info(f'total time: {finish-start}')
 
-            diffusion_is_stats = torch.stack([diffusion_estimate, zero_std])
-            torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
-                save_dir,
-                alpha,
-                cfg.start_round+i
-            ))
-            logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
-                diffusion_estimate,
-                zero_std,
-            ))
+            # diffusion_is_stats = torch.stack([diffusion_estimate, zero_std])
+            # torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
+            #     save_dir,
+            #     alpha,
+            #     cfg.start_round+i
+            # ))
+            # logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
+            #     diffusion_estimate,
+            #     zero_std,
+            # ))
             ##################################################
 
         finish = time.time()
