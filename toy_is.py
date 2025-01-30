@@ -85,12 +85,11 @@ def importance_estimate(
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
     phis = test_fn(saps_raw, saps).squeeze()
-    num_saps_not_in_region = (1-phis).sum()
     expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
     logN = torch.tensor(log_ws.shape[0]).log()
     log_std = (torch.logsumexp((phis * w_bars - expectation) ** 2, dim=0) - logN)/2
     std = log_std.exp()
-    return expectation, std, num_saps_not_in_region, phis
+    return expectation, std, phis
 
 def iterative_importance_estimate(
         test_fn: Callable,
@@ -105,12 +104,11 @@ def iterative_importance_estimate(
     max_log_w = log_ws.max()
     w_bars = (log_ws - max_log_w).exp()
     phis = test_fn(saps_raw, saps).squeeze()
-    num_saps_not_in_region = (1-phis).sum()
     new_expectation = ((phis * w_bars).mean().log() + max_log_w).exp()
     total_sum = cur_expectation * cur_N + new_expectation * log_probs.nelement()
     total_N = cur_N + log_probs.nelement()
     total_expectation = total_sum / total_N
-    return total_expectation, total_N, num_saps_not_in_region, phis
+    return total_expectation, total_N, phis
 
 def compute_is_diagnostics(
     log_probs: torch.Tensor,
@@ -313,7 +311,7 @@ def importance_sample(cfg):
                 saps_idx = saps_new_idx
                 true_log_probs = target.log_prob(saps_raw).squeeze()
                 all_true_log_probs.append(true_log_probs)
-                target_estimate, target_N, num_saps_not_in_region, q_phis = iterative_importance_estimate(
+                target_estimate, target_N, q_phis = iterative_importance_estimate(
                     test_fn=test_fn,
                     saps_raw=saps_raw,
                     saps=saps,
@@ -323,7 +321,7 @@ def importance_sample(cfg):
                     cur_N=target_N,
                 )
                 all_q_phis.append(q_phis)
-                # target_estimate, _, num_saps_not_in_region, q_phis = iterative_importance_estimate(
+                # target_estimate, _, q_phis = iterative_importance_estimate(
                 #     test_fn=test_fn,
                 #     saps_raw=saps_raw,
                 #     saps=saps,
@@ -345,7 +343,7 @@ def importance_sample(cfg):
                 #     cur_N=target_N,
                 # )
                 # std.cfg.guidance = old_guidance
-                total_num_saps_not_in_region += num_saps_not_in_region
+                total_num_saps_not_in_region += (1-q_phis).sum()
 
             diagnostics = compute_is_diagnostics(
                 torch.cat(all_log_qrobs),

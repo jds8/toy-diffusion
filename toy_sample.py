@@ -617,25 +617,18 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     plt.savefig('{}/theta_hist.pdf'.format(cfg.figs_dir))
     plt.clf()
 
-def plot_rayleigh_from_sample_trajs(non_nan_ode_lk, cfg, sample_trajs, std):
+def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1,2])
     plt.hist(sample_levels.numpy(), bins=100, edgecolor='black', density=True)
-    # rayleigh_lk = non_nan_ode_lk * sample_levels / torch.tensor(2*torch.pi
-    # )
-    # plt_llk(sample_levels, rayleigh_lk, cfg.figs_dir, plot_type='scatter')
 
     # Plot analytical Rayleigh distribution using scipy
     import scipy.stats as stats
     x = np.linspace(0, sample_levels.max().item(), 1000)
     alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
-    asdf = sample_trajs.squeeze()
-    covariance = torch.matmul(asdf.T, asdf) / asdf.shape[0]
-    sigma = covariance.sqrt()[0,0].item()
-    print('covariance: {}'.format(covariance))
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.rayleigh.pdf(x, scale=sigma) / (1 - stats.rayleigh.cdf(alpha, scale=sigma))
+        pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
         # Zero out values below alpha
         pdf[x < alpha] = 0
     else:
@@ -643,6 +636,14 @@ def plot_rayleigh_from_sample_trajs(non_nan_ode_lk, cfg, sample_trajs, std):
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
     plt.savefig('{}/rayleigh_hist.pdf'.format(cfg.figs_dir))
+
+    # plot points points (ode_llk, sample_trajs) against analytical rayleigh
+    plt.clf()
+    rayleigh_ode_lk = ode_llk.exp() * torch.tensor(2*np.pi) * sample_levels
+    plt.scatter(sample_levels, rayleigh_ode_lk)
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/rayleigh_scatter.pdf'.format(cfg.figs_dir))
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     plt.clf()
@@ -671,7 +672,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     # (x-μ)^T Σ^(-1) (x-μ) = k
     # For a 2D Gaussian, this forms an ellipse
     # Get eigenvalues of covariance matrix to find major/minor axes
-    eigenvals = torch.linalg.eigvals(sigma).real
+    eigenvals = torch.linalg.eigvalsh(sigma)
     # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
     max_radius = torch.sqrt(max_level * eigenvals.max())
     
@@ -737,7 +738,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
 
     plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-    plot_rayleigh_from_sample_trajs(non_nan_ode_lk, cfg, sample_trajs, std)
+    plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):

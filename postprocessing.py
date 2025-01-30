@@ -12,7 +12,7 @@ import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
 
-from toy_train_config import GaussianExampleConfig, BrownianMotionDiffExampleConfig, \
+from toy_train_config import GaussianExampleConfig, MultivariateGaussianExampleConfig, BrownianMotionDiffExampleConfig, \
                              PostProcessingConfig, get_target
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
@@ -566,6 +566,10 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     omega_cfg = OmegaConf.to_object(cfg)
     if isinstance(omega_cfg.example, GaussianExampleConfig):
         return saps * cfg.example.sigma + cfg.example.mu
+    elif isinstance(omega_cfg.example, MultivariateGaussianExampleConfig):
+        torch_sigma = torch.tensor(omega_cfg.example.sigma)
+        L = torch_sigma.cholesky()
+        return torch.matmul(L, saps) + torch.tensor(omega_cfg.example.mu)
     elif isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
         dt = torch.tensor(1. / saps.shape[1])
         scaled_saps = saps * dt.sqrt()
@@ -589,8 +593,8 @@ def make_performance_v_samples(cfg):
     The IS plots will be for a particular (the best?) model and the empirical plots
     will be for sample sizes 10x and 100x larger than the smallest IS sample size.
     """
-    alphas = cfg.alphas
-    for alpha in alphas:
+    assert len(cfg.alphas) > 0 and len(cfg.samples) > 0
+    for alpha in cfg.alphas:
         directory = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
 
         # collect all sample data for each round
@@ -604,20 +608,23 @@ def make_performance_v_samples(cfg):
                 if sample_data[rnd] is not None:
                     sample_data[rnd] = torch.cat([
                         sample_data[rnd],
-                        data.reshape(-1, 1, 1)
-                    ]).reshape(-1, 1, 1)
+                        data#.reshape(-1, 1, 1)
+                    ])#.reshape(-1, 1, 1)
                 else:
-                    sample_data[rnd] = data.reshape(-1, 1, 1)
-            if re.search(f'alpha={alpha}.*log_qrobs.*', file_path) is not None:
+                    sample_data[rnd] = data#.reshape(-1, 1, 1)
+            if re.search(f'alpha={alpha}_log_qrobs_[0-9]+_[0-9]+_round', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
                 if sample_log_qrobs[rnd] is not None:
                     sample_log_qrobs[rnd] = torch.cat([
                         sample_log_qrobs[rnd],
-                        data.reshape(-1, 1, 1)
-                    ]).reshape(-1, 1, 1)
+                        data#.reshape(-1, 1, 1)
+                    ])#.reshape(-1, 1, 1)
                 else:
-                    sample_log_qrobs[rnd] = data.reshape(-1, 1, 1)
+                    try:
+                        sample_log_qrobs[rnd] = data#.reshape(-1, 1, 1)
+                    except Exception as e:
+                        import pdb; pdb.set_trace()
 
         std = ContinuousEvaluator(cfg=cfg)
         target = get_target(std)
@@ -628,7 +635,7 @@ def make_performance_v_samples(cfg):
         quantile_map = {}
 
         omega_cfg = OmegaConf.to_object(cfg)
-        if isinstance(omega_cfg.example, GaussianExampleConfig):
+        if not isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
             true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
             true = true.to('cpu')
         else:
@@ -648,13 +655,16 @@ def make_performance_v_samples(cfg):
 
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
-            for i, (data, log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
+            for i, (data, all_log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
+                if data is None:
+                    continue
                 # for each subsample of data, compute IS estimate
                 saps = data[num_samples:cfg.samples[sample_idx]]
                 saps_raw = get_saps_raw(saps, cfg)
                 log_probs = target.log_prob(saps_raw).squeeze()
+                log_qrobs = all_log_qrobs[num_samples:cfg.samples[sample_idx]]
 
-                target_estimate, target_N, num_saps_not_in_region = \
+                target_estimate, target_N, q_phis = \
                     iterative_importance_estimate(
                         test_fn=test_fn,
                         saps_raw=saps_raw,
@@ -667,7 +677,7 @@ def make_performance_v_samples(cfg):
                 target_rel_error = torch.abs(target_estimate - true) / true
                 target_rel_errors[i] = target_rel_error
                 target_Ns[i] = target_N
-                num_saps_not_in_region_list[i] += num_saps_not_in_region
+                num_saps_not_in_region_list[i] += (1-q_phis).sum()
             # construct error bar
             quantiles = torch.stack(target_rel_errors).to('cpu').quantile(
                 torch.tensor([0.05, 0.5, 0.95])
@@ -737,8 +747,8 @@ def make_performance_v_samples(cfg):
 
 @hydra.main(version_base=None, config_path="conf", config_name="pp_config")
 def main(cfg):
-    make_effort_v_performance(cfg)
-    # make_performance_v_samples(cfg)
+    # make_effort_v_performance(cfg)
+    make_performance_v_samples(cfg)
 
 
 if __name__ == '__main__':
