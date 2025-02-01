@@ -581,7 +581,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     )
     tail = 2 * datapoint_dist.cdf(cfg.example.mu-alpha*cfg.example.sigma)
     datapoint_left_llk = datapoint_dist.log_prob(datapoints_left) - tail.log()
-    import pdb; pdb.set_trace()
+
     datapoint_right_llk = datapoint_dist.log_prob(datapoints_right) - tail.log()
     datapoint_center_llk = -torch.ones(2) * torch.inf
     datapoint_llk = torch.hstack([datapoint_left_llk, datapoint_center_llk, datapoint_right_llk])
