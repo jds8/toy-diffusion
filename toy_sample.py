@@ -951,7 +951,7 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-    sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
+    sample_levels = sample_trajs.norm(dim=[1, 2])
     exited = (sample_levels > std.likelihood.alpha).to(float)
     prop_exited = exited.mean() * 100
     print('{}% of {} samples outside Level {}'.format(
@@ -1025,9 +1025,9 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
 
     datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
-    # alpha == r^2 as indicated by how the `exited` variable is defined
+    # alpha == sqrt(x^2 + y^2) as indicated by how the `exited` variable is defined
     # at the top of this function
-    tail = torch.exp(-alpha / 2)
+    tail = torch.exp(-alpha**2 / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
