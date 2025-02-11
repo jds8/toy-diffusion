@@ -54,11 +54,12 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
             self,
             alpha: float,
             which_condition: LikelihoodCondition,
+            gamma: float,
     ):
         super().__init__(alpha)
         self.sigmas = torch.linspace(1., 0.001, 1000)
         self.dist = torch.distributions.Normal(alpha, self.sigmas)
-        self.gamma = 1
+        self.gamma = gamma
         self.which_condition = which_condition
 
     def set_alpha(self, alpha: torch.Tensor):

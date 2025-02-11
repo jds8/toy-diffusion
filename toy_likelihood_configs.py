@@ -39,6 +39,7 @@ class LikelihoodCondition(Enum):
 class MultivariateGaussianTailsLikelihoodConfig(LikelihoodConfig):
     alpha: float = 3.
     which_condition: LikelihoodCondition = LikelihoodCondition.Hard
+    gamma: float = 1.
     _target_: str = 'toy_likelihoods.MultivariateGaussianTailsLikelihood'
 
     def name(self):
