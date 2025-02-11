@@ -17,23 +17,43 @@ class DistanceFunction(Enum):
 class LikelihoodConfig:
     _target_: str = ''
 
+    def name(self):
+        return 'Lik'
+
 
 @dataclass
 class GaussianTailsLikelihoodConfig(LikelihoodConfig):
     alpha: float = 3.
     _target_: str = 'toy_likelihoods.GaussianTailsLikelihood'
 
+    def name(self):
+        return 'GTailsLik'
+
+
+class LikelihoodCondition(Enum):
+    Hard = 'hard'
+    Soft = 'soft'
+
 
 @dataclass
 class MultivariateGaussianTailsLikelihoodConfig(LikelihoodConfig):
     alpha: float = 3.
+    which_condition: LikelihoodCondition = LikelihoodCondition.Hard
     _target_: str = 'toy_likelihoods.MultivariateGaussianTailsLikelihood'
+
+    def name(self):
+        return 'MVGTailsLik{}'.format(
+            self.which_condition.value.capitalize()
+        )
 
 
 @dataclass
 class BrownianMotionDiffTailsLikelihoodConfig(LikelihoodConfig):
     alpha: float = 3.
     _target_: str = 'toy_likelihoods.BrownianMotionDiffTailsLikelihood'
+
+    def name(self):
+        return 'BMTailsLik'
 
 
 @dataclass

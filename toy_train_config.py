@@ -31,6 +31,7 @@ class GaussianExampleConfig(ExampleConfig):
     def name(self):
         return 'GaussianExampleConfig'
 
+
 @dataclass
 class MultivariateGaussianExampleConfig(ExampleConfig):
     d: int = 1
@@ -134,11 +135,13 @@ def get_model_path(cfg: TrainConfig, dim: int):
         sampler_name = cfg_obj.sampler.name()
         diffusion_name = cfg_obj.diffusion.name()
         example_name = cfg_obj.example.name()
-        model_name = "{}_{}_dim_{}_{}".format(
+        lik_name = cfg_obj.likelihood.name()
+        model_name = "{}_{}_dim_{}_{}_{}".format(
             sampler_name,
             diffusion_name,
             dim,
             example_name,
+            lik_name,
         )
     return get_path(cfg, model_name)
 

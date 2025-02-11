@@ -591,8 +591,10 @@ class AlphaConditionTrainer(ConditionTrainer):
             x0_raw.device
         )
         self.likelihood.set_alpha(alphas)
-        cond = self.likelihood.get_condition( x0_raw.squeeze(-1),
-                                              x0.squeeze(-1), ).reshape(-1, 1)
+        cond = self.likelihood.get_condition(
+            x0_raw.squeeze(-1),
+            x0.squeeze(-1)
+        ).reshape(-1, 1)
         alpha = alphas[:, 0].reshape(-1, 1)
         return AlphaModelInput(x0_in, cond, alpha)
 

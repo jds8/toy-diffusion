@@ -10,14 +10,16 @@ from collections import namedtuple
 import hydra
 from hydra.core.config_store import ConfigStore
 from omegaconf import OmegaConf
-import scipy.stats as stats
 import numpy as np
+import einops
 import torch
 import torch.distributions as dist
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import scipy.stats as stats
+import scipy
 
-from torchdiffeq import odeint
+from torchdiffeq import odeint, odeint_adjoint
 
 from toy_plot import SDE, analytical_log_likelihood, plot_ode_trajectories
 from toy_configs import register_configs
@@ -244,7 +246,7 @@ class DiscreteEvaluator(ToyEvaluator):
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         x_min = x, x.new_zeros([x.shape[0]])
         times = torch.tensor([self.sampler.t_eps, 1.], device=x.device)
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         # compute log(p(0)) = log(p(T)) + Tr(df/dx) where dx/dt = f
@@ -290,18 +292,43 @@ class ContinuousEvaluator(ToyEvaluator):
                     x=x.to(device),
                     time=t.to(device),
                 )
-                return self.sampler.get_sf_estimator(
-                    unconditional_output,
-                    xt=x.to(device),
-                    t=t.to(device)
-                )
+                if self.cfg.guidance == GuidanceType.Classifier:
+                    if self.cond is not None:
+                        with torch.enable_grad():
+                            xt = x.detach().clone().requires_grad_(True)
+                            grad_log_lik = self.likelihood.grad_log_lik(
+                                xt,
+                                t.item(),
+                            )
+                    else:
+                        grad_log_lik = torch.tensor(0.)
+                    cond_sf_est = self.sampler.get_classifier_guided_sf_estimator(
+                        xt=x.reshape(unconditional_output.shape),
+                        unconditional_output=unconditional_output,
+                        t=t.item(),
+                        cond_score=grad_log_lik
+                    )
+                    return cond_sf_est
+                elif self.cfg.guidance == GuidanceType.NoGuidance:
+                    uncond_sf_est = self.sampler.get_sf_estimator(
+                        unconditional_output,
+                        xt=x.to(device),
+                        t=t.to(device)
+                    )
+                    return uncond_sf_est
+                else:
+                    raise NotImplementedError
         else:
             raise NotImplementedError
 
-    def set_no_guidance(self):
+    def set_guidance(self, guidance: GuidanceType):
         old_guidance = self.cfg.guidance
-        self.cfg.guidance = GuidanceType.NoGuidance
+        self.cfg.guidance = guidance
         return old_guidance
+
+    def set_no_guidance(self):
+        no_guidance = GuidanceType.NoGuidance
+        return self.set_guidance(no_guidance)
 
     def get_dx_dt(self, t, x, evaluate_likelihood, **kwargs):
         time = t.reshape(-1)
@@ -387,6 +414,20 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps)
 
+    class ODESampleFunc(nn.Module):
+        def __init__(self, ce, **kwargs):
+            self.ce = ce
+            self.kwargs = kwargs
+            self.fevals = 0
+            super().__init__()
+
+        def forward(self, t, x):
+            self.fevals += 1
+            if 'observed_idx' in self.kwargs:
+                x[:, self.kwargs['observed_idx']] = self.kwargs['observed_values']
+            dx_dt = self.ce.get_dx_dt(t, x, evaluate_likelihood=False, **self.kwargs)
+            return dx_dt
+
     def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5, **kwargs):
         x_min = self.get_x_min()
 
@@ -405,7 +446,17 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x_min.device
         )
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        # ode_fn = ContinuousEvaluator.ODESampleFunc(self, **kwargs)
+        sol = odeint(
+            ode_fn,
+            x_min,
+            times,
+            atol=atol,
+            rtol=rtol,
+            method='rk4',
+            # method='scipy_solver',
+            # options={'solver': 'LSODA'},
+        )
         # import matplotlib.pyplot as plt
         # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
         # bm_trajs = torch.cat([
@@ -428,6 +479,24 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
         return sample_out
+
+    class ODELLKFunc(nn.Module):
+        def __init__(self, ce, x_shape, **kwargs):
+            self.ce = ce
+            self.kwargs = kwargs
+            self.v = torch.randint(2, x_shape) * 2 - 1
+            self.fevals = 0
+            super().__init__()
+
+        def forward(self, t, x):
+            self.fevals += 1
+            with torch.enable_grad():
+                x = x[0].detach().requires_grad_()
+                dx_dt = self.ce.get_dx_dt(t, x, evaluate_likelihood=True, **self.kwargs)
+                grad = torch.autograd.grad((dx_dt * self.v).sum(), x)[0]
+                d_ll = (self.v * grad).sum([-1, -2])
+            out = torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
+            return out
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
@@ -460,6 +529,8 @@ class ContinuousEvaluator(ToyEvaluator):
                 # else:
                 #     grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
                 grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
+                top_dx = dx_dt.norm(dim=[1, 2]).topk(k=5)
+                top_x = x[top_dx.indices]
                 d_ll = (v * grad).sum([-1, -2])
             return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
         # if self.cfg.guidance == GuidanceType.ClassifierFree:
@@ -474,7 +545,17 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x.device
         )
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        # ode_fn = ContinuousEvaluator.ODELLKFunc(self, x.shape, **kwargs)
+        sol = odeint(
+            ode_fn,
+            x_min,
+            times,
+            atol=atol,
+            rtol=rtol,
+            method='rk4',
+            # method='scipy_solver',
+            # options={'solver': 'LSODA'},
+        )
         latent, delta_ll = sol[0][-1], sol[1][-1]
         # if self.cfg.test == TestType.Gaussian:
         #     pseudo_example = self.cfg.example.copy()
@@ -613,18 +694,31 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     theta = torch.atan2(sample_trajs[..., 1, :], sample_trajs[..., 0, :])
     plt.clf()
-    plt.hist(theta.numpy(), bins=100, edgecolor='black', density=True)
+    plt.hist(
+        theta.numpy(),
+        bins=sample_trajs.shape[0] // 10,
+        edgecolor='black',
+        density=True
+    )
     plt.savefig('{}/theta_hist.pdf'.format(cfg.figs_dir))
     plt.clf()
 
 def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.clf()
-    sample_levels = sample_trajs.norm(dim=[1,2])
-    plt.hist(sample_levels.numpy(), bins=100, edgecolor='black', density=True)
+    # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
+    # sample_trajs = dd.sample([10*sample_trajs.shape[0], 1]).movedim(1,2)
+    # sample_trajs = sample_trajs[(sample_trajs.norm(dim=[1,2]) > std.likelihood.alpha.sqrt())]
+    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    num_bins = sample_trajs.shape[0] // 10
+    plt.hist(
+        sample_levels.numpy(),
+        bins=num_bins,
+        edgecolor='black',
+        density=True
+    )
 
     # Plot analytical Rayleigh distribution using scipy
-    import scipy.stats as stats
-    x = np.linspace(0, sample_levels.max().item(), 1000)
+    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
     alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
@@ -637,15 +731,224 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.legend()
     plt.savefig('{}/rayleigh_hist.pdf'.format(cfg.figs_dir))
 
-    # plot points points (ode_llk, sample_trajs) against analytical rayleigh
+    # plot points (ode_llk, sample_trajs) against analytical rayleigh
     plt.clf()
     rayleigh_ode_lk = ode_llk.exp() * torch.tensor(2*np.pi) * sample_levels
-    plt.scatter(sample_levels, rayleigh_ode_lk)
+    y = einops.repeat(x, 'x_len -> batch x_len', batch=sample_levels.shape[0])  # [B 1000]
+    levels = einops.repeat(sample_levels, 'batch -> batch x_len', x_len=x.shape[0])  # [B 1000]
+    idx = (levels > torch.tensor(y)).sum(dim=1)
+    true_rayleigh_ode_lk = torch.tensor(pdf[idx])
+    nonzero_idx = true_rayleigh_ode_lk.to(bool).nonzero()
+    ratios = rayleigh_ode_lk[nonzero_idx] / true_rayleigh_ode_lk[nonzero_idx]
+    plt.hist(ratios, bins=num_bins, edgecolor='black')
+    plt.xlabel('Likelihood Ratio (Estimate / True)')
+    plt.ylabel('Count')
+    plt.savefig('{}/rayleigh_ratios.pdf'.format(cfg.figs_dir))
+
+    # split sample_levels into 100 bins and compute the variance of the corresponding
+    # rayleigh_ode_lk values
+    plt.clf()
+    level_bins = torch.linspace(
+        sample_levels.min(),
+        sample_levels.max(),
+        num_bins
+    )
+    var = einops.reduce(
+        rayleigh_ode_lk,
+        '(n_bins bin_size) -> n_bins',
+        torch.var,
+        n_bins=num_bins
+    )
+    plt.scatter(level_bins, var)
+    plt.ylabel('Variance')
+    plt.xlabel('Radius')
+    plt.savefig('{}/rayleigh_variances.pdf'.format(cfg.figs_dir))
+
+    plt.clf()
+    gamma = std.likelihood.gamma
+    # plot sigmoid-adjusted conditional distribution
+    if alpha > 0:
+        sigmoid = torch.sigmoid(gamma * (torch.tensor(x) - alpha))
+        # plot sigmoid function as approximation to indicator
+        plt.plot(x, sigmoid, label=f'Sigmoid({gamma} * (x-{alpha}))', color='violet')
+
+        # For unnormalized conditional distribution
+        unnormed_pdf = stats.rayleigh.pdf(x) * sigmoid.numpy()
+        # trapezoid integration
+        normalization_factor = scipy.integrate.trapezoid(y=unnormed_pdf, x=x)
+        # normalized conditional
+        normed_pdf = unnormed_pdf / normalization_factor
+        plt.plot(x, normed_pdf, label='Sigmoid-Adjusted PDF', color='orange')
+
+    plt.scatter(sample_levels, rayleigh_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
     plt.savefig('{}/rayleigh_scatter.pdf'.format(cfg.figs_dir))
 
-def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
+    plt.clf()
+    trunc_idx = (ratios < 2).nonzero()
+    plt.scatter(sample_levels[trunc_idx], rayleigh_ode_lk[trunc_idx])
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/truncated_rayleigh_scatter.pdf'.format(cfg.figs_dir))
+
+def generate_diffusion_video(ode_llk, all_trajs, cfg):
+    samples = all_trajs.squeeze()
+    # generate gif of samples where each index in samples represents a frame
+    import matplotlib.animation as animation
+    import matplotlib.colors as colors
+
+    # Create figure and axis
+    fig, ax = plt.subplots()
+    
+    # Set up plot limits based on data range
+    x_min, x_max = samples[..., 0].min(), samples[..., 0].max()
+    y_min, y_max = samples[..., 1].min(), samples[..., 1].max()
+    margin = 0.1 * max(x_max - x_min, y_max - y_min)
+    ax.set_xlim(x_min - margin, x_max + margin)
+    ax.set_ylim(y_min - margin, y_max + margin)
+
+    # Create color normalization based on likelihood values
+    norm = colors.Normalize(vmin=ode_llk.min(), vmax=ode_llk.max())
+    
+    # Initialize scatter plot
+    scat = ax.scatter([], [], c=[], cmap='viridis', norm=norm)
+    fig.colorbar(scat, label='Log Likelihood')
+    
+    def update(frame):
+        # Update positions and colors for current frame
+        scat.set_offsets(samples[frame, :, :2])
+        scat.set_array(ode_llk)
+        return scat,
+    
+    # Create animation
+    frames = len(samples)
+    anim = animation.FuncAnimation(
+        fig,
+        update,
+        frames=frames,
+        interval=100,  # 100ms between frames
+        blit=True
+    )
+
+    # Save animation
+    cond = 'conditional' if cfg.cond else 'unconditional'
+    anim.save(f'{cfg.figs_dir}/{cond}_mvn_diffusion.gif', writer='pillow')
+    plt.close()
+
+def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
+    """Create 2D heatmaps of mean and variance of log-likelihoods."""
+    # Reshape inputs
+    points = sample_trajs.squeeze(-1)  # Shape: (B, 2)
+    llk = ode_llk.exp()  # Shape: (B,)
+
+    # Calculate analytical likelihoods
+    mu = torch.tensor(cfg.example.mu).squeeze(-1)
+    sigma = torch.tensor(cfg.example.sigma)
+    analytical_dist = torch.distributions.MultivariateNormal(mu, sigma)
+    analytical_lk = analytical_dist.log_prob(points).exp()
+    
+    # Calculate estimated likelihoods and relative errors
+    estimated_lk = ode_llk.exp()
+    relative_errors = torch.abs(estimated_lk - analytical_lk) / analytical_lk
+
+    # Create grid for interpolation
+    margin = 0.1
+    x_min, x_max = points[:, 0].min() - margin, points[:, 0].max() + margin
+    y_min, y_max = points[:, 1].min() - margin, points[:, 1].max() + margin
+    
+    grid_size = 50
+    x_grid = torch.linspace(x_min, x_max, grid_size)
+    y_grid = torch.linspace(y_min, y_max, grid_size)
+    X, Y = torch.meshgrid(x_grid, y_grid, indexing='ij')
+    
+    # Calculate grid cell assignments for each point
+    x_bins = torch.bucketize(points[:, 0].contiguous(), x_grid) - 1
+    y_bins = torch.bucketize(points[:, 1].contiguous(), y_grid) - 1
+    
+    # Create mean heatmap
+    mean_Z = torch.zeros_like(X)
+    count_Z = torch.zeros_like(X)
+    
+    # Create variance heatmap 
+    squared_sum_Z = torch.zeros_like(X)
+    
+    # Create relative error heatmap 
+    err_Z = torch.zeros_like(X)
+
+    # Accumulate values in grid cells
+    for i in range(len(points)):
+        x_idx = x_bins[i]
+        y_idx = y_bins[i]
+        if 0 <= x_idx < grid_size and 0 <= y_idx < grid_size:
+            mean_Z[x_idx, y_idx] += llk[i]
+            squared_sum_Z[x_idx, y_idx] += llk[i] ** 2
+            err_Z[x_idx, y_idx] += relative_errors[i]
+            count_Z[x_idx, y_idx] += 1
+    
+    # Calculate mean and variance
+    mask = count_Z > 0
+    mean_Z[mask] /= count_Z[mask]
+    var_Z = torch.zeros_like(mean_Z)
+    var_Z[mask] = (squared_sum_Z[mask] / count_Z[mask]) - (mean_Z[mask] ** 2)
+    
+    err_Z[mask] /= count_Z[mask]
+    
+    # Plot heatmap
+    plt.figure(figsize=(10, 8))
+    plt.pcolormesh(X.numpy(), Y.numpy(), err_Z.numpy(), shading='auto', cmap='viridis')
+    plt.colorbar(label='Relative Error')
+    plt.title('Relative Error Heatmap')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    
+    plt.savefig(f'{cfg.figs_dir}/relative_error_heatmap.pdf')
+    plt.close()
+
+    # Plot mean heatmap
+    plt.figure(figsize=(10, 8))
+    plt.subplot(1, 2, 1)
+    plt.pcolormesh(X.numpy(), Y.numpy(), mean_Z.numpy(), shading='auto', cmap='viridis')
+    plt.colorbar(label='Mean Density')
+    plt.title('Mean Density Heatmap')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    
+    # Plot variance heatmap
+    plt.subplot(1, 2, 2)
+    plt.pcolormesh(X.numpy(), Y.numpy(), var_Z.numpy(), shading='auto', cmap='viridis')
+    plt.colorbar(label='Variance of Density')
+    plt.title('Density Variance Heatmap')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    
+    plt.tight_layout()
+    plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps.pdf')
+    plt.close()
+
+    # Create scatter plot overlay
+    plt.figure(figsize=(10, 8))
+    plt.subplot(1, 2, 1)
+    plt.pcolormesh(X.numpy(), Y.numpy(), mean_Z.numpy(), shading='auto', cmap='viridis', alpha=0.7)
+    plt.scatter(points[:, 0], points[:, 1], c=llk, cmap='viridis', alpha=0.5, s=1)
+    plt.colorbar(label='Density')
+    plt.title('Mean Density with Sample Points')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    
+    plt.subplot(1, 2, 2)
+    plt.pcolormesh(X.numpy(), Y.numpy(), var_Z.numpy(), shading='auto', cmap='viridis', alpha=0.7)
+    plt.scatter(points[:, 0], points[:, 1], c=llk, cmap='viridis', alpha=0.5, s=1)
+    plt.colorbar(label='Density')
+    plt.title('Variance with Sample Points')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    
+    plt.tight_layout()
+    plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps_with_points.pdf')
+    plt.close()
+
+def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
@@ -737,8 +1040,12 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
 
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
 
-    plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-    plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+    if cfg.example.d == 2:
+        plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
+        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+        generate_diffusion_video(ode_llk[0], all_trajs, cfg)
+        plot_likelihood_heat_maps(ode_llk[0], sample_trajs, cfg)
+    print(f'\nmin norm: {sample_trajs.norm(dim=[1, 2]).min()}\n')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
@@ -781,7 +1088,6 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
-    os.makedirs(save_dir, exist_ok=True)
     alpha = torch.tensor([std.likelihood.alpha])
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -1072,11 +1378,11 @@ def test_transformer_bm(end_time, std):
         ))
     import pdb; pdb.set_trace()
 
-def test(end_time, cfg, out_trajs, std):
+def test(end_time, cfg, out_trajs, std, all_trajs):
     if type(std.example) == GaussianExampleConfig:
         test_gaussian(end_time, cfg, out_trajs, std)
     elif type(std.example) == MultivariateGaussianExampleConfig:
-        test_multivariate_gaussian(end_time, cfg, out_trajs, std)
+        test_multivariate_gaussian(end_time, cfg, out_trajs, std, all_trajs)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         test_brownian_motion_diff(end_time, cfg, out_trajs, std)
     elif type(std.example) == UniformExampleConfig:
@@ -1134,14 +1440,21 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
+        # TODO: delete comments
+        # guidance = GuidanceType.NoGuidance
+        # if std.cond == 1:
+        #     guidance = GuidanceType.ClassifierFree
+        # old_guidance = std.set_guidance(guidance)
         sample_traj_out = std.sample_trajectories(
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
         )
+        # std.set_guidance(old_guidance)
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
         # plot_ode_trajectories(ode_trajs)
 
+        # TODO: uncomment
         print('fevals: {}'.format(sample_traj_out.fevals))
         sample_trajs = sample_traj_out.samples
         trajs = sample_trajs[-1]
@@ -1149,8 +1462,11 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std)
+        # TODO: Remove
+        # out_trajs = torch.zeros(1000, 2, 1)
+        test(end_time, cfg, out_trajs, std, sample_trajs)
         import pdb; pdb.set_trace()
+
 
 
 if __name__ == "__main__":
