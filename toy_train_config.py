@@ -172,7 +172,6 @@ class IntegratorType(Enum):
 class SampleConfig(BaseConfig):
     num_samples: int = 100
     cond: Optional[float] = None
-    figs_dir: str = 'figs'
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow

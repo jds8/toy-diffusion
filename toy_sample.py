@@ -9,6 +9,7 @@ from collections import namedtuple
 
 import hydra
 from hydra.core.config_store import ConfigStore
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 import numpy as np
 import einops
@@ -62,7 +63,7 @@ class ToyEvaluator:
         ).to(device)
 
         self.diffusion_model.eval()
-        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood, sampler=self.sampler)
         self.example = OmegaConf.to_object(cfg.example)
 
         self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
@@ -308,6 +309,7 @@ class ContinuousEvaluator(ToyEvaluator):
                         t=t.item(),
                         cond_score=grad_log_lik
                     )
+
                     return cond_sf_est
                 elif self.cfg.guidance == GuidanceType.NoGuidance:
                     uncond_sf_est = self.sampler.get_sf_estimator(
@@ -631,7 +633,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     pdf = stats.norm.pdf(x) / (1 - stats.norm.cdf(std.likelihood.alpha))
     pdf[np.abs(x) < std.likelihood.alpha.numpy()] = 0
     plt.plot(x, pdf, color='red', label='Analytical PDF')
-    plt.savefig('{}/gaussian_hist_w_analytical.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/gaussian_hist_w_analytical.pdf'.format(HydraConfig.get().run.dir))
 
     cond = std.cond if std.cond else torch.tensor([-1.])
     traj = sample_trajs * cfg.example.sigma + cfg.example.mu
@@ -684,8 +686,8 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     try:
-        plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
-        plt_llk(datapoints, datapoint_llk.exp(), cfg.figs_dir, plot_type='line')
+        plt_llk(traj, ode_lk, HydraConfig.get().run.dir, plot_type='scatter')
+        plt_llk(datapoints, datapoint_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     except Exception as e:
         print(f'error: {e}')
 
@@ -700,7 +702,7 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
         edgecolor='black',
         density=True
     )
-    plt.savefig('{}/theta_hist.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/theta_hist.pdf'.format(HydraConfig.get().run.dir))
     plt.clf()
 
 def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
@@ -719,7 +721,7 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
 
     # Plot analytical Rayleigh distribution using scipy
     x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
-    alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
         pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
@@ -729,7 +731,7 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
         pdf = stats.rayleigh.pdf(x)
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/rayleigh_hist.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/rayleigh_hist.pdf'.format(HydraConfig.get().run.dir))
 
     # plot points (ode_llk, sample_trajs) against analytical rayleigh
     plt.clf()
@@ -743,7 +745,7 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.hist(ratios, bins=num_bins, edgecolor='black')
     plt.xlabel('Likelihood Ratio (Estimate / True)')
     plt.ylabel('Count')
-    plt.savefig('{}/rayleigh_ratios.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/rayleigh_ratios.pdf'.format(HydraConfig.get().run.dir))
 
     # split sample_levels into 100 bins and compute the variance of the corresponding
     # rayleigh_ode_lk values
@@ -762,12 +764,13 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.scatter(level_bins, var)
     plt.ylabel('Variance')
     plt.xlabel('Radius')
-    plt.savefig('{}/rayleigh_variances.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/rayleigh_variances.pdf'.format(HydraConfig.get().run.dir))
 
     plt.clf()
     gamma = std.likelihood.gamma
     # plot sigmoid-adjusted conditional distribution
-    if alpha > 0:
+    cond = std.cond if std.cond is not None else -1
+    if cond > 0:
         sigmoid = torch.sigmoid(gamma * (torch.tensor(x) - alpha))
         # plot sigmoid function as approximation to indicator
         plt.plot(x, sigmoid, label=f'Sigmoid({gamma} * (x-{alpha}))', color='violet')
@@ -783,14 +786,14 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.scatter(sample_levels, rayleigh_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/rayleigh_scatter.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/rayleigh_scatter.pdf'.format(HydraConfig.get().run.dir))
 
     plt.clf()
     trunc_idx = (ratios < 2).nonzero()
     plt.scatter(sample_levels[trunc_idx], rayleigh_ode_lk[trunc_idx])
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/truncated_rayleigh_scatter.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/truncated_rayleigh_scatter.pdf'.format(HydraConfig.get().run.dir))
 
 def generate_diffusion_video(ode_llk, all_trajs, cfg):
     samples = all_trajs.squeeze()
@@ -833,7 +836,7 @@ def generate_diffusion_video(ode_llk, all_trajs, cfg):
 
     # Save animation
     cond = 'conditional' if cfg.cond else 'unconditional'
-    anim.save(f'{cfg.figs_dir}/{cond}_mvn_diffusion.gif', writer='pillow')
+    anim.save(f'{HydraConfig.get().run.dir}/{cond}_mvn_diffusion.gif', writer='pillow')
     plt.close()
 
 def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
@@ -902,7 +905,7 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.xlabel('x')
     plt.ylabel('y')
     
-    plt.savefig(f'{cfg.figs_dir}/relative_error_heatmap.pdf')
+    plt.savefig(f'{HydraConfig.get().run.dir}/relative_error_heatmap.pdf')
     plt.close()
 
     # Plot mean heatmap
@@ -923,7 +926,7 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.ylabel('y')
     
     plt.tight_layout()
-    plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps.pdf')
+    plt.savefig(f'{HydraConfig.get().run.dir}/likelihood_heatmaps.pdf')
     plt.close()
 
     # Create scatter plot overlay
@@ -945,8 +948,75 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.ylabel('y')
     
     plt.tight_layout()
-    plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps_with_points.pdf')
+    plt.savefig(f'{HydraConfig.get().run.dir}/likelihood_heatmaps_with_points.pdf')
     plt.close()
+
+def plot_likelihood_surface(sample_trajs, ode_llk, cfg):
+    """
+    Creates a 3D surface plot of likelihood values with optional analytical Gaussian overlay.
+    
+    Args:
+        sample_trajs: Tensor of shape (B, 2, 1) containing x,y coordinates
+        ode_llk: Tensor of shape (B,) containing likelihood values
+        show_analytical: Boolean to toggle analytical Gaussian overlay
+    """
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    
+    # Convert tensors to numpy arrays if needed
+    if torch.is_tensor(sample_trajs):
+        sample_trajs = sample_trajs.cpu().numpy()
+    if torch.is_tensor(ode_llk):
+        ode_llk = ode_llk.cpu().numpy()
+    
+    # Extract x and y coordinates
+    x = sample_trajs[:, 0, 0]  # First dimension values
+    y = sample_trajs[:, 1, 0]  # Second dimension values
+    z = np.exp(ode_llk)  # Likelihood values
+    
+    # Create the 3D plot
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Create the scatter plot
+    scatter = ax.scatter(x, y, z, c=z, cmap='viridis', alpha=0.6, label='Samples')
+    
+    # Create a grid of points for the analytical surface
+    x_grid = np.linspace(min(x)-0.5, max(x)+0.5, 100)
+    y_grid = np.linspace(min(y)-0.5, max(y)+0.5, 100)
+    X, Y = np.meshgrid(x_grid, y_grid)
+    
+    # Bivariate Gaussian parameters
+    mean = np.array([3./5., 3./5.])
+    variance = 4/5
+
+    # Calculate the Gaussian PDF
+    Z = np.zeros_like(X)
+    for i in range(len(x_grid)):
+        for j in range(len(y_grid)):
+            point = np.array([X[i, j], Y[i, j]])
+            Z[i, j] = (1/(2*np.pi*variance)) * np.exp(
+                -0.5 * np.sum((point - mean)**2) / variance
+            )
+
+    # Plot the analytical surface
+    surf = ax.plot_surface(X, Y, Z, cmap='Reds', alpha=0.3, label='Analytical')
+    
+    # Add labels and colorbar
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Likelihood')
+    plt.colorbar(scatter)
+    
+    # Add title and legend
+    ax.set_title('Likelihood Surface: Samples vs Analytical')
+    
+    # Hack to add legend for surface plot
+    fake_surf = plt.Rectangle((0, 0), 1, 1, fc='r', alpha=0.3)
+    ax.legend([scatter, fake_surf], ['Samples', 'Analytical Gaussian'])
+    plt.savefig(f'{HydraConfig.get().run.dir}/p(x_0|y)_3d_samples.pdf')
+    
+    return fig, ax
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     plt.clf()
@@ -1038,14 +1108,14 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
-    plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
     if cfg.example.d == 2:
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
         plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
         plot_likelihood_heat_maps(ode_llk[0], sample_trajs, cfg)
-    print(f'\nmin norm: {sample_trajs.norm(dim=[1, 2]).min()}\n')
+        plot_likelihood_surface(sample_trajs, ode_llk[0], cfg)
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
@@ -1070,11 +1140,11 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     if sample_trajs.shape[1] > 1:
-        ax = plt_llk(sample_trajs, ode_llk[0].exp(), cfg.figs_dir, plot_type='3d_scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), cfg.figs_dir, plot_type='3d_line', ax=ax)
+        ax = plt_llk(sample_trajs, ode_llk[0].exp(), HydraConfig.get().run.dir, plot_type='3d_scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='3d_line', ax=ax)
     else:
-        plt_llk(sample_trajs, ode_llk[0].exp(), cfg.figs_dir, plot_type='scatter')
-        plt_llk(sample_trajs, analytical_llk.exp(), cfg.figs_dir, plot_type='line')
+        plt_llk(sample_trajs, ode_llk[0].exp(), HydraConfig.get().run.dir, plot_type='scatter')
+        plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
@@ -1087,7 +1157,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
-    save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
+    save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
     alpha = torch.tensor([std.likelihood.alpha])
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -1178,8 +1248,8 @@ def test_uniform(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
-    plt_llk(traj, a_lk, cfg.figs_dir, plot_type='line')
+    plt_llk(traj, ode_lk, HydraConfig.get().run.dir, plot_type='scatter')
+    plt_llk(traj, a_lk, HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_student_t(end_time, cfg, sample_trajs, std):
@@ -1228,8 +1298,8 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     print('\nmse_llk: {}'.format(mse_llk))
 
     plt.clf()
-    plt_llk(traj, ode_lk, cfg.figs_dir, plot_type='scatter')
-    plt_llk(datapoints, datapoint_llk.exp(), cfg.figs_dir, plot_type='line')
+    plt_llk(traj, ode_lk, HydraConfig.get().run.dir, plot_type='scatter')
+    plt_llk(datapoints, datapoint_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
 def test_student_t_diff(end_time, cfg, sample_trajs, std):
@@ -1242,7 +1312,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of Student T state diffs')
-    save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
+    save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
     alpha = std.likelihood.alpha
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -1333,7 +1403,7 @@ def test_transformer_bm(end_time, std):
         # plt.clf()
         # plt.hist(data, bins=30, edgecolor='black')
         # plt.title('Histogram of brownian motion state diffs')
-        save_dir = '{}/{}'.format(std.cfg.figs_dir, std.cfg.model_name)
+        save_dir = '{}/{}'.format(std.HydraConfig.get().run.dir, std.cfg.model_name)
         # alpha = '%.1f' % std.likelihood.alpha.item()
         # plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         #     save_dir,
@@ -1400,7 +1470,7 @@ def viz_trajs(cfg, std, out_trajs, end_time):
             undiffed_trajs
         ], dim=1)
     for idx, out_traj in enumerate(out_trajs):
-        std.viz_trajs(out_traj, end_time, idx, cfg.figs_dir, clf=False)
+        std.viz_trajs(out_traj, end_time, idx, HydraConfig.get().run.dir, clf=False)
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
@@ -1463,7 +1533,8 @@ def sample(cfg):
         # viz_trajs(cfg, std, out_trajs, end_time)
 
         # TODO: Remove
-        # out_trajs = torch.zeros(1000, 2, 1)
+        # sample_trajs = torch.randn(20, 1000, 2, 1)
+        # out_trajs = sample_trajs[-1]
         test(end_time, cfg, out_trajs, std, sample_trajs)
         import pdb; pdb.set_trace()
 

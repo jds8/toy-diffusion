@@ -55,12 +55,14 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
             alpha: float,
             which_condition: LikelihoodCondition,
             gamma: float,
+            sampler=None,
     ):
         super().__init__(alpha)
         self.sigmas = torch.linspace(1., 0.001, 1000)
         self.dist = torch.distributions.Normal(alpha, self.sigmas)
         self.gamma = gamma
         self.which_condition = which_condition
+        self.sampler = sampler
 
     def set_alpha(self, alpha: torch.Tensor):
         self.alpha = alpha[:, 0]
@@ -81,6 +83,7 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
         else:
             raise NotImplementedError
 
+    # TODO: Remove
     def gaussian_approx_grad_log_lik(self, xt, t):
         # approximates the score function of the indicator,
         # which is a Dirac delta, as a sequence of Gaussians
@@ -94,13 +97,74 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
         # so the score function approximation is the gradient
         # of a LogSigmoid
         xt_norm = xt.norm(dim=[1, 2])
-        llk = torch.nn.LogSigmoid()(self.gamma * (xt_norm - self.alpha)).sum()
+        # gammas = torch.linspace(1., 10., 1000)
+        # idx = (t <= self.sigmas).nonzero().max()
+        # gamma = gammas[idx]
+        gamma = 0.8
+        llk = torch.nn.LogSigmoid()(gamma * (xt_norm - self.alpha)).sum()
         approx = torch.autograd.grad(llk, xt)[0]
         assert approx.shape == xt.shape
         return approx
 
+    # TODO: Remove
+    def gaussian_grad_log_lik(self, xt: torch.Tensor, t: float):
+        """
+        score function of likelihood
+        p(y_1, y_2|x_1 + x_2) = N(y_1, y_2; mu=x_1 + x_2, Sigma=2*torch.eye(2))
+        and we observe that y_1 = 3, y_2 = 3
+        Y = X_0 + 2W, so
+        E[Y] = E[X_0]+ 2E[W] = 0 + 0 = 0
+        Var[Y] = Var[X_0] + Var[2W] = I + 4I since X_0 and W are iid N(0, I)
+        let alpha = log_mean_coeff.exp(), beta = std with alpha ** 2 + beta ** 2 = 1
+        X_t = alpha * X_0 + beta * V, so
+        E[X_t] = alpha * E[X_0] + beta * E[V] = 0 + 0 = 0
+        Var[X_t] = alpha ** 2 * I + beta ** 2 * I since X_0 and V are iid N(0, I)
+                 = I since alpha ** 2 + beta ** 2 = 1
+        Cov[Y, X_t] = Cov[X_0 + 2W, alpha X_0 + beta V] = alpha Var[X_0] since X_0, W, V are iid
+                    = alpha * I
+        """
+        y_obs = 3.
+        y_var = 2.
+        with torch.no_grad():
+            _, log_mean_coeff, std = self.sampler.marginal_prob(
+                xt,
+                torch.tensor(t)
+            )
+            std_dev = std[0]
+            alpha = log_mean_coeff.exp()[0]
+            mu_x0 = torch.zeros(2, 1)
+            sigma_x0 = torch.eye(2)
+            # this means the observation y = 3 and
+            # marginal mean of xt
+            mu_xt = alpha * mu_x0
+            # marginal covariance of xt
+            # sigma_xt = (alpha ** 2 * sigma_x0 + std_dev ** 2) * torch.eye(2)
+            sigma_xt = torch.eye(2)
+            # marginal mean of y
+            mu_y = torch.tensor([[0], [0]])
+            sigma_y = sigma_x0 + y_var ** 2 * torch.eye(2)
+            sigma_y_xt = alpha * sigma_x0
+            sigma_xt_inv = sigma_xt.pinverse()
+            sigma_y_given_xt = sigma_y - torch.matmul(
+                sigma_y_xt,
+                torch.matmul(
+                    sigma_xt_inv,
+                    sigma_y_xt.T
+                )
+            )
+            mu_y_given_xt = mu_y + torch.matmul(
+                torch.matmul(
+                    sigma_y_xt,
+                    sigma_xt_inv,
+                ),
+                xt - mu_xt
+            )
+            score = torch.matmul(sigma_y_given_xt.pinverse(), mu_y_given_xt - y_obs)
+            return score
+
     def grad_log_lik(self, xt, t):
         return self.sigmoid_approx_grad_log_lik(xt, t)
+        # return self.gaussian_grad_log_lik(xt, t)
 
 
 class BrownianMotionDiffTailsLikelihood(Likelihood):

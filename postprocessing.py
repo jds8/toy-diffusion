@@ -10,6 +10,7 @@ import argparse
 import torch
 import hydra
 from hydra.core.config_store import ConfigStore
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 
 from toy_train_config import GaussianExampleConfig, MultivariateGaussianExampleConfig, BrownianMotionDiffExampleConfig, \
@@ -595,7 +596,7 @@ def make_performance_v_samples(cfg):
     """
     assert len(cfg.alphas) > 0 and len(cfg.samples) > 0
     for alpha in cfg.alphas:
-        directory = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
+        directory = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
 
         # collect all sample data for each round
         sample_data = [None] * cfg.total_rounds
@@ -636,7 +637,7 @@ def make_performance_v_samples(cfg):
 
         omega_cfg = OmegaConf.to_object(cfg)
         if not isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
-            true, _ = get_true_tail_prob(cfg.figs_dir, cfg.model_name, alpha)
+            true, _ = get_true_tail_prob(HydraConfig.get().run.dir, cfg.model_name, alpha)
             true = true.to('cpu')
         else:
             batch_size = 1690000
@@ -735,7 +736,7 @@ def make_performance_v_samples(cfg):
         ax2.plot((-d, +d), (1-d, 1+d), **kwargs)
         ax2.plot((-d, +d), (-d, +d), **kwargs)
 
-        directory = '{}/effort_v_performance'.format(cfg.figs_dir)
+        directory = '{}/effort_v_performance'.format(HydraConfig.get().run.dir)
         os.makedirs(directory, exist_ok=True)
         error_bar_file = '{}/{}.pdf'.format(
             directory,
