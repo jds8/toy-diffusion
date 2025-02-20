@@ -428,7 +428,9 @@ class ToyTrainer:
             dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
             d = self.cfg.example.d
-            if d == 8:
+            if d == 2:
+                dataset = torch.load('gaussian2.pt', map_location=device, weights_only=True)
+            elif d == 8:
                 dataset = torch.load('gaussian8.pt', map_location=device, weights_only=True)
             elif d == 64:
                 dataset = torch.load('gaussian64.pt', map_location=device, weights_only=True)
