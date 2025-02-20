@@ -3,6 +3,8 @@ import os
 import warnings
 import logging
 
+import time as timer
+import pandas as pd
 from pathlib import Path
 
 from collections import namedtuple
@@ -481,10 +483,14 @@ class ContinuousEvaluator(ToyEvaluator):
         return sample_out
 
     class ODELLKFunc(nn.Module):
+        NUM_SAMPLES = 'num_samples'
         def __init__(self, ce, x_shape, **kwargs):
             self.ce = ce
+            self.x_shape = x_shape
             self.kwargs = kwargs
-            self.v = torch.randint(2, x_shape) * 2 - 1
+            if self.NUM_SAMPLES not in kwargs:
+                self.kwargs[self.NUM_SAMPLES] = 1
+            # self.v = torch.randint(2, x_shape) * 2 - 1
             self.fevals = 0
             super().__init__()
 
@@ -493,27 +499,69 @@ class ContinuousEvaluator(ToyEvaluator):
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
                 dx_dt = self.ce.get_dx_dt(t, x, evaluate_likelihood=True, **self.kwargs)
-                grad = torch.autograd.grad((dx_dt * self.v).sum(), x)[0]
-                d_ll = (self.v * grad).sum([-1, -2])
+                d_ll = torch.zeros(x.shape[0])
+                for _ in range(self.kwargs[self.NUM_SAMPLES]):
+                    v = torch.randint(2, self.x_shape) * 2 - 1
+                    grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
+                    d_ll += (v * grad).sum([-1, -2]) / self.kwargs[self.NUM_SAMPLES]
             out = torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
+
+                # dx_dt = lambda y: self.ce.get_dx_dt(t, y, evaluate_likelihood=True, **self.kwargs)
+                # d_ll = torch.zeros(x.shape[0])
+                # for i in range(2):
+                #     unit_vec = torch.zeros_like(x)
+                #     unit_vec[:, i, 0] = 1.0
+                #     jvp = torch.autograd.functional.jvp(dx_dt, x, v=unit_vec)
+                #     d_ll += jvp[1][:, i, 0]
+            # out = torch.cat([jvp[0].reshape(-1), d_ll.reshape(-1)])
             return out
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
-        # hutchinson's trick
-        # if self.cfg.guidance == GuidanceType.ClassifierFree:
-        #     v = torch.randint_like(x.tile(2, 1, 1, 1), 2) * 2 - 1
-        # else:
-        #     v = torch.randint_like(x, 2) * 2 - 1
-        v = torch.randint_like(x, 2) * 2 - 1
+        if 'num_hutchinson_trace_samples' not in kwargs:
+            kwargs['num_hutchinson_trace_samples'] = 1
         fevals = 0
-        def ode_fn(t, x):
+        def exact_ode_fn(t, x):
             nonlocal fevals
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True, **kwargs)
+                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                d_ll = torch.zeros(x.shape[0])
+                for i in range(x.shape[1]):
+                    v = torch.zeros_like(x)
+                    v[:, i, 0] = 1.0
+                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+                    d_ll += (vjp * v).sum([-1, -2])
+                out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
+                return out
+        def hutchinson_ode_fn(t, x):
+            nonlocal fevals
+            fevals += 1
+            with torch.enable_grad():
+                x = x[0].detach().requires_grad_()
+                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                d_ll = torch.zeros(x.shape[0])
+                for _ in range(kwargs['num_hutchinson_trace_samples']):
+                    # hutchinson's trick
+                    v = torch.randint_like(x, 2) * 2 - 1
+                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+                    d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_trace_samples']
+                out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
+            return out
+
+                # for i in range(x.dim[1]):
+                #     unit_vec = torch.zeros_like(x)
+                #     unit_vec[:, i, 0] = 1.0
+                #     jvp = torch.autograd.functional.jvp(dx_dt, x, v=unit_vec)
+                #     d_ll += jvp[1][:, i, 0]
+
+                # x = x[0].detach().requires_grad_()
+                # dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True, **kwargs)
+                #
+                # top_dx = dx_dt.norm(dim=[1, 2]).topk(k=5)
+                # top_x = x[top_dx.indices]
                 # if self.cfg.guidance == GuidanceType.ClassifierFree:
                 #     grad_uncond = torch.autograd.grad(
                 #         (dx_dt[0] * v[0]).sum(),
@@ -528,11 +576,11 @@ class ContinuousEvaluator(ToyEvaluator):
                 #     dx_dt = dx_dt[1]  # update x according to conditional gradient
                 # else:
                 #     grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                top_dx = dx_dt.norm(dim=[1, 2]).topk(k=5)
-                top_x = x[top_dx.indices]
-                d_ll = (v * grad).sum([-1, -2])
-            return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
+                #
+                # grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
+                # d_ll = (v * grad).sum([-1, -2])
+            # out = torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
+            # return out
         # if self.cfg.guidance == GuidanceType.ClassifierFree:
         #     ll = x.new_zeros([2*x.shape[0]])
         # else:
@@ -546,6 +594,7 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x.device
         )
         # ode_fn = ContinuousEvaluator.ODELLKFunc(self, x.shape, **kwargs)
+        ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
         sol = odeint(
             ode_fn,
             x_min,
@@ -556,7 +605,7 @@ class ContinuousEvaluator(ToyEvaluator):
             # method='scipy_solver',
             # options={'solver': 'LSODA'},
         )
-        latent, delta_ll = sol[0][-1], sol[1][-1]
+        latent, delta_ll = sol[0][-1], sol[1]
         # if self.cfg.test == TestType.Gaussian:
         #     pseudo_example = self.cfg.example.copy()
         #     pseudo_example['mu'] = 0.
@@ -676,7 +725,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0].exp() / cfg.example.sigma
+    ode_lk = ode_llk[0][-1].exp() / cfg.example.sigma
     non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
@@ -703,7 +752,13 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     plt.savefig('{}/theta_hist.pdf'.format(cfg.figs_dir))
     plt.clf()
 
-def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
+def plot_rayleigh_from_sample_trajs(
+        cfg,
+        sample_trajs,
+        std,
+        ode_llk,
+        num_hutchinson_trace_samples
+):
     plt.clf()
     # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
     # sample_trajs = dd.sample([10*sample_trajs.shape[0], 1]).movedim(1,2)
@@ -783,7 +838,7 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.scatter(sample_levels, rayleigh_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/rayleigh_scatter.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/rayleigh_scatter_{}.pdf'.format(cfg.figs_dir, num_samples))
 
     plt.clf()
     trunc_idx = (ratios < 2).nonzero()
@@ -818,7 +873,7 @@ def generate_diffusion_video(ode_llk, all_trajs, cfg):
     def update(frame):
         # Update positions and colors for current frame
         scat.set_offsets(samples[frame, :, :2])
-        scat.set_array(ode_llk)
+        scat.set_array(ode_llk[frame])
         return scat,
     
     # Create animation
@@ -1031,20 +1086,54 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha.unsqueeze(-1))
-    non_nan_ode_lk = (ode_llk[0] - L.det().abs().log()).exp()
+    is_exact = False
+    num_hutchinson_trace_samples = 1
+    tm = timer.time()
+    ode_llk = std.ode_log_likelihood(
+        sample_trajs,
+        cond=cond,
+        alpha=alpha.unsqueeze(-1),
+        num_huthcinson_trace_samples=num_hutchinson_trace_samples,
+        exact=is_exact
+    )
+    eval_time = timer.time() - tm
+    print(f'\node eval time (is_exact: {is_exact}): {eval_time}')
+    non_nan_ode_lk = (ode_llk[0][-1] - L.det().abs().log()).exp()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
 
     avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
+    headers = [
+        'Avg. Rel. Error',
+        'Time',
+        'Model',
+        'Diffusion Timesteps',
+        'is_exact',
+        'num hutchinson trace samples'
+    ]
+    data = [[
+        avg_rel_error.numpy(),
+        eval_time,
+        cfg.model_name,
+        cfg.sampler.diffusion_timesteps,
+        is_exact,
+        num_hutchinson_trace_samples if not is_exact else 0
+    ]]
+    df = pd.DataFrame(data, columns=headers)
+    df.to_csv(
+        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}_exact?_{is_exact}_HK_samples_{num_hutchinson_trace_samples}.csv',
+        index=False
+    )
+
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
 
     if cfg.example.d == 2:
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1],
+                                        num_hutchinson_trace_samples=1)
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
-        plot_likelihood_heat_maps(ode_llk[0], sample_trajs, cfg)
+        plot_likelihood_heat_maps(ode_llk[0][-1], sample_trajs, cfg)
     print(f'\nmin norm: {sample_trajs.norm(dim=[1, 2]).min()}\n')
     import pdb; pdb.set_trace()
 
@@ -1141,7 +1230,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    scaled_ode_llk = ode_llk[0][-1] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
@@ -1169,7 +1258,7 @@ def test_uniform(end_time, cfg, sample_trajs, std):
     # derivative of sigmoid inverse is derivative of logit
     std_unif_traj = (traj - cfg.example.lower) / (cfg.example.upper - cfg.example.lower)
     logit_derivative = 1 / (std_unif_traj * (1 - std_unif_traj))
-    ode_lk = ode_llk[0].exp() * logit_derivative.squeeze() / (scale * (cfg.example.upper - cfg.example.lower))
+    ode_lk = ode_llk[0][-1].exp() * logit_derivative.squeeze() / (scale * (cfg.example.upper - cfg.example.lower))
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(
         a_lk,
@@ -1219,7 +1308,7 @@ def test_student_t(end_time, cfg, sample_trajs, std):
     a_lk = analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(a_lk))
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0].exp() / sigma
+    ode_lk = ode_llk[0][-1].exp() / sigma
     print('\node_llk: {}\node evals: {}'.format(ode_lk, ode_llk[1]))
     mse_llk = torch.nn.MSELoss()(
         a_lk,
@@ -1300,7 +1389,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    scaled_ode_llk = ode_llk[0][-1] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
