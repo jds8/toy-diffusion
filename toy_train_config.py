@@ -31,6 +31,7 @@ class GaussianExampleConfig(ExampleConfig):
     def name(self):
         return 'GaussianExampleConfig'
 
+
 @dataclass
 class MultivariateGaussianExampleConfig(ExampleConfig):
     d: int = 1
@@ -169,10 +170,11 @@ class IntegratorType(Enum):
 class SampleConfig(BaseConfig):
     num_samples: int = 100
     cond: Optional[float] = None
-    figs_dir: str = 'figs'
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+    compute_exact_trace: bool = False
+    num_hutchinson_samples: int = 1
 
 
 @dataclass

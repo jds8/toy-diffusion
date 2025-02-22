@@ -9,6 +9,7 @@ from collections import namedtuple
 
 import hydra
 from hydra.core.config_store import ConfigStore
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 import torch
 
@@ -176,7 +177,7 @@ def importance_sample(cfg):
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
 
-        save_dir = '{}/{}'.format(cfg.figs_dir, cfg.model_name)
+        save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
         os.makedirs(save_dir, exist_ok=True)
 
         # get alpha level
