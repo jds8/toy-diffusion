@@ -304,12 +304,12 @@ class ContinuousEvaluator(ToyEvaluator):
                             )
                     else:
                         grad_log_lik = torch.tensor(0.)
-                    cond_sf_est = self.sampler.get_classifier_guided_sf_estimator(
-                        xt=x.reshape(unconditional_output.shape),
-                        unconditional_output=unconditional_output,
-                        t=t.item(),
-                        cond_score=grad_log_lik
+                    uncond_sf_est = self.sampler.get_sf_estimator(
+                        unconditional_output,
+                        xt=x.to(device),
+                        t=t.to(device)
                     )
+                    cond_sf_est = uncond_sf_est + grad_log_lik
                     return cond_sf_est
                 elif self.cfg.guidance == GuidanceType.NoGuidance:
                     uncond_sf_est = self.sampler.get_sf_estimator(

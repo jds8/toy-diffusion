@@ -380,17 +380,6 @@ class VPSDEVelocitySampler(VPSDESampler):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=x0, t=t)
         return log_mean_coeff.exp() * eps - sigma_t * x0
 
-    def get_unconditional_eps(
-        self,
-        xt,
-        unconditional_output,
-        t,
-    ):
-        # _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=torch.tensor(t))
-        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
-        alpha_t = log_mean_coeff.exp()
-        return sigma_t * xt + alpha_t * unconditional_output, alpha_t, sigma_t
-
     def get_classifier_free_sf_estimator(
         self,
         xt,
@@ -398,30 +387,12 @@ class VPSDEVelocitySampler(VPSDESampler):
         t,
         conditional_output
     ):
-        unconditional_eps, alpha_t, sigma_t = self.get_unconditional_eps(
-            xt,
-            unconditional_output,
-            t
-        )
+        _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
+        alpha_t = log_mean_coeff.exp()
+        unconditional_eps = sigma_t * xt + alpha_t * unconditional_output
         conditional_eps = sigma_t * xt + alpha_t * conditional_output
         eps_pred = self.combine_eps(unconditional_eps, conditional_eps)
         return -eps_pred / sigma_t
-
-    def get_classifier_guided_sf_estimator(
-        self,
-        xt,
-        unconditional_output,
-        t,
-        cond_score,
-    ):
-        unconditional_eps, _, sigma_t = self.get_unconditional_eps(
-            xt,
-            unconditional_output,
-            torch.tensor(t)
-        )
-        uncond_score = -unconditional_eps / sigma_t
-        total_score = uncond_score + cond_score
-        return total_score
 
     def get_sf_estimator(self, v_pred, xt, t):
         _, log_mean_coeff, sigma_t = self.marginal_prob(x=xt, t=t)
