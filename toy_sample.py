@@ -519,8 +519,8 @@ class ContinuousEvaluator(ToyEvaluator):
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
-        if 'num_hutchinson_trace_samples' not in kwargs:
-            kwargs['num_hutchinson_trace_samples'] = 1
+        if 'num_hutchinson_samples' not in kwargs:
+            kwargs['num_hutchinson_samples'] = 1
         fevals = 0
         def exact_ode_fn(t, x):
             nonlocal fevals
@@ -543,11 +543,11 @@ class ContinuousEvaluator(ToyEvaluator):
                 x = x[0].detach().requires_grad_()
                 dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
                 d_ll = torch.zeros(x.shape[0])
-                for _ in range(kwargs['num_hutchinson_trace_samples']):
+                for _ in range(kwargs['num_hutchinson_samples']):
                     # hutchinson's trick
                     v = torch.randint_like(x, 2) * 2 - 1
                     dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
-                    d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_trace_samples']
+                    d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_samples']
                 out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
             return out
 
@@ -752,12 +752,57 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     plt.savefig('{}/theta_hist.pdf'.format(cfg.figs_dir))
     plt.clf()
 
+def plot_chi_from_sample_trajs(
+        cfg,
+        sample_trajs,
+        std,
+        ode_llk,
+):
+    plt.clf()
+    # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
+    # sample_trajs = dd.sample([10*sample_trajs.shape[0], 1]).movedim(1,2)
+    # sample_trajs = sample_trajs[(sample_trajs.norm(dim=[1,2]) > std.likelihood.alpha.sqrt())]
+    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    num_bins = sample_trajs.shape[0] // 10
+    plt.hist(
+        sample_levels.numpy(),
+        bins=num_bins,
+        edgecolor='black',
+        density=True
+    )
+
+    # Plot analytical Chi distribution using scipy
+    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf = stats.chi(cfg.example.d).pdf(x) / (1 - stats.chi(cfg.example.d).cdf(alpha))
+        # Zero out values below alpha
+        pdf[x < alpha] = 0
+    else:
+        pdf = stats.chi(cfg.example.d).pdf(x)
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/chi_hist.pdf'.format(cfg.figs_dir))
+
+    # plot points (ode_llk, sample_trajs) against analytical chi
+    plt.clf()
+    chi_ode_lk = ode_llk.exp() * torch.tensor(2 * np.pi) ** (cfg.example.d / 2) * \
+                 sample_levels ** (cfg.example.d - 1) / \
+                 torch.tensor(2.) ** (cfg.example.d / 2 - 1) / \
+                 scipy.special.gamma(cfg.example.d / 2)
+
+    plt.clf()
+    plt.scatter(sample_levels, chi_ode_lk, label='Density Estimates')
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/chi_scatter_{}.pdf'.format(cfg.figs_dir, cfg.num_hutchinson_samples))
+
 def plot_rayleigh_from_sample_trajs(
         cfg,
         sample_trajs,
         std,
         ode_llk,
-        num_hutchinson_trace_samples
 ):
     plt.clf()
     # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
@@ -774,7 +819,7 @@ def plot_rayleigh_from_sample_trajs(
 
     # Plot analytical Rayleigh distribution using scipy
     x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
-    alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
         pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
@@ -820,25 +865,10 @@ def plot_rayleigh_from_sample_trajs(
     plt.savefig('{}/rayleigh_variances.pdf'.format(cfg.figs_dir))
 
     plt.clf()
-    gamma = std.likelihood.gamma
-    # plot sigmoid-adjusted conditional distribution
-    if alpha > 0:
-        sigmoid = torch.sigmoid(gamma * (torch.tensor(x) - alpha))
-        # plot sigmoid function as approximation to indicator
-        plt.plot(x, sigmoid, label=f'Sigmoid({gamma} * (x-{alpha}))', color='violet')
-
-        # For unnormalized conditional distribution
-        unnormed_pdf = stats.rayleigh.pdf(x) * sigmoid.numpy()
-        # trapezoid integration
-        normalization_factor = scipy.integrate.trapezoid(y=unnormed_pdf, x=x)
-        # normalized conditional
-        normed_pdf = unnormed_pdf / normalization_factor
-        plt.plot(x, normed_pdf, label='Sigmoid-Adjusted PDF', color='orange')
-
     plt.scatter(sample_levels, rayleigh_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/rayleigh_scatter_{}.pdf'.format(cfg.figs_dir, num_samples))
+    plt.savefig('{}/rayleigh_scatter_{}.pdf'.format(cfg.figs_dir, cfg.num_hutchinson_samples))
 
     plt.clf()
     trunc_idx = (ratios < 2).nonzero()
@@ -1004,6 +1034,7 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.close()
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
+    torch.save(sample_trajs, f'{cfg.figs_dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
@@ -1086,24 +1117,24 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
-    is_exact = False
-    num_hutchinson_trace_samples = 1
+    cfg.num_hutchinson_samples = 1
     tm = timer.time()
     ode_llk = std.ode_log_likelihood(
         sample_trajs,
         cond=cond,
         alpha=alpha.unsqueeze(-1),
-        num_huthcinson_trace_samples=num_hutchinson_trace_samples,
-        exact=is_exact
+        num_huthcinson_trace_samples=cfg.num_hutchinson_samples,
+        exact=cfg.compute_exact_trace
     )
     eval_time = timer.time() - tm
-    print(f'\node eval time (is_exact: {is_exact}): {eval_time}')
+    print(f'\node eval time (is_exact: {cfg.compute_exact_trace}): {eval_time}')
     non_nan_ode_lk = (ode_llk[0][-1] - L.det().abs().log()).exp()
     print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
 
     avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
+    torch.save(ode_llk[0], f'{cfg.figs_dir}/{cfg.example.d}_dim_ode_llk.pt')
     headers = [
         'Avg. Rel. Error',
         'Time',
@@ -1117,12 +1148,14 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         eval_time,
         cfg.model_name,
         cfg.sampler.diffusion_timesteps,
-        is_exact,
-        num_hutchinson_trace_samples if not is_exact else 0
+        cfg.compute_exact_trace,
+        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
     ]]
     df = pd.DataFrame(data, columns=headers)
     df.to_csv(
-        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}_exact?_{is_exact}_HK_samples_{num_hutchinson_trace_samples}.csv',
+        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}' \
+        f'_exact?_{cfg.compute_exact_exact}_HK_samples_' \
+        f'{cfg.num_hutchinson_samples}.csv',
         index=False
     )
 
@@ -1130,8 +1163,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
 
     if cfg.example.d == 2:
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1],
-                                        num_hutchinson_trace_samples=1)
+        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
         plot_likelihood_heat_maps(ode_llk[0][-1], sample_trajs, cfg)
     print(f'\nmin norm: {sample_trajs.norm(dim=[1, 2]).min()}\n')

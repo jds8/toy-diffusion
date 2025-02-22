@@ -176,6 +176,8 @@ class SampleConfig(BaseConfig):
     guidance: GuidanceType = GuidanceType.NoGuidance
     test: TestType = TestType.Test
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
+    compute_exact_trace: bool = False
+    num_hutchinson_samples: int = 1
 
 
 @dataclass
