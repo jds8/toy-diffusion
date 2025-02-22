@@ -135,13 +135,11 @@ def get_model_path(cfg: TrainConfig, dim: int):
         sampler_name = cfg_obj.sampler.name()
         diffusion_name = cfg_obj.diffusion.name()
         example_name = cfg_obj.example.name()
-        lik_name = cfg_obj.likelihood.name()
-        model_name = "{}_{}_dim_{}_{}_{}".format(
+        model_name = "{}_{}_dim_{}_{}".format(
             sampler_name,
             diffusion_name,
             dim,
             example_name,
-            lik_name,
         )
     return get_path(cfg, model_name)
 

@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import scipy
 
-from torchdiffeq import odeint, odeint_adjoint
+from torchdiffeq import odeint
 
 from toy_plot import SDE, analytical_log_likelihood, plot_ode_trajectories
 from toy_configs import register_configs
@@ -416,20 +416,6 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps)
 
-    class ODESampleFunc(nn.Module):
-        def __init__(self, ce, **kwargs):
-            self.ce = ce
-            self.kwargs = kwargs
-            self.fevals = 0
-            super().__init__()
-
-        def forward(self, t, x):
-            self.fevals += 1
-            if 'observed_idx' in self.kwargs:
-                x[:, self.kwargs['observed_idx']] = self.kwargs['observed_values']
-            dx_dt = self.ce.get_dx_dt(t, x, evaluate_likelihood=False, **self.kwargs)
-            return dx_dt
-
     def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5, **kwargs):
         x_min = self.get_x_min()
 
@@ -448,7 +434,6 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x_min.device
         )
-        # ode_fn = ContinuousEvaluator.ODESampleFunc(self, **kwargs)
         sol = odeint(
             ode_fn,
             x_min,
@@ -456,19 +441,7 @@ class ContinuousEvaluator(ToyEvaluator):
             atol=atol,
             rtol=rtol,
             method='rk4',
-            # method='scipy_solver',
-            # options={'solver': 'LSODA'},
         )
-        # import matplotlib.pyplot as plt
-        # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
-        # bm_trajs = torch.cat([
-        #     torch.zeros(sol.shape[0], sol.shape[1], 1, 1, device=sol.device),
-        #     (sol * dt.sqrt()).cumsum(dim=-2)
-        # ], dim=2)
-        # plt.plot(torch.arange(104), bm_trajs[-10].squeeze().cpu(), color='blue')
-        # gt = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
-        # plt.plot(torch.arange(104), gt[0].squeeze().cpu(), color='red')
-        # plt.show()
 
         return SampleOutput(samples=sol, fevals=fevals)
 
@@ -481,40 +454,6 @@ class ContinuousEvaluator(ToyEvaluator):
         else:
             raise NotImplementedError
         return sample_out
-
-    class ODELLKFunc(nn.Module):
-        NUM_SAMPLES = 'num_samples'
-        def __init__(self, ce, x_shape, **kwargs):
-            self.ce = ce
-            self.x_shape = x_shape
-            self.kwargs = kwargs
-            if self.NUM_SAMPLES not in kwargs:
-                self.kwargs[self.NUM_SAMPLES] = 1
-            # self.v = torch.randint(2, x_shape) * 2 - 1
-            self.fevals = 0
-            super().__init__()
-
-        def forward(self, t, x):
-            self.fevals += 1
-            with torch.enable_grad():
-                x = x[0].detach().requires_grad_()
-                dx_dt = self.ce.get_dx_dt(t, x, evaluate_likelihood=True, **self.kwargs)
-                d_ll = torch.zeros(x.shape[0])
-                for _ in range(self.kwargs[self.NUM_SAMPLES]):
-                    v = torch.randint(2, self.x_shape) * 2 - 1
-                    grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                    d_ll += (v * grad).sum([-1, -2]) / self.kwargs[self.NUM_SAMPLES]
-            out = torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
-
-                # dx_dt = lambda y: self.ce.get_dx_dt(t, y, evaluate_likelihood=True, **self.kwargs)
-                # d_ll = torch.zeros(x.shape[0])
-                # for i in range(2):
-                #     unit_vec = torch.zeros_like(x)
-                #     unit_vec[:, i, 0] = 1.0
-                #     jvp = torch.autograd.functional.jvp(dx_dt, x, v=unit_vec)
-                #     d_ll += jvp[1][:, i, 0]
-            # out = torch.cat([jvp[0].reshape(-1), d_ll.reshape(-1)])
-            return out
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
@@ -550,41 +489,6 @@ class ContinuousEvaluator(ToyEvaluator):
                     d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_samples']
                 out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
             return out
-
-                # for i in range(x.dim[1]):
-                #     unit_vec = torch.zeros_like(x)
-                #     unit_vec[:, i, 0] = 1.0
-                #     jvp = torch.autograd.functional.jvp(dx_dt, x, v=unit_vec)
-                #     d_ll += jvp[1][:, i, 0]
-
-                # x = x[0].detach().requires_grad_()
-                # dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True, **kwargs)
-                #
-                # top_dx = dx_dt.norm(dim=[1, 2]).topk(k=5)
-                # top_x = x[top_dx.indices]
-                # if self.cfg.guidance == GuidanceType.ClassifierFree:
-                #     grad_uncond = torch.autograd.grad(
-                #         (dx_dt[0] * v[0]).sum(),
-                #         x,
-                #         retain_graph=True
-                #     )[0]
-                #     grad_cond = torch.autograd.grad(
-                #         (dx_dt[1] * v[1]).sum(),
-                #         x
-                #     )[0]
-                #     grad = torch.stack([grad_uncond, grad_cond])
-                #     dx_dt = dx_dt[1]  # update x according to conditional gradient
-                # else:
-                #     grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                #
-                # grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                # d_ll = (v * grad).sum([-1, -2])
-            # out = torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
-            # return out
-        # if self.cfg.guidance == GuidanceType.ClassifierFree:
-        #     ll = x.new_zeros([2*x.shape[0]])
-        # else:
-        #     ll = x.new_zeros([x.shape[0]])
         ll = x.new_zeros([x.shape[0]])
         x_min = x, ll
         times = torch.linspace(
@@ -593,7 +497,6 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x.device
         )
-        # ode_fn = ContinuousEvaluator.ODELLKFunc(self, x.shape, **kwargs)
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
         sol = odeint(
             ode_fn,
@@ -602,28 +505,9 @@ class ContinuousEvaluator(ToyEvaluator):
             atol=atol,
             rtol=rtol,
             method='rk4',
-            # method='scipy_solver',
-            # options={'solver': 'LSODA'},
         )
         latent, delta_ll = sol[0][-1], sol[1]
-        # if self.cfg.test == TestType.Gaussian:
-        #     pseudo_example = self.cfg.example.copy()
-        #     pseudo_example['mu'] = 0.
-        #     pseudo_example['sigma'] = 1.
-        #     ll_prior = self.sampler.prior_analytic_logp(
-        #         # self.cfg.example,
-        #         pseudo_example,
-        #         device,
-        #         latent,
-        #     ).flatten(1).sum(1)
-        # else:
-        #     ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
         ll_prior = self.sampler.prior_logp(latent, device=device).flatten(1).sum(1)
-        # compute log(p(0)) = log(p(T)) + \int_0^T Tr(df(x,t)/dx)dt where dx/dt = f
-        # if self.cfg.guidance == GuidanceType.ClassifierFree:
-        #     ll_output = ll_prior.repeat(2) + delta_ll
-        # else:
-        #     ll_output = ll_prior + delta_ll
         ll_output = ll_prior + delta_ll
         return ll_output, {'fevals': fevals}
 
@@ -1033,6 +917,66 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps_with_points.pdf')
     plt.close()
 
+    def plot_ellipsoid_scatter(cfg, mu, sigma, sample_levels, traj):
+        # Find the largest level curve value for the samples
+        max_level = sample_levels.max().ceil().item()
+        levels = torch.arange(0, max_level + 1)
+
+        # Calculate the radius needed to contain the largest level curve
+        # For a given level value k, points (x,y) on the curve satisfy:
+        # (x-μ)^T Σ^(-1) (x-μ) = k
+        # For a 2D Gaussian, this forms an ellipse
+        # Get eigenvalues of covariance matrix to find major/minor axes
+        eigenvals = torch.linalg.eigvalsh(sigma)
+        # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
+        max_radius = torch.sqrt(max_level * eigenvals.max())
+
+        # Add buffer and round up to nearest integer
+        buffer = 2
+        plot_radius = torch.ceil(max_radius + buffer).item()
+
+        # Calculate plot limits centered on mean
+        x_min = mu[0].item() - plot_radius
+        x_max = mu[0].item() + plot_radius
+        y_min = mu[1].item() - plot_radius
+        y_max = mu[1].item() + plot_radius
+
+        # Generate grid points
+        x = torch.linspace(x_min, x_max, 500)
+        y = torch.linspace(y_min, y_max, 500)
+        X, Y = torch.meshgrid(x, y, indexing="ij")
+        points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
+
+        # Compute the quadratic form (x - mean)^T P (x - mean)
+        diff = points - mu[:2, 0]
+        precision_matrix = sigma.pinverse()[:2, :2]
+        Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
+
+        # Convert to NumPy for plotting
+        Z = Z.numpy()
+
+        # Plot the level curves
+        plt.figure(figsize=(8, 6))
+        contour = plt.contour(
+            X.numpy(),
+            Y.numpy(),
+            Z,
+            levels=levels,
+            colors='red'
+        )
+        plt.clabel(contour, inline=True, fontsize=8)
+
+        # Add labels, title, and styling
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.title('Level Curves of Gaussian and Diffusion Samples')
+        plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
+        plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
+        plt.grid(alpha=0.3)
+        plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
+        plt.scatter(traj[:, 0], traj[:, 1], color='blue')
+        plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
+
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     torch.save(sample_trajs, f'{cfg.figs_dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
@@ -1052,64 +996,6 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     L = torch.linalg.cholesky(sigma)
     traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
 
-    # Find the largest level curve value for the samples
-    max_level = sample_levels.max().ceil().item()
-    levels = torch.arange(0, max_level + 1)
-
-    # Calculate the radius needed to contain the largest level curve
-    # For a given level value k, points (x,y) on the curve satisfy:
-    # (x-μ)^T Σ^(-1) (x-μ) = k
-    # For a 2D Gaussian, this forms an ellipse
-    # Get eigenvalues of covariance matrix to find major/minor axes
-    eigenvals = torch.linalg.eigvalsh(sigma)
-    # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
-    max_radius = torch.sqrt(max_level * eigenvals.max())
-    
-    # Add buffer and round up to nearest integer
-    buffer = 2
-    plot_radius = torch.ceil(max_radius + buffer).item()
-    
-    # Calculate plot limits centered on mean
-    x_min = mu[0].item() - plot_radius
-    x_max = mu[0].item() + plot_radius
-    y_min = mu[1].item() - plot_radius 
-    y_max = mu[1].item() + plot_radius
-
-    # Generate grid points
-    x = torch.linspace(x_min, x_max, 500)
-    y = torch.linspace(y_min, y_max, 500)
-    X, Y = torch.meshgrid(x, y, indexing="ij")
-    points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
-
-    # Compute the quadratic form (x - mean)^T P (x - mean)
-    diff = points - mu[:2, 0]
-    precision_matrix = sigma.pinverse()[:2, :2]
-    Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
-
-    # Convert to NumPy for plotting
-    Z = Z.numpy()
-
-    # Plot the level curves
-    plt.figure(figsize=(8, 6))
-    contour = plt.contour(
-        X.numpy(),
-        Y.numpy(),
-        Z,
-        levels=levels,
-        colors='red'
-    )
-    plt.clabel(contour, inline=True, fontsize=8)
-
-    # Add labels, title, and styling
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('Level Curves of Gaussian and Diffusion Samples')
-    plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
-    plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
-    plt.grid(alpha=0.3)
-    plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
-    plt.scatter(traj[:, 0], traj[:, 1], color='blue')
-
     datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
     # alpha == r^2 as indicated by how the `exited` variable is defined
     # at the top of this function
@@ -1117,7 +1003,6 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
     print('analytical_llk: {}'.format(non_nan_a_lk))
-    cfg.num_hutchinson_samples = 1
     tm = timer.time()
     ode_llk = std.ode_log_likelihood(
         sample_trajs,
@@ -1154,19 +1039,18 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     df = pd.DataFrame(data, columns=headers)
     df.to_csv(
         f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}' \
-        f'_exact?_{cfg.compute_exact_exact}_HK_samples_' \
+        f'_exact?_{cfg.compute_exact_trace}_HK_samples_' \
         f'{cfg.num_hutchinson_samples}.csv',
         index=False
     )
 
-    plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
-
+    plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
     if cfg.example.d == 2:
+        plot_ellipsoid_scatter(sample_levels, traj)
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
         plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
         plot_likelihood_heat_maps(ode_llk[0][-1], sample_trajs, cfg)
-    print(f'\nmin norm: {sample_trajs.norm(dim=[1, 2]).min()}\n')
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
@@ -1562,20 +1446,11 @@ def sample(cfg):
         # )
 
         # TODO: delete comments
-        # guidance = GuidanceType.NoGuidance
-        # if std.cond == 1:
-        #     guidance = GuidanceType.ClassifierFree
-        # old_guidance = std.set_guidance(guidance)
         sample_traj_out = std.sample_trajectories(
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
         )
-        # std.set_guidance(old_guidance)
 
-        # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
-        # plot_ode_trajectories(ode_trajs)
-
-        # TODO: uncomment
         print('fevals: {}'.format(sample_traj_out.fevals))
         sample_trajs = sample_traj_out.samples
         trajs = sample_trajs[-1]
@@ -1583,8 +1458,6 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        # TODO: Remove
-        # out_trajs = torch.zeros(1000, 2, 1)
         test(end_time, cfg, out_trajs, std, sample_trajs)
         import pdb; pdb.set_trace()
 

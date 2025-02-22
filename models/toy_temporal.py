@@ -625,7 +625,7 @@ class TemporalUnetAlpha(nn.Module):
             cond_in = torch.ones(t.shape[0], 1, device=x.device) * -1
         cemb = self.cond_mlp(cond_in).reshape(cond_in.shape[0], -1)
 
-        use_cond = (cond_in > 0.).to(torch.float).reshape(cond_in.shape)
+        use_cond = (cond_in >= 0.).to(torch.float).reshape(cond_in.shape)
         bool_emb = self.bool_mlp(use_cond).reshape(cemb.shape)
 
         alpha_in = alpha

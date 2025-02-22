@@ -2,7 +2,7 @@
 
 import torch
 import numpy as np
-from toy_likelihood_configs import DistanceFunction, LikelihoodCondition
+from toy_likelihood_configs import DistanceFunction
 
 from models.toy_temporal import NewTemporalClassifier
 from models.toy_sampler import get_beta_schedule
@@ -50,56 +50,11 @@ class GaussianTailsLikelihood(Likelihood):
 
 
 class MultivariateGaussianTailsLikelihood(Likelihood):
-    def __init__(
-            self,
-            alpha: float,
-            which_condition: LikelihoodCondition,
-    ):
-        super().__init__(alpha)
-        self.sigmas = torch.linspace(1., 0.001, 1000)
-        self.dist = torch.distributions.Normal(alpha, self.sigmas)
-        self.gamma = 1
-        self.which_condition = which_condition
-
     def set_alpha(self, alpha: torch.Tensor):
         self.alpha = alpha[:, 0]
 
-    def get_hard_condition(self, _, x0):
+    def get_condition(self, _, x0):
         return (x0.norm(dim=1) > self.alpha).to(torch.float)
-
-    def get_soft_condition(self, _, x0):
-        x0_norm = x0.norm(dim=1)
-        soft_cond = torch.sigmoid(self.gamma * (x0_norm - self.alpha))
-        return soft_cond
-
-    def get_condition(self, x0_raw, x0):
-        if self.which_condition == LikelihoodCondition.Hard:
-            return self.get_hard_condition(x0_raw, x0)
-        elif self.which_condition == LikelihoodCondition.Soft:
-            return self.get_soft_condition(x0_raw, x0)
-        else:
-            raise NotImplementedError
-
-    def gaussian_approx_grad_log_lik(self, xt, t):
-        # approximates the score function of the indicator,
-        # which is a Dirac delta, as a sequence of Gaussians
-        idx = (t <= self.sigmas).nonzero().max()
-        xt_norm = xt.norm(dim=[1, 2])
-        approx = self.dist.log_prob(xt_norm).exp()[idx]
-        return approx
-
-    def sigmoid_approx_grad_log_lik(self, xt, t):
-        # approximates the indicator function as a sigmoid,
-        # so the score function approximation is the gradient
-        # of a LogSigmoid
-        xt_norm = xt.norm(dim=[1, 2])
-        llk = torch.nn.LogSigmoid()(self.gamma * (xt_norm - self.alpha)).sum()
-        approx = torch.autograd.grad(llk, xt)[0]
-        assert approx.shape == xt.shape
-        return approx
-
-    def grad_log_lik(self, xt, t):
-        return self.sigmoid_approx_grad_log_lik(xt, t)
 
 
 class BrownianMotionDiffTailsLikelihood(Likelihood):
