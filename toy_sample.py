@@ -917,65 +917,65 @@ def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
     plt.savefig(f'{cfg.figs_dir}/likelihood_heatmaps_with_points.pdf')
     plt.close()
 
-    def plot_ellipsoid_scatter(cfg, mu, sigma, sample_levels, traj):
-        # Find the largest level curve value for the samples
-        max_level = sample_levels.max().ceil().item()
-        levels = torch.arange(0, max_level + 1)
+def plot_ellipsoid_scatter(cfg, mu, sigma, sample_levels, traj):
+    # Find the largest level curve value for the samples
+    max_level = sample_levels.max().ceil().item()
+    levels = torch.arange(0, max_level + 1)
 
-        # Calculate the radius needed to contain the largest level curve
-        # For a given level value k, points (x,y) on the curve satisfy:
-        # (x-μ)^T Σ^(-1) (x-μ) = k
-        # For a 2D Gaussian, this forms an ellipse
-        # Get eigenvalues of covariance matrix to find major/minor axes
-        eigenvals = torch.linalg.eigvalsh(sigma)
-        # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
-        max_radius = torch.sqrt(max_level * eigenvals.max())
+    # Calculate the radius needed to contain the largest level curve
+    # For a given level value k, points (x,y) on the curve satisfy:
+    # (x-μ)^T Σ^(-1) (x-μ) = k
+    # For a 2D Gaussian, this forms an ellipse
+    # Get eigenvalues of covariance matrix to find major/minor axes
+    eigenvals = torch.linalg.eigvalsh(sigma)
+    # Maximum distance from mean = sqrt(max_level * largest_eigenvalue)
+    max_radius = torch.sqrt(max_level * eigenvals.max())
 
-        # Add buffer and round up to nearest integer
-        buffer = 2
-        plot_radius = torch.ceil(max_radius + buffer).item()
+    # Add buffer and round up to nearest integer
+    buffer = 2
+    plot_radius = torch.ceil(max_radius + buffer).item()
 
-        # Calculate plot limits centered on mean
-        x_min = mu[0].item() - plot_radius
-        x_max = mu[0].item() + plot_radius
-        y_min = mu[1].item() - plot_radius
-        y_max = mu[1].item() + plot_radius
+    # Calculate plot limits centered on mean
+    x_min = mu[0].item() - plot_radius
+    x_max = mu[0].item() + plot_radius
+    y_min = mu[1].item() - plot_radius
+    y_max = mu[1].item() + plot_radius
 
-        # Generate grid points
-        x = torch.linspace(x_min, x_max, 500)
-        y = torch.linspace(y_min, y_max, 500)
-        X, Y = torch.meshgrid(x, y, indexing="ij")
-        points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
+    # Generate grid points
+    x = torch.linspace(x_min, x_max, 500)
+    y = torch.linspace(y_min, y_max, 500)
+    X, Y = torch.meshgrid(x, y, indexing="ij")
+    points = torch.stack([X, Y], dim=-1)  # Shape: (500, 500, 2)
 
-        # Compute the quadratic form (x - mean)^T P (x - mean)
-        diff = points - mu[:2, 0]
-        precision_matrix = sigma.pinverse()[:2, :2]
-        Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
+    # Compute the quadratic form (x - mean)^T P (x - mean)
+    diff = points - mu[:2, 0]
+    precision_matrix = sigma.pinverse()[:2, :2]
+    Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
 
-        # Convert to NumPy for plotting
-        Z = Z.numpy()
+    # Convert to NumPy for plotting
+    Z = Z.numpy()
 
-        # Plot the level curves
-        plt.figure(figsize=(8, 6))
-        contour = plt.contour(
-            X.numpy(),
-            Y.numpy(),
-            Z,
-            levels=levels,
-            colors='red'
-        )
-        plt.clabel(contour, inline=True, fontsize=8)
+    # Plot the level curves
+    plt.figure(figsize=(8, 6))
+    contour = plt.contour(
+        X.numpy(),
+        Y.numpy(),
+        Z,
+        levels=levels,
+        colors='red'
+    )
+    plt.clabel(contour, inline=True, fontsize=8)
 
-        # Add labels, title, and styling
-        plt.xlabel('x')
-        plt.ylabel('y')
-        plt.title('Level Curves of Gaussian and Diffusion Samples')
-        plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
-        plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
-        plt.grid(alpha=0.3)
-        plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
-        plt.scatter(traj[:, 0], traj[:, 1], color='blue')
-        plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
+    # Add labels, title, and styling
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Level Curves of Gaussian and Diffusion Samples')
+    plt.axhline(0, color='black', linewidth=0.5, linestyle='--')  # x-axis
+    plt.axvline(0, color='black', linewidth=0.5, linestyle='--')  # y-axis
+    plt.grid(alpha=0.3)
+    plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
+    plt.scatter(traj[:, 0], traj[:, 1], color='blue')
+    plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     torch.save(sample_trajs, f'{cfg.figs_dir}/{cfg.example.d}_dim_sample_trajs.pt')
@@ -1001,8 +1001,8 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     # at the top of this function
     tail = torch.exp(-alpha / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
-    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_lk))
+    non_nan_a_llk = non_nan_analytical_llk.squeeze()
+    print('analytical_llk: {}'.format(non_nan_a_llk))
     tm = timer.time()
     ode_llk = std.ode_log_likelihood(
         sample_trajs,
@@ -1013,10 +1013,10 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     )
     eval_time = timer.time() - tm
     print(f'\node eval time (is_exact: {cfg.compute_exact_trace}): {eval_time}')
-    non_nan_ode_lk = (ode_llk[0][-1] - L.det().abs().log()).exp()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
+    non_nan_ode_llk = ode_llk[0][-1] - L.det().abs().log()
+    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_llk, ode_llk[1]))
 
-    avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
+    avg_rel_error = torch.expm1(non_nan_a_llk - non_nan_ode_llk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
     torch.save(ode_llk[0], f'{cfg.figs_dir}/{cfg.example.d}_dim_ode_llk.pt')
@@ -1046,7 +1046,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
 
     plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
     if cfg.example.d == 2:
-        plot_ellipsoid_scatter(sample_levels, traj)
+        plot_ellipsoid_scatter(cfg, mu, sigma, sample_levels, traj)
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
         plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
@@ -1145,20 +1145,41 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
+    tm = timer.time()
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
+    eval_time = timer.time() - tm
     scaled_ode_llk = ode_llk[0][-1] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
-    mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
-    sse_llk = ((analytical_llk - scaled_ode_llk) ** 2).std()
-    print('\nmse_llk: {}\nsse_llk: {}'.format(mse_llk, sse_llk))
+    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
+    print('\naverage relative error: {}'.format(avg_rel_error))
 
-    llk_stats = torch.stack([mse_llk, sse_llk])
-    torch.save(llk_stats, '{}/alpha={}_llk_stats.pt'.format(
-        save_dir,
-        std.cond
-    ))
+    torch.save(ode_llk[0], f'{cfg.figs_dir}/{cfg.example.d}_dim_ode_llk.pt')
+    headers = [
+        'Avg. Rel. Error',
+        'Time',
+        'Model',
+        'Diffusion Timesteps',
+        'is_exact',
+        'num hutchinson trace samples'
+    ]
+    data = [[
+        avg_rel_error.numpy(),
+        eval_time,
+        cfg.model_name,
+        cfg.sampler.diffusion_timesteps,
+        cfg.compute_exact_trace,
+        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
+    ]]
+    df = pd.DataFrame(data, columns=headers)
+    df.to_csv(
+        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}' \
+        f'_exact?_{cfg.compute_exact_trace}_HK_samples_' \
+        f'{cfg.num_hutchinson_samples}.csv',
+        index=False
+    )
+
     import pdb; pdb.set_trace()
 
 def test_uniform(end_time, cfg, sample_trajs, std):
