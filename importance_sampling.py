@@ -163,7 +163,7 @@ class MultivariateGaussianTarget(Target):
     def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         return self.dist.log_prob(saps.squeeze(-1))
     def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor  :
-        return torch.tensor(1 - stats.chi2.cdf(alpha, df=self.cfg.example.d), dtype=alpha.dtype)
+        return torch.tensor(1 - stats.chi(df=self.cfg.example.d).cdf(alpha), dtype=alpha.dtype)
 
 
 class BrownianMotionDiffTarget(Target):
