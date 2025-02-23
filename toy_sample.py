@@ -2,6 +2,7 @@
 import os
 import warnings
 import logging
+import time as timer
 
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import torch
 import torch.distributions as dist
 import torch.nn as nn
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from torchdiffeq import odeint
 
@@ -475,7 +477,7 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
-        latent, delta_ll = sol[0][-1], sol[1][-1]
+        latent, delta_ll = sol[0][-1], sol[1]
         # if self.cfg.test == TestType.Gaussian:
         #     pseudo_example = self.cfg.example.copy()
         #     pseudo_example['mu'] = 0.
@@ -532,6 +534,57 @@ def plt_llk(traj, lik, figs_dir, plot_type='scatter', ax=None):
             ax.plot(xs=xs, ys=ys, zs=zs, color='red')
 
     plt.savefig('{}/scatter.pdf'.format(figs_dir))
+
+def compute_ode_log_likelihood(
+        analytical_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+):
+    print('analytical_llk: {}'.format(analytical_llk))
+
+    # compute log likelihood under diffusion model
+    tm = timer.time()
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
+    # ode_llk = torch.zeros(1,1,sample_trajs.shape[0])
+    eval_time = timer.time() - tm
+    scaled_ode_llk = scale_fn(ode_llk[0][-1])
+    print('\node_llk: {}'.format(scaled_ode_llk))
+
+    # compare log likelihoods by MSE
+    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
+    print('\naverage relative error: {}'.format(avg_rel_error))
+
+    torch.save(
+        ode_llk[0],
+        f'{HydraConfig.get().run.dir}/{cfg.model_name}_ode_llk.pt'
+    )
+    headers = [
+        'Avg. Rel. Error',
+        'Time',
+        'Model',
+        'Diffusion Timesteps',
+        'is_exact',
+        'num hutchinson trace samples'
+    ]
+    data = [[
+        avg_rel_error.numpy(),
+        eval_time,
+        cfg.model_name,
+        cfg.sampler.diffusion_timesteps,
+        cfg.compute_exact_trace,
+        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
+    ]]
+    df = pd.DataFrame(data, columns=headers)
+    df.to_csv(
+        f'{HydraConfig.get().run.dir}/{cfg.model_name}_ode_eval' \
+        f'_exact?_{cfg.compute_exact_trace}_HS_samples_' \
+        f'{cfg.num_hutchinson_samples}.csv',
+        index=False
+    )
+    return ode_llk
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
@@ -592,14 +645,19 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     )
     non_nan_idx = ~torch.any(analytical_llk_w_nan.isnan(), dim=1)
     non_nan_analytical_llk = analytical_llk_w_nan[non_nan_idx]
-    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0].exp() / cfg.example.sigma
-    non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
-    print('\nmse_llk: {}'.format(mse_llk))
+    non_nan_a_llk = non_nan_analytical_llk.squeeze()
+
+    scale_fn = lambda ode: (
+        ode - torch.tensor(cfg.example.example.sigma).log()
+    )[non_nan_idx.squeeze()]
+    compute_ode_log_likelihood(
+        non_nan_a_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+    )
 
     plt.clf()
     try:
@@ -621,39 +679,6 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     )
     plt.savefig('{}/theta_hist.pdf'.format(HydraConfig.get().run.dir))
     plt.clf()
-
-def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
-    plt.clf()
-    sample_levels = sample_trajs.norm(dim=[1,2])
-    plt.hist(sample_levels.numpy(), bins=100, edgecolor='black', density=True)
-
-    # Plot analytical Rayleigh distribution using scipy
-    x = np.linspace(0, sample_levels.max().item(), 1000)
-    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
-    if alpha > 0:
-        # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
-        # Zero out values below alpha
-        pdf[x < alpha] = 0
-    else:
-        pdf = stats.rayleigh.pdf(x)
-    plt.plot(x, pdf, 'r-', label='Analytical PDF')
-    plt.legend()
-    plt.xlabel('Radius')
-    plt.ylabel('Probability Density')
-    plt.title('Histogram of Samples with Analytical Tail Density')
-    plt.savefig('{}/rayleigh_hist.pdf'.format(HydraConfig.get().run.dir))
-
-    # plot points points (ode_llk, sample_trajs) against analytical rayleigh
-    plt.clf()
-    rayleigh_ode_lk = ode_llk.exp() * torch.tensor(2*np.pi) * sample_levels
-    plt.scatter(sample_levels, rayleigh_ode_lk)
-    plt.plot(x, pdf, 'r-', label='Analytical PDF')
-    plt.xlabel('Radius')
-    plt.ylabel('Probability Density')
-    plt.title('Density Estimate with Analytical Tail Density')
-    plt.legend()
-    plt.savefig('{}/rayleigh_scatter.pdf'.format(HydraConfig.get().run.dir))
 
 def plot_chi_from_sample_trajs(
         cfg,
@@ -682,8 +707,10 @@ def plot_chi_from_sample_trajs(
     else:
         pdf = stats.chi(cfg.example.d).pdf(x)
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Histogram of Samples with Analytical Tail Density')
     plt.legend()
-
     plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
 
     # plot points (ode_llk, sample_trajs) against analytical chi
@@ -696,6 +723,9 @@ def plot_chi_from_sample_trajs(
     plt.scatter(sample_levels, chi_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Density Estimate with Analytical Tail Density')
     plt.savefig('{}/chi_scatter_{}.pdf'.format(
         HydraConfig.get().run.dir,
         cfg.num_hutchinson_samples
@@ -723,7 +753,7 @@ def generate_diffusion_video(ode_llk, all_trajs, cfg):
     # Initialize scatter plot
     scat = ax.scatter([], [], c=[], cmap='viridis', norm=norm)
     fig.colorbar(scat, label='Log Likelihood')
-    
+
     def update(frame):
         # Update positions and colors for current frame
         scat.set_offsets(samples[frame, :, :2])
@@ -745,125 +775,9 @@ def generate_diffusion_video(ode_llk, all_trajs, cfg):
     anim.save(f'{HydraConfig.get().run.dir}/{cond}_mvn_diffusion.gif', writer='pillow')
     plt.close()
 
-def plot_likelihood_heat_maps(ode_llk, sample_trajs, cfg):
-    """Create 2D heatmaps of mean and variance of log-likelihoods."""
-    # Reshape inputs
-    points = sample_trajs.squeeze(-1)  # Shape: (B, 2)
-    llk = ode_llk.exp()  # Shape: (B,)
-
-    cond = std.cond if std.cond else torch.tensor([-1.])
-    mu = torch.tensor(cfg.example.mu)
-    sigma = torch.tensor(cfg.example.sigma)
-    L = torch.linalg.cholesky(sigma)
-    traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
-
-    analytical_dist = torch.distributions.MultivariateNormal(mu, sigma)
-    analytical_lk = analytical_dist.log_prob(points).exp()
-    
-    # Calculate estimated likelihoods and relative errors
-    estimated_lk = ode_llk.exp()
-    relative_errors = torch.abs(estimated_lk - analytical_lk) / analytical_lk
-
-    # Create grid for interpolation
-    margin = 0.1
-    x_min, x_max = points[:, 0].min() - margin, points[:, 0].max() + margin
-    y_min, y_max = points[:, 1].min() - margin, points[:, 1].max() + margin
-    
-    grid_size = 50
-    x_grid = torch.linspace(x_min, x_max, grid_size)
-    y_grid = torch.linspace(y_min, y_max, grid_size)
-    X, Y = torch.meshgrid(x_grid, y_grid, indexing='ij')
-    
-    # Calculate grid cell assignments for each point
-    x_bins = torch.bucketize(points[:, 0].contiguous(), x_grid) - 1
-    y_bins = torch.bucketize(points[:, 1].contiguous(), y_grid) - 1
-    
-    # Create mean heatmap
-    mean_Z = torch.zeros_like(X)
-    count_Z = torch.zeros_like(X)
-    
-    # Create variance heatmap 
-    squared_sum_Z = torch.zeros_like(X)
-    
-    # Create relative error heatmap 
-    err_Z = torch.zeros_like(X)
-
-    # Accumulate values in grid cells
-    for i in range(len(points)):
-        x_idx = x_bins[i]
-        y_idx = y_bins[i]
-        if 0 <= x_idx < grid_size and 0 <= y_idx < grid_size:
-            mean_Z[x_idx, y_idx] += llk[i]
-            squared_sum_Z[x_idx, y_idx] += llk[i] ** 2
-            err_Z[x_idx, y_idx] += relative_errors[i]
-            count_Z[x_idx, y_idx] += 1
-    
-    # Calculate mean and variance
-    mask = count_Z > 0
-    mean_Z[mask] /= count_Z[mask]
-    var_Z = torch.zeros_like(mean_Z)
-    var_Z[mask] = (squared_sum_Z[mask] / count_Z[mask]) - (mean_Z[mask] ** 2)
-    
-    err_Z[mask] /= count_Z[mask]
-    
-    # Plot heatmap
-    plt.figure(figsize=(10, 8))
-    plt.pcolormesh(X.numpy(), Y.numpy(), err_Z.numpy(), shading='auto', cmap='viridis')
-    plt.colorbar(label='Relative Error')
-    plt.title('Relative Error Heatmap')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    
-    plt.savefig(f'{HydraConfig.get().run.dir}/relative_error_heatmap.pdf')
-    plt.close()
-
-    # Plot mean heatmap
-    plt.figure(figsize=(10, 8))
-    plt.subplot(1, 2, 1)
-    plt.pcolormesh(X.numpy(), Y.numpy(), mean_Z.numpy(), shading='auto', cmap='viridis')
-    plt.colorbar(label='Mean Density')
-    plt.title('Mean Density Heatmap')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    
-    # Plot variance heatmap
-    plt.subplot(1, 2, 2)
-    plt.pcolormesh(X.numpy(), Y.numpy(), var_Z.numpy(), shading='auto', cmap='viridis')
-    plt.colorbar(label='Variance of Density')
-    plt.title('Density Variance Heatmap')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    
-    plt.tight_layout()
-    plt.savefig(f'{HydraConfig.get().run.dir}/likelihood_heatmaps.pdf')
-    plt.close()
-
-    # Create scatter plot overlay
-    plt.figure(figsize=(10, 8))
-    plt.subplot(1, 2, 1)
-    plt.pcolormesh(X.numpy(), Y.numpy(), mean_Z.numpy(), shading='auto', cmap='viridis', alpha=0.7)
-    plt.scatter(points[:, 0], points[:, 1], c=llk, cmap='viridis', alpha=0.5, s=1)
-    plt.colorbar(label='Density')
-    plt.title('Mean Density with Sample Points')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    
-    plt.subplot(1, 2, 2)
-    plt.pcolormesh(X.numpy(), Y.numpy(), var_Z.numpy(), shading='auto', cmap='viridis', alpha=0.7)
-    plt.scatter(points[:, 0], points[:, 1], c=llk, cmap='viridis', alpha=0.5, s=1)
-    plt.colorbar(label='Density')
-    plt.title('Variance with Sample Points')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    
-    plt.tight_layout()
-    plt.savefig(f'{HydraConfig.get().run.dir}/likelihood_heatmaps_with_points.pdf')
-    plt.close()
-
-def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
+def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     plt.clf()
 
-    alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     sample_levels = sample_trajs.norm(dim=[1,2])
     exited = (sample_levels > std.likelihood.alpha).to(float)
     prop_exited = exited.mean() * 100
@@ -936,6 +850,26 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     plt.grid(alpha=0.3)
     plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
+    plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
+
+def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
+    torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/{cfg.example.d}_dim_sample_trajs.pt')
+    plt.clf()
+    alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+    sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
+    exited = (sample_levels > std.likelihood.alpha).to(float)
+    prop_exited = exited.mean() * 100
+    print('{}% of {} samples outside Level {}'.format(
+        prop_exited,
+        sample_trajs.shape[0],
+        std.likelihood.alpha,
+    ))
+
+    cond = std.cond if std.cond else torch.tensor([-1.])
+    mu = torch.tensor(cfg.example.mu)
+    sigma = torch.tensor(cfg.example.sigma)
+    L = torch.linalg.cholesky(sigma)
+    traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
 
     datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
     # alpha == r^2 as indicated by how the `exited` variable is defined
@@ -943,26 +877,22 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     tail = torch.exp(-alpha / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_llk))
-    ode_llk = std.ode_log_likelihood(
+
+    scale_fn = lambda ode: ode - L.det().abs().log()
+    ode_llk = compute_ode_log_likelihood(
+        non_nan_a_llk,
         sample_trajs,
-        cond=cond,
-        alpha=alpha.unsqueeze(-1),
-        exact=cfg.compute_exact_trace,
-        hum_hutchinson_samples=cfg.num_hutchinson_samples,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
     )
-    non_nan_ode_llk = ode_llk[0] - L.det().abs().log()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_llk, ode_llk[1]))
 
-    avg_rel_error = torch.expm1(non_nan_a_llk - non_nan_ode_llk).abs().mean()
-    print('\naverage relative error: {}'.format(avg_rel_error))
-
-    plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
-
-    plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+    plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
     if cfg.example.d == 2:
+        plot_ellipsoid(end_time, cfg, sample_trajs, std)
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+        generate_diffusion_video(ode_llk[0], all_trajs, cfg)
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
@@ -1057,21 +987,16 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
     print('analytical_llk: {}'.format(analytical_llk))
 
-    # compute log likelihood under diffusion model
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    print('\node_llk: {}'.format(scaled_ode_llk))
+    scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    compute_ode_log_likelihood(
+        analytical_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+    )
 
-    # compare log likelihoods by MSE
-    mse_llk = torch.nn.MSELoss()(analytical_llk, scaled_ode_llk)
-    sse_llk = ((analytical_llk - scaled_ode_llk) ** 2).std()
-    print('\nmse_llk: {}\nsse_llk: {}'.format(mse_llk, sse_llk))
-
-    llk_stats = torch.stack([mse_llk, sse_llk])
-    torch.save(llk_stats, '{}/alpha={}_llk_stats.pt'.format(
-        save_dir,
-        std.cond
-    ))
     import pdb; pdb.set_trace()
 
 def test_uniform(end_time, cfg, sample_trajs, std):
@@ -1218,7 +1143,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
 
     # compute log likelihood under diffusion model
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    scaled_ode_llk = ode_llk[0] - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    scaled_ode_llk = ode_llk[0][-1] - dt.sqrt().log() * (cfg.example.sde_steps-1)
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
@@ -1296,11 +1221,11 @@ def test_transformer_bm(end_time, std):
         ))
     import pdb; pdb.set_trace()
 
-def test(end_time, cfg, out_trajs, std):
+def test(end_time, cfg, out_trajs, std, all_trajs):
     if type(std.example) == GaussianExampleConfig:
         test_gaussian(end_time, cfg, out_trajs, std)
     elif type(std.example) == MultivariateGaussianExampleConfig:
-        test_multivariate_gaussian(end_time, cfg, out_trajs, std)
+        test_multivariate_gaussian(end_time, cfg, out_trajs, std, all_trajs)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         test_brownian_motion_diff(end_time, cfg, out_trajs, std)
     elif type(std.example) == UniformExampleConfig:
@@ -1358,10 +1283,16 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
-        sample_traj_out = std.sample_trajectories(
-            cond=std.cond,
-            alpha=std.likelihood.alpha.reshape(-1, 1),
-        )
+        if True:
+            sample_traj_out = std.sample_trajectories(
+                cond=std.cond,
+                alpha=std.likelihood.alpha.reshape(-1, 1),
+            )
+        else:
+            class A:
+                def __init__(self, samples):
+                    self.samples = samples
+            sample_traj_out = A(torch.rand(1, cfg.num_samples, cfg.example.d, 1))
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
         # plot_ode_trajectories(ode_trajs)
@@ -1373,7 +1304,7 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std)
+        test(end_time, cfg, out_trajs, std, sample_trajs)
         import pdb; pdb.set_trace()
 
 
