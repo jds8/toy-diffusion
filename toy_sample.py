@@ -548,6 +548,56 @@ def plt_llk(traj, lik, figs_dir, plot_type='scatter', ax=None):
 
     plt.savefig('{}/scatter.pdf'.format(figs_dir))
 
+def compute_ode_log_likelihood(
+        analytical_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+):
+    print('analytical_llk: {}'.format(analytical_llk))
+
+    # compute log likelihood under diffusion model
+    tm = timer.time()
+    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
+    non_nan_ode_lk = ode_llk[non_nan_idx.squeeze()].squeeze()
+    eval_time = timer.time() - tm
+    scaled_ode_llk = scale_fn(ode_llk[0][-1])
+    print('\node_llk: {}'.format(scaled_ode_llk))
+
+    # compare log likelihoods by MSE
+    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
+    print('\naverage relative error: {}'.format(avg_rel_error))
+
+    torch.save(
+        ode_llk[0],
+        f'{HydraConfig.get().run.dir}/{cfg.model_name}_ode_llk.pt'
+    )
+    headers = [
+        'Avg. Rel. Error',
+        'Time',
+        'Model',
+        'Diffusion Timesteps',
+        'is_exact',
+        'num hutchinson trace samples'
+    ]
+    data = [[
+        avg_rel_error.numpy(),
+        eval_time,
+        cfg.model_name,
+        cfg.sampler.diffusion_timesteps,
+        cfg.compute_exact_trace,
+        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
+    ]]
+    df = pd.DataFrame(data, columns=headers)
+    df.to_csv(
+        f'{HydraConfig.get().run.dir}/{model_name}_ode_eval' \
+        f'_exact?_{cfg.compute_exact_trace}_HS_samples_' \
+        f'{cfg.num_hutchinson_samples}.csv',
+        index=False
+    )
+
 def test_gaussian(end_time, cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
@@ -607,14 +657,19 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     )
     non_nan_idx = ~torch.any(analytical_llk_w_nan.isnan(), dim=1)
     non_nan_analytical_llk = analytical_llk_w_nan[non_nan_idx]
-    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha)
-    ode_lk = ode_llk[0][-1].exp() / cfg.example.sigma
-    non_nan_ode_lk = ode_lk[non_nan_idx.squeeze()].squeeze()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
-    mse_llk = torch.nn.MSELoss()(non_nan_a_lk, non_nan_ode_lk)
-    print('\nmse_llk: {}'.format(mse_llk))
+    non_nan_a_llk = non_nan_analytical_llk.squeeze()
+
+    scale_fn = lambda ode: (
+        ode - torch.tensor(cfg.example.example.sigma).log()
+    )[non_nan_idx.squeeze()]
+    compute_ode_log_likelihood(
+        non_nan_a_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+    )
 
     plt.clf()
     try:
@@ -668,7 +723,7 @@ def plot_chi_from_sample_trajs(
         pdf = stats.chi(cfg.example.d).pdf(x)
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/chi_hist.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     plt.clf()
@@ -681,7 +736,7 @@ def plot_chi_from_sample_trajs(
     plt.scatter(sample_levels, chi_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/chi_scatter_{}.pdf'.format(cfg.figs_dir, cfg.num_hutchinson_samples))
+    plt.savefig('{}/chi_scatter_{}.pdf'.format(HydraConfig.get().run.dir, cfg.num_hutchinson_samples))
 
 def plot_rayleigh_from_sample_trajs(
         cfg,
@@ -753,7 +808,7 @@ def plot_rayleigh_from_sample_trajs(
     plt.scatter(sample_levels, rayleigh_ode_lk, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
-    plt.savefig('{}/rayleigh_scatter_{}.pdf'.format(cfg.figs_dir, cfg.num_hutchinson_samples))
+    plt.savefig('{}/rayleigh_scatter_{}.pdf'.format(HydraConfig.get().run.dir, cfg.num_hutchinson_samples))
 
     plt.clf()
     trunc_idx = (ratios < 2).nonzero()
@@ -976,10 +1031,10 @@ def plot_ellipsoid_scatter(cfg, mu, sigma, sample_levels, traj):
     plt.grid(alpha=0.3)
     plt.gca().set_aspect('equal', adjustable='box')  # Equal aspect ratio
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
-    plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
+    plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
-    torch.save(sample_trajs, f'{cfg.figs_dir}/{cfg.example.d}_dim_sample_trajs.pt')
+    torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
@@ -1003,46 +1058,15 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     tail = torch.exp(-alpha / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_llk))
-    tm = timer.time()
-    ode_llk = std.ode_log_likelihood(
+
+    scale_fn = lambda ode: ode - L.det().abs().log()
+    compute_ode_log_likelihood(
+        non_nan_a_llk,
         sample_trajs,
-        cond=cond,
-        alpha=alpha.unsqueeze(-1),
-        num_huthcinson_trace_samples=cfg.num_hutchinson_samples,
-        exact=cfg.compute_exact_trace
-    )
-    eval_time = timer.time() - tm
-    print(f'\node eval time (is_exact: {cfg.compute_exact_trace}): {eval_time}')
-    non_nan_ode_llk = ode_llk[0][-1] - L.det().abs().log()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_llk, ode_llk[1]))
-
-    avg_rel_error = torch.expm1(non_nan_a_llk - non_nan_ode_llk).abs().mean()
-    print('\naverage relative error: {}'.format(avg_rel_error))
-
-    torch.save(ode_llk[0], f'{cfg.figs_dir}/{cfg.example.d}_dim_ode_llk.pt')
-    headers = [
-        'Avg. Rel. Error',
-        'Time',
-        'Model',
-        'Diffusion Timesteps',
-        'is_exact',
-        'num hutchinson trace samples'
-    ]
-    data = [[
-        avg_rel_error.numpy(),
-        eval_time,
-        cfg.model_name,
-        cfg.sampler.diffusion_timesteps,
-        cfg.compute_exact_trace,
-        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
-    ]]
-    df = pd.DataFrame(data, columns=headers)
-    df.to_csv(
-        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}' \
-        f'_exact?_{cfg.compute_exact_trace}_HK_samples_' \
-        f'{cfg.num_hutchinson_samples}.csv',
-        index=False
+        std,
+        cfg,
+        alpha,
+        scale_fn,
     )
 
     plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
@@ -1145,40 +1169,14 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
     print('analytical_llk: {}'.format(analytical_llk))
 
-    # compute log likelihood under diffusion model
-    tm = timer.time()
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    eval_time = timer.time() - tm
-    scaled_ode_llk = ode_llk[0][-1] - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    print('\node_llk: {}'.format(scaled_ode_llk))
-
-    # compare log likelihoods by MSE
-    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
-    print('\naverage relative error: {}'.format(avg_rel_error))
-
-    torch.save(ode_llk[0], f'{cfg.figs_dir}/{cfg.example.d}_dim_ode_llk.pt')
-    headers = [
-        'Avg. Rel. Error',
-        'Time',
-        'Model',
-        'Diffusion Timesteps',
-        'is_exact',
-        'num hutchinson trace samples'
-    ]
-    data = [[
-        avg_rel_error.numpy(),
-        eval_time,
-        cfg.model_name,
-        cfg.sampler.diffusion_timesteps,
-        cfg.compute_exact_trace,
-        cfg.num_hutchinson_samples if not cfg.compute_exact_trace else 0
-    ]]
-    df = pd.DataFrame(data, columns=headers)
-    df.to_csv(
-        f'{cfg.figs_dir}/ode_eval_dim_{cfg.example.d}' \
-        f'_exact?_{cfg.compute_exact_trace}_HK_samples_' \
-        f'{cfg.num_hutchinson_samples}.csv',
-        index=False
+    scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
+    compute_ode_log_likelihood(
+        non_nan_a_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
     )
 
     import pdb; pdb.set_trace()

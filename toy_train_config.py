@@ -55,7 +55,7 @@ class BrownianMotionExampleConfig(ExampleConfig):
 @dataclass
 class BrownianMotionDiffExampleConfig(BrownianMotionExampleConfig):
     def name(self):
-        return 'BrownianMotionDiffExampleConfig'
+        return 'BrownianMotionDiff{}ExampleConfig'.format(self.sde_steps)
 
 
 @dataclass
