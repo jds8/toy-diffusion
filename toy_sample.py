@@ -65,7 +65,7 @@ class ToyEvaluator:
         ).to(device)
 
         self.diffusion_model.eval()
-        self.likelihood = hydra.utils.instantiate(cfg.likelihood, sampler=self.sampler)
+        self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 
         self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
@@ -555,17 +555,15 @@ def compute_ode_log_likelihood(
         cfg,
         alpha,
         scale_fn,
-):
+) -> torch.Tensor:
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
     tm = timer.time()
     ode_llk = std.ode_log_likelihood(sample_trajs, cond=std.cond, alpha=alpha)
-    non_nan_ode_lk = ode_llk[non_nan_idx.squeeze()].squeeze()
     eval_time = timer.time() - tm
     scaled_ode_llk = scale_fn(ode_llk[0][-1])
-    print('\node_llk: {}'.format(scaled_ode_llk))
-
+    print('\node_llk: {}\node evals: {}'.format(scaled_ode_llk, ode_llk[1]))
     # compare log likelihoods by MSE
     avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
@@ -592,11 +590,12 @@ def compute_ode_log_likelihood(
     ]]
     df = pd.DataFrame(data, columns=headers)
     df.to_csv(
-        f'{HydraConfig.get().run.dir}/{model_name}_ode_eval' \
+        f'{HydraConfig.get().run.dir}/{cfg.model_name}_ode_eval' \
         f'_exact?_{cfg.compute_exact_trace}_HS_samples_' \
         f'{cfg.num_hutchinson_samples}.csv',
         index=False
     )
+    return ode_llk
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
@@ -699,9 +698,6 @@ def plot_chi_from_sample_trajs(
         ode_llk,
 ):
     plt.clf()
-    # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
-    # sample_trajs = dd.sample([10*sample_trajs.shape[0], 1]).movedim(1,2)
-    # sample_trajs = sample_trajs[(sample_trajs.norm(dim=[1,2]) > std.likelihood.alpha.sqrt())]
     sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
@@ -745,9 +741,6 @@ def plot_rayleigh_from_sample_trajs(
         ode_llk,
 ):
     plt.clf()
-    # dd = dist.MultivariateNormal(torch.zeros(2), torch.eye(2))
-    # sample_trajs = dd.sample([10*sample_trajs.shape[0], 1]).movedim(1,2)
-    # sample_trajs = sample_trajs[(sample_trajs.norm(dim=[1,2]) > std.likelihood.alpha.sqrt())]
     sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
@@ -1060,7 +1053,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.det().abs().log()
-    compute_ode_log_likelihood(
+    ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
         std,
@@ -1118,6 +1111,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
     save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     alpha = torch.tensor([std.likelihood.alpha])
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
@@ -1167,11 +1161,10 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ).sum(1).squeeze()
     tail = get_target(std).analytical_prob(alpha) if alpha.numpy() else torch.tensor(1.)
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
-    print('analytical_llk: {}'.format(analytical_llk))
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
     compute_ode_log_likelihood(
-        non_nan_a_llk,
+        analytical_llk,
         sample_trajs,
         std,
         cfg,
