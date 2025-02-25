@@ -432,40 +432,37 @@ class ContinuousEvaluator(ToyEvaluator):
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
-        # hutchinson's trick
-        # if self.cfg.guidance == GuidanceType.ClassifierFree:
-        #     v = torch.randint_like(x.tile(2, 1, 1, 1), 2) * 2 - 1
-        # else:
-        #     v = torch.randint_like(x, 2) * 2 - 1
-        v = torch.randint_like(x, 2) * 2 - 1
         fevals = 0
-        def ode_fn(t, x):
+        if 'num_hutchinson_samples' not in kwargs:
+            kwargs['num_hutchinson_samples'] = 1
+        def exact_ode_fn(t, x):
             nonlocal fevals
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=True, **kwargs)
-                # if self.cfg.guidance == GuidanceType.ClassifierFree:
-                #     grad_uncond = torch.autograd.grad(
-                #         (dx_dt[0] * v[0]).sum(),
-                #         x,
-                #         retain_graph=True
-                #     )[0]
-                #     grad_cond = torch.autograd.grad(
-                #         (dx_dt[1] * v[1]).sum(),
-                #         x
-                #     )[0]
-                #     grad = torch.stack([grad_uncond, grad_cond])
-                #     dx_dt = dx_dt[1]  # update x according to conditional gradient
-                # else:
-                #     grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                grad = torch.autograd.grad((dx_dt * v).sum(), x)[0]
-                d_ll = (v * grad).sum([-1, -2])
-            return torch.cat([dx_dt.reshape(-1), d_ll.reshape(-1)])
-        # if self.cfg.guidance == GuidanceType.ClassifierFree:
-        #     ll = x.new_zeros([2*x.shape[0]])
-        # else:
-        #     ll = x.new_zeros([x.shape[0]])
+                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                d_ll = torch.zeros(x.shape[0])
+                for i in range(x.shape[1]):
+                    v = torch.zeros_like(x)
+                    v[:, i, 0] = 1.0
+                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+                    d_ll += (vjp * v).sum([-1, -2])
+                out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
+                return out
+        def hutchinson_ode_fn(t, x):
+            nonlocal fevals
+            fevals += 1
+            with torch.enable_grad():
+                x = x[0].detach().requires_grad_()
+                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                d_ll = torch.zeros(x.shape[0])
+                for _ in range(kwargs['num_hutchinson_samples']):
+                    # hutchinson's trick
+                    v = torch.randint_like(x, 2) * 2 - 1
+                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+                    d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_samples']
+                out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
+            return out
         ll = x.new_zeros([x.shape[0]])
         x_min = x, ll
         times = torch.linspace(
@@ -474,6 +471,7 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x.device
         )
+        ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         latent, delta_ll = sol[0][-1], sol[1][-1]
         # if self.cfg.test == TestType.Gaussian:
@@ -623,9 +621,8 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     plt.hist(sample_levels.numpy(), bins=100, edgecolor='black', density=True)
 
     # Plot analytical Rayleigh distribution using scipy
-    import scipy.stats as stats
     x = np.linspace(0, sample_levels.max().item(), 1000)
-    alpha = std.likelihood.alpha.sqrt().item() if std.cond == 1. else 0.
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
         pdf = stats.rayleigh.pdf(x) / (1 - stats.rayleigh.cdf(alpha))
@@ -635,6 +632,9 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
         pdf = stats.rayleigh.pdf(x)
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Histogram of Samples with Analytical Tail Density')
     plt.savefig('{}/rayleigh_hist.pdf'.format(cfg.figs_dir))
 
     # plot points points (ode_llk, sample_trajs) against analytical rayleigh
@@ -642,13 +642,59 @@ def plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk):
     rayleigh_ode_lk = ode_llk.exp() * torch.tensor(2*np.pi) * sample_levels
     plt.scatter(sample_levels, rayleigh_ode_lk)
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Density Estimate with Analytical Tail Density')
     plt.legend()
     plt.savefig('{}/rayleigh_scatter.pdf'.format(cfg.figs_dir))
+
+def plot_chi_from_sample_trajs(
+        cfg,
+        sample_trajs,
+        std,
+        ode_llk,
+):
+    plt.clf()
+    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    num_bins = sample_trajs.shape[0] // 10
+    plt.hist(
+        sample_levels.numpy(),
+        bins=num_bins,
+        edgecolor='black',
+        density=True
+    )
+
+    # Plot analytical Chi distribution using scipy
+    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf = stats.chi(cfg.example.d).pdf(x) / (1 - stats.chi(cfg.example.d).cdf(alpha))
+        # Zero out values below alpha
+        pdf[x < alpha] = 0
+    else:
+        pdf = stats.chi(cfg.example.d).pdf(x)
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+
+    # plot points (ode_llk, sample_trajs) against analytical chi
+    plt.clf()
+    chi_ode_lk = ode_llk.exp() * torch.tensor(2 * np.pi) ** (cfg.example.d / 2) * \
+                 sample_levels ** (cfg.example.d - 1) / \
+                 torch.tensor(2.) ** (cfg.example.d / 2 - 1) / \
+                 scipy.special.gamma(cfg.example.d / 2)
+
+    plt.clf()
+    plt.scatter(sample_levels, chi_ode_lk, label='Density Estimates')
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.legend()
+    plt.savefig('{}/chi_scatter_{}.pdf'.format(HydraConfig.get().run.dir, cfg.num_hutchinson_samples))
 
 def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-    sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
+    sample_levels = sample_trajs.norm(dim=[1,2])
     exited = (sample_levels > std.likelihood.alpha).to(float)
     prop_exited = exited.mean() * 100
     print('{}% of {} samples outside Level {}'.format(
@@ -726,19 +772,31 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std):
     # at the top of this function
     tail = torch.exp(-alpha / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
-    non_nan_a_lk = non_nan_analytical_llk.exp().squeeze()
-    print('analytical_llk: {}'.format(non_nan_a_lk))
-    ode_llk = std.ode_log_likelihood(sample_trajs, cond=cond, alpha=alpha.unsqueeze(-1))
-    non_nan_ode_lk = (ode_llk[0] - L.det().abs().log()).exp()
-    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_lk, ode_llk[1]))
+    non_nan_a_llk = non_nan_analytical_llk.squeeze()
+    print('analytical_llk: {}'.format(non_nan_a_llk))
+    ode_llk = std.ode_log_likelihood(
+        sample_trajs,
+        cond=cond,
+        alpha=alpha.unsqueeze(-1),
+        #exact='exact'
+        hum_hutchinson_samples=1,
+    )
+    non_nan_ode_llk = ode_llk[0] - L.det().abs().log()
+    print('\node_llk: {}\node evals: {}'.format(non_nan_ode_llk, ode_llk[1]))
 
-    avg_rel_error = torch.expm1(non_nan_a_lk - non_nan_ode_lk).abs().mean()
+    avg_rel_error = torch.expm1(non_nan_a_llk - non_nan_ode_llk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(cfg.figs_dir))
 
-    plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-    plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+    try:
+        plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+    except:
+        import pdb; pdb.set_trace()
+        plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
+    if cfg.example.d == 2:
+        plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
+        plot_rayleigh_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0])
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):

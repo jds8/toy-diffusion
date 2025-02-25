@@ -5,7 +5,7 @@ import torch
 import torch.distributions as dist
 import numpy as np
 import scipy.stats as stats
-
+import scipy.integrate as integrate
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -192,13 +192,36 @@ class BrownianMotionDiffTarget(Target):
             scaled_x0.cumsum(dim=1)
         ], dim=1)
         return (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
+    def quadrature(self, alpha):
+        def normal_pdf(x, mean, var):
+            """Probability density function of a normal distribution."""
+            return stats.norm.pdf(x, loc=mean, scale=np.sqrt(var))
+        """Computes the probability of leaving [-alpha, alpha] using quadrature."""
+        # First integral over X1 ~ N(0, 1/4)
+        def inner_integral_x1(x1):
+            # Second integral over X2 ~ N(X1, 1/4)
+            def inner_integral_x2(x2):
+                # Third integral over X3 ~ N(X2, 1/4)
+                def inner_integral_x3(x3):
+                    # Fourth integral over X4 ~ N(X3, 1/4)
+                    def inner_integral_x4(x4):
+                        return normal_pdf(x4, x3, 1/4)
+                    result_x4, _ = integrate.quad(inner_integral_x4, -alpha, alpha)
+                    return normal_pdf(x3, x2, 1/4) * result_x4
+                result_x3, _ = integrate.quad(inner_integral_x3, -alpha, alpha)
+                return normal_pdf(x2, x1, 1/4) * result_x3
+            result_x2, _ = integrate.quad(inner_integral_x2, -alpha, alpha)
+            return normal_pdf(x1, 0, 1/4) * result_x2
+
+        result_x1, _ = integrate.quad(inner_integral_x1, -alpha, alpha)
+        return 1 - result_x1
     def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         # no better solution known
         if alpha == 2.5:
             return torch.tensor(0.0108)
         elif alpha == 3.0:
             return torch.tensor(0.00225)
-        raise NotImplementedError
+        return torch.tensor(self.quadrature(alpha))
     def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:
         # 0.0059 for alpha=3
         # https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
