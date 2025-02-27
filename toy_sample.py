@@ -650,7 +650,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     scale_fn = lambda ode: (
         ode - torch.tensor(cfg.example.example.sigma).log()
     )[non_nan_idx.squeeze()]
-    compute_ode_log_likelihood(
+    ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
         std,
@@ -661,7 +661,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
     plt.clf()
     try:
-        plt_llk(traj, ode_lk, HydraConfig.get().run.dir, plot_type='scatter')
+        plt_llk(traj, ode_llk.exp(), HydraConfig.get().run.dir, plot_type='scatter')
         plt_llk(datapoints, datapoint_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     except Exception as e:
         print(f'error: {e}')
@@ -715,12 +715,11 @@ def plot_chi_from_sample_trajs(
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     plt.clf()
-    chi_ode_lk = ode_llk.exp() * torch.tensor(2 * np.pi) ** (cfg.example.d / 2) * \
-                 sample_levels ** (cfg.example.d - 1) / \
-                 torch.tensor(2.) ** (cfg.example.d / 2 - 1) / \
-                 scipy.special.gamma(cfg.example.d / 2)
+    chi_ode_llk = ode_llk + (cfg.example.d / 2) * torch.tensor(2 * np.pi).log() + \
+                 (cfg.example.d - 1) * sample_levels.log() - (cfg.example.d / 2 - 1) * \
+                 torch.tensor(2.).log() - scipy.special.loggamma(cfg.example.d / 2)
 
-    plt.scatter(sample_levels, chi_ode_lk, label='Density Estimates')
+    plt.scatter(sample_levels, chi_ode_llk.exp(), label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
     plt.xlabel('Radius')
@@ -856,7 +855,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-    sample_levels = (sample_trajs * sample_trajs).sum(dim=[1,2])
+    sample_levels = sample_trajs.norm(dim=[1, 2])
     exited = (sample_levels > std.likelihood.alpha).to(float)
     prop_exited = exited.mean() * 100
     print('{}% of {} samples outside Level {}'.format(
@@ -871,14 +870,20 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     L = torch.linalg.cholesky(sigma)
     traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
 
-    datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
+    try:
+        datapoint_dist = torch.distributions.MultivariateNormal(mu.squeeze(-1), sigma)
+    except:
+        datapoint_dist = torch.distributions.MultivariateNormal(
+            mu.squeeze(-1),
+            torch.matmul(L, L.T)
+        )
     # alpha == r^2 as indicated by how the `exited` variable is defined
     # at the top of this function
     tail = torch.exp(-alpha / 2)
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
-    scale_fn = lambda ode: ode - L.det().abs().log()
+    scale_fn = lambda ode: ode - L.logdet()
     ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
