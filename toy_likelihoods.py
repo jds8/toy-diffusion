@@ -54,7 +54,7 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
         self.alpha = alpha[:, 0]
 
     def get_condition(self, _, x0):
-        return ((x0 * x0).sum(dim=1) > self.alpha).to(torch.float)
+        return (x0.norm(dim=1) > self.alpha).to(torch.float)
 
 
 class BrownianMotionDiffTailsLikelihood(Likelihood):
