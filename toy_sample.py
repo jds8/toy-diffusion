@@ -44,6 +44,8 @@ SampleOutput = namedtuple('SampleOutput', 'samples fevals')
 SDEConfig = namedtuple('SDEConfig', 'drift diffusion sde_steps end_time')
 DiffusionConfig = namedtuple('DiffusionConfig', 'f g')
 
+DEBUG = False
+
 
 #########################
 #########################
@@ -833,7 +835,7 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
 
     # Convert to NumPy for plotting
-    Z = Z.numpy()
+    Z = Z.sqrt().numpy()
 
     # Plot the level curves
     plt.figure(figsize=(8, 6))
@@ -1294,16 +1296,20 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
-        if True:
+        if DEBUG:
+            class A:
+                def __init__(self, samples):
+                    self.samples = samples
+            sample_traj_out = A(torch.randn(10*cfg.num_samples, cfg.example.d, 1))
+            if std.cond == 1:
+                cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
+                cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
+                sample_traj_out.samples = cond_samples.unsqueeze(0)
+        else:
             sample_traj_out = std.sample_trajectories(
                 cond=std.cond,
                 alpha=std.likelihood.alpha.reshape(-1, 1),
             )
-        else:
-            class A:
-                def __init__(self, samples):
-                    self.samples = samples
-            sample_traj_out = A(torch.rand(1, cfg.num_samples, cfg.example.d, 1))
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
         # plot_ode_trajectories(ode_trajs)
