@@ -732,7 +732,7 @@ def plot_chi_from_sample_trajs(
     plt.legend()
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
-    plt.title('Density Estimate with Analytical Tail Density')
+    plt.title(f'Density Estimate with Analytical {cfg.example.d}D Tail Density')
     plt.savefig('{}/chi_scatter_{}.pdf'.format(
         HydraConfig.get().run.dir,
         cfg.num_hutchinson_samples
