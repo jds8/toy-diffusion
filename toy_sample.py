@@ -446,7 +446,7 @@ class ContinuousEvaluator(ToyEvaluator):
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
                 dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
-                d_ll = torch.zeros(x.shape[0])
+                d_ll = torch.zeros(x.shape[0], device=x.device)
                 for i in range(x.shape[1]):
                     v = torch.zeros_like(x)
                     v[:, i, 0] = 1.0
@@ -460,7 +460,7 @@ class ContinuousEvaluator(ToyEvaluator):
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
                 dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
-                d_ll = torch.zeros(x.shape[0])
+                d_ll = torch.zeros(x.shape[0], device=x.device)
                 for _ in range(kwargs['num_hutchinson_samples']):
                     # hutchinson's trick
                     v = torch.randint_like(x, 2) * 2 - 1
