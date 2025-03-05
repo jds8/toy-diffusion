@@ -254,7 +254,6 @@ def importance_sample(cfg):
                 log_qrobs_start = time.time()
                 log_qrobs = proposal.log_prob(saps)
                 log_qrobs_end = time.time()
-                conditional_log_probs = target.analytical_conditional_log_prob(saps_raw, alpha_tensor)
                 log_qrobs_time = log_qrobs_end - log_qrobs_start
                 log_qrobs = log_qrobs.squeeze()
                 all_log_qrobs.append(log_qrobs)

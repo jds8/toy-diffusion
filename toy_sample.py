@@ -90,8 +90,7 @@ class ToyEvaluator:
         )
         if 'model_state_dict' in model:
             self.diffusion_model.load_state_dict(model['model_state_dict'])
-            model_parameters = filter(lambda p: p.requires_grad, self.diffusion_model.parameters())
-            num_params = sum([np.prod(p.size()) for p in model_parameters])
+            num_params = self.get_num_params()
             logger = logging.getLogger("main")
             logger.info('loaded model with {} parameters'.format(num_params))
         else:
@@ -595,6 +594,7 @@ def compute_ode_log_likelihood(
     return ode_llk
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
+    torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/gaussian_sample_trajs.pt')
     exited = (sample_trajs.abs() > std.likelihood.alpha).any(dim=1).to(float)
     prop_exited = exited.mean() * 100
     print('{}% of {} samples outside [-{}, {}]'.format(
@@ -938,6 +938,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
     import pdb; pdb.set_trace()
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
+    torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/bm_sample_trajs.pt')
     dt = end_time / (cfg.example.sde_steps-1)
     # de-standardize data
     trajs = sample_trajs * dt.sqrt()
@@ -998,7 +999,6 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ).sum(1).squeeze()
     tail = get_target(std).analytical_prob(alpha) if alpha.numpy() else torch.tensor(1.)
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
-    print('analytical_llk: {}'.format(analytical_llk))
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
     compute_ode_log_likelihood(
@@ -1275,8 +1275,6 @@ def sample(cfg):
         raise NotImplementedError
 
     end_time = torch.tensor(1., device=device)
-
-    logger.info(f'Num model params: {std.get_num_params()}')
 
     with torch.no_grad():
         if isinstance(std.diffusion_model, TemporalTransformerUnet):

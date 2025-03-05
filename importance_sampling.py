@@ -31,7 +31,9 @@ class GaussianProposal(Proposal):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
-            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+            exact=self.std.cfg.compute_exact_trace,
+            num_hutchinson_samples=self.std.cfg.num_hutchinson_samples,
         )[0]
         scale_factor = torch.tensor(self.std.cfg.example.sigma).log()
         self.ode_llk = raw_ode_llk - scale_factor
@@ -57,7 +59,9 @@ class MultivariateGaussianProposal(Proposal):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=cond,
-            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+            exact=self.std.cfg.compute_exact_trace,
+            num_hutchinson_samples=self.std.cfg.num_hutchinson_samples,
         )[0]
         L = torch.linalg.cholesky(torch.tensor(self.std.cfg.example.sigma))
         scale_factor = L.det().abs().log()
@@ -90,7 +94,9 @@ class BrownianMotionDiffProposal(Proposal):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
-            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+            exact=self.std.cfg.compute_exact_trace,
+            num_hutchinson_samples=self.std.cfg.num_hutchinson_samples,
         )[0]
         scale_factor = self.dt.sqrt().log() * (self.std.cfg.example.sde_steps-1)
         self.ode_llk = raw_ode_llk - scale_factor
@@ -116,7 +122,9 @@ class StudentTProposal(Proposal):
         raw_ode_llk = self.std.ode_log_likelihood(
             samples,
             cond=self.std.cond.to(device),
-            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device)
+            alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
+            exact=self.std.cfg.compute_exact_trace,
+            num_hutchinson_samples=self.std.cfg.num_hutchinson_samples,
         )[0]
         self.ode_llk = raw_ode_llk - self.sigma.log()
         return self.ode_llk
