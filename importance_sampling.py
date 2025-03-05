@@ -229,7 +229,10 @@ class BrownianMotionDiffTarget(Target):
             return torch.tensor(0.0108)
         elif alpha == 3.0:
             return torch.tensor(0.00225)
-        return torch.tensor(self.quadrature(alpha))
+        elif self.cfg.example.sde_steps <= 5:
+            return torch.tensor(self.quadrature(alpha))
+        else:
+            raise NotImplementedError
     def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:
         # 0.0059 for alpha=3
         # https://math.stackexchange.com/questions/2336266/exit-probability-on-a-brownian-motion-from-an-interval
