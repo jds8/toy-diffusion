@@ -1001,7 +1001,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    compute_ode_log_likelihood(
+    ode_llk = compute_ode_log_likelihood(
         analytical_llk,
         sample_trajs,
         std,
