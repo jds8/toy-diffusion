@@ -998,6 +998,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()
     ).sum(1).squeeze()
     tail = get_target(std).analytical_prob(alpha) if alpha.numpy() else torch.tensor(1.)
+    print(f'true tail prob: {tail}')
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)

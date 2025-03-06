@@ -48,8 +48,8 @@ class MultivariateGaussianProposal(Proposal):
             alpha=self.std.likelihood.alpha.reshape(-1, 1).to(device),
         )
         self.sample_trajs = sample_traj_out.samples[-1]
-        mu = torch.tensor(self.std.cfg.example.mu)
-        sigma = torch.tensor(self.std.cfg.example.sigma)
+        mu = torch.tensor(self.std.cfg.example.mu, device=self.sample.trajs.device)
+        sigma = torch.tensor(self.std.cfg.example.sigma, device=self.sample.trajs.device)
         L = torch.linalg.cholesky(sigma)
         self.trajs = torch.matmul(L, self.sample_trajs) + mu
         return self.trajs, self.sample_trajs
