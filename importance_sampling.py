@@ -165,8 +165,8 @@ class MultivariateGaussianTarget(Target):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.dist = dist.MultivariateNormal(
-            torch.tensor(cfg.example.mu).squeeze(-1),
-            torch.tensor(cfg.example.sigma)
+            torch.tensor(cfg.example.mu, device=device).squeeze(-1),
+            torch.tensor(cfg.example.sigma, device=device)
         )
     def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         return self.dist.log_prob(saps.squeeze(-1))
