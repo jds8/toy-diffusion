@@ -175,7 +175,7 @@ class SampleConfig(BaseConfig):
     integrator_type: IntegratorType = IntegratorType.ProbabilityFlow
     compute_exact_trace: bool = False
     num_hutchinson_samples: int = 1
-    figs_dir = 'figs'
+    figs_dir: str = 'figs'
 
 
 @dataclass
