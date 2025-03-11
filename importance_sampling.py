@@ -182,6 +182,20 @@ class BrownianMotionDiffTarget(Target):
             0.,
             self.dt.sqrt(),
         )
+        self.quadrature_values = {
+            3: {
+                1.: 0.37064871,
+                1.5: 0.146098491,
+                2.0: 0.047321563,
+                2.5: 0.012584247
+            },
+            5: {
+                1.: 0.4216649,
+                1.5: 0.1655791,
+                2.0: 0.0531212,
+                2.5: 0.0138067
+            }
+        }
     def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         # the elements of saps are dependent, but those of
         # saps.diff(dim=1) are independent increments
@@ -224,12 +238,16 @@ class BrownianMotionDiffTarget(Target):
         return 1 - result_x1
     def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         # no better solution known
-        if alpha == 2.5:
-            return torch.tensor(0.0108)
-        elif alpha == 3.0:
-            return torch.tensor(0.00225)
-        elif self.cfg.example.sde_steps <= 5:
-            return torch.tensor(self.quadrature(alpha))
+        if self.cfg.example.sde_steps == 104:
+            if alpha == 2.5:
+                return torch.tensor(0.0108)
+            if alpha == 3.0:
+                return torch.tensor(0.00225)
+        elif self.cfg.example.sde_steps in [3, 5]:
+            value_dct = self.quadrature_values[self.cfg.example.sde_steps]
+            if alpha in value_dct:
+                return torch.tensor(value_dct[alpha])
+            raise NotImplementedError
         else:
             raise NotImplementedError
     def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:
