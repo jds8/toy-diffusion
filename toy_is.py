@@ -177,14 +177,17 @@ def importance_sample(cfg):
         std = ContinuousEvaluator(cfg=cfg)
         cfg_obj = OmegaConf.to_object(cfg)
 
-        save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
+        save_dir = f'{cfg.figs_dir}/{cfg.model_name}'
         os.makedirs(save_dir, exist_ok=True)
 
         # get alpha level
         alpha = '%.1f' % cfg_obj.likelihood.alpha
 
         # save config
-        torch.save(cfg_str, f'{save_dir}/alpha={alpha}_config.txt')
+        torch.save(
+            cfg_str,
+            f'{save_dir}/alpha={alpha}_round_{cfg.start_round}_config.txt'
+        )
 
         ##################################################
         # true tail probability under target
@@ -204,6 +207,7 @@ def importance_sample(cfg):
 
         old_guidance = std.cfg.guidance
         for i in range(cfg.num_rounds):
+            curr_round = cfg.start_round + i
             print('round {}'.format(i))
             ##################################################
             # IS estimate using target
@@ -212,7 +216,7 @@ def importance_sample(cfg):
             num_full_splits, num_leftover = cfg_obj.num_splits()
             num_samples_list = [std.cfg.split_size] * num_full_splits + [num_leftover]
             test_fn = std.likelihood.get_condition
-            round_data = RoundData.load(save_dir, alpha, i)
+            round_data = RoundData.load(save_dir, alpha, curr_round)
             saps_idx = round_data.curr_sap
             target_estimate = round_data.target_estimate
             diffusion_estimate = round_data.diffusion_estimate
@@ -234,7 +238,7 @@ def importance_sample(cfg):
                     alpha,
                     saps_idx,
                     saps_new_idx,
-                    cfg.start_round+i
+                    curr_round
                 )
                 torch.save(
                     saps,
@@ -245,7 +249,7 @@ def importance_sample(cfg):
                     alpha,
                     saps_idx,
                     saps_new_idx,
-                    cfg.start_round+i
+                    curr_round
                 )
                 torch.save(
                     sample_time,
@@ -262,7 +266,7 @@ def importance_sample(cfg):
                     alpha,
                     saps_idx,
                     saps_new_idx,
-                    cfg.start_round+i
+                    curr_round
                 )
                 torch.save(
                     log_qrobs,
@@ -273,7 +277,7 @@ def importance_sample(cfg):
                     alpha,
                     saps_idx,
                     saps_new_idx,
-                    cfg.start_round+i
+                    curr_round
                 )
                 torch.save(
                     log_qrobs_time,
@@ -291,7 +295,7 @@ def importance_sample(cfg):
                 #     alpha,
                 #     saps_idx,
                 #     saps_new_idx,
-                #     cfg.start_round+i
+                #     curr_round
                 # )
                 # torch.save(
                 #     log_drobs,
@@ -302,7 +306,7 @@ def importance_sample(cfg):
                 #     alpha,
                 #     saps_idx,
                 #     saps_new_idx,
-                #     cfg.start_round+i
+                #     curr_round
                 # )
                 # torch.save(
                 #     log_drobs_time,
@@ -359,14 +363,14 @@ def importance_sample(cfg):
                 target_N=target_N,
                 total_num_saps_not_in_region=total_num_saps_not_in_region
             )
-            round_data.save(save_dir, alpha, i)
+            round_data.save(save_dir, alpha, curr_round)
             pct_saps_not_in_region = torch.tensor([100 * total_num_saps_not_in_region / target_N])
             logger.info(f'pct saps not in region: {pct_saps_not_in_region}')
             torch.save(pct_saps_not_in_region, \
             '{}/alpha={}_pct_saps_not_in_region_round_{}.pt'.format(
                 save_dir,
                 alpha,
-                cfg.start_round+i
+                curr_round
             ))
 
             finish_sample = time.time()
@@ -380,7 +384,7 @@ def importance_sample(cfg):
             torch.save(target_is_stats, '{}/alpha={}_target_is_stats_round_{}.pt'.format(
                 save_dir,
                 alpha,
-                cfg.start_round+i
+                curr_round
             ))
 
             finish = time.time()
@@ -390,7 +394,7 @@ def importance_sample(cfg):
             # torch.save(diffusion_is_stats, '{}/alpha={}_diffusion_is_stats_round_{}.pt'.format(
             #     save_dir,
             #     alpha,
-            #     cfg.start_round+i
+            #     curr_round
             # ))
             # logger.info('IS estimate with diffusion: {} and std. dev.: {}'.format(
             #     diffusion_estimate,

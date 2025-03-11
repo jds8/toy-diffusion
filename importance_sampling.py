@@ -220,7 +220,6 @@ class BrownianMotionDiffTarget(Target):
                 return normal_pdf(x2, x1, 1/4) * result_x3
             result_x2, _ = integrate.quad(inner_integral_x2, -alpha, alpha)
             return normal_pdf(x1, 0, 1/4) * result_x2
-
         result_x1, _ = integrate.quad(inner_integral_x1, -alpha, alpha)
         return 1 - result_x1
     def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:

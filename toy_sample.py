@@ -1277,10 +1277,6 @@ def sample(cfg):
 
     end_time = torch.tensor(1., device=device)
 
-    job_id = os.getenv("SLURM_JOB_ID")
-    if job_id is not None:
-        os.system(f'nvidia-smi --loop=900 --filename={job_id}-gpu_util.txt')
-
     with torch.no_grad():
         if isinstance(std.diffusion_model, TemporalTransformerUnet):
             test_transformer_bm(end_time, std)

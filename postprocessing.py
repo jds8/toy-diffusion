@@ -140,8 +140,7 @@ def plot_is_vs_alpha(figs_dir, model_name):
         'is_vs_alpha'
     )
 
-def get_true_tail_prob(figs_dir, model, alpha):
-    directory = '{}/{}'.format(figs_dir, model)
+def get_true_tail_prob(directory, alpha):
     true_file = '{}/{}'.format(
         directory,
         true_tail_prob(alpha)
@@ -179,7 +178,7 @@ def process_performance_data(figs_dir, model_name, args):
             alpha = float(pattern.search(filename).group(1))
             true_alpha_map[alpha] = data
     for alpha in args.alphas:
-        true, _ = get_true_tail_prob(figs_dir, model_name, alpha)
+        true, _ = get_true_tail_prob(directory, alpha)
         target = torch.stack(target_alpha_map[alpha])
         target_rel_errors = torch.abs(target - true) / true
         target_performance_data = torch.stack([
@@ -221,7 +220,8 @@ def old_plot_effort_v_performance(args, title, xlabel):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            true, _ = get_true_tail_prob(args.figs_dir, models_by_dim[dim][0], alpha)
+            directory = f'{args.figs_dir}/{models_by_dim[dim][0]}'
+            true, _ = get_true_tail_prob(directory, alpha)
             for model_name in models_by_dim[dim]:
                 directory = '{}/{}'.format(args.figs_dir, model_name)
                 target_file = '{}/{}'.format(
@@ -280,7 +280,8 @@ def plot_effort_v_performance(args, title, xlabel):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            true, _ = get_true_tail_prob(args.figs_dir, models_by_dim[dim][0], alpha)
+            directory = f'{args.figs_dir, models_by_dim[dim][0]}'
+            true, _ = get_true_tail_prob(directory, alpha)
             for model_name in models_by_dim[dim]:
                 directory = '{}/{}'.format(args.figs_dir, model_name)
                 target_file = '{}/{}'.format(
@@ -595,9 +596,8 @@ def make_performance_v_samples(cfg):
     will be for sample sizes 10x and 100x larger than the smallest IS sample size.
     """
     assert len(cfg.alphas) > 0 and len(cfg.samples) > 0
+    directory = f'{cfg.figs_dir}/{cfg.model_name}'
     for alpha in cfg.alphas:
-        directory = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
-
         # collect all sample data for each round
         sample_data = [None] * cfg.total_rounds
         sample_log_qrobs = [None] * cfg.total_rounds
@@ -637,7 +637,7 @@ def make_performance_v_samples(cfg):
 
         omega_cfg = OmegaConf.to_object(cfg)
         if not isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
-            true, _ = get_true_tail_prob(HydraConfig.get().run.dir, cfg.model_name, alpha)
+            true, _ = get_true_tail_prob(directory, alpha)
             true = true.to('cpu')
         else:
             batch_size = 1690000
