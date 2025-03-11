@@ -424,27 +424,37 @@ class ToyTrainer:
 
     def set_dl_iter(self):
         dataset = None
+        dataset_name = ''
         if isinstance(self.example, GaussianExampleConfig):
-            dataset = torch.load('gaussian_dataset.pt', map_location=device, weights_only=True)
+            dataset_name = 'gaussian_dataset.pt',
+            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
         elif isinstance(self.example, MultivariateGaussianExampleConfig):
             d = self.cfg.example.d
             if d == 2:
-                dataset = torch.load('gaussian2.pt', map_location=device, weights_only=True)
+                dataset_name = 'gaussian2.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif d == 4:
-                dataset = torch.load('gaussian4.pt', map_location=device, weights_only=True)
+                dataset_name = 'gaussian4.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif d == 8:
-                dataset = torch.load('gaussian8.pt', map_location=device, weights_only=True)
+                dataset_name = 'gaussian8.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif d == 64:
-                dataset = torch.load('gaussian64.pt', map_location=device, weights_only=True)
+                dataset_name = 'gaussian64.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
         elif isinstance(self.example, StudentTExampleConfig):
-            dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
+            dataset_name = 'student_t_dataset.pt'
+            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
             if self.cfg.example.sde_steps == 3:
-                dataset = torch.load('bm_dataset_3.pt', map_location=device, weights_only=True)
+                dataset_name = 'bm_dataset_3.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif self.cfg.example.sde_steps == 5:
-                dataset = torch.load('bm_dataset_5.pt', map_location=device, weights_only=True)
+                dataset_name = 'bm_dataset_5.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif self.cfg.example.sde_steps == 104:
-                dataset = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
+                dataset_name = 'bm_dataset.pt'
+                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             else:
                 raise NotImplementedError
         else:
@@ -452,6 +462,7 @@ class ToyTrainer:
 
         if dataset is None:
             raise ValueError('dataset is None')
+        print(f'loaded {dataset_name}')
 
         self.dataset_size = dataset.shape[0]
         self.dl = DataLoader(
