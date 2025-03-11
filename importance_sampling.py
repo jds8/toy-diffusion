@@ -187,13 +187,23 @@ class BrownianMotionDiffTarget(Target):
                 1.: 0.37064871,
                 1.5: 0.146098491,
                 2.0: 0.047321563,
-                2.5: 0.012584247
+                2.5: 0.012584247,
+                3.0: 0.00270902,
+                3.5: 0.0004655756,
+                4.0: 6.334919e-05,
+                4.5: 6.79543301e-06,
+                5.0: 5.7330383e-07,
+                5.5: 3.7979128e-08,
+                6.0: 1.97317518e-09,
             },
             5: {
                 1.: 0.4216649,
                 1.5: 0.1655791,
                 2.0: 0.0531212,
-                2.5: 0.0138067
+                2.5: 0.0138067,
+                3.0: 0.0028901723,
+                3.5: 0.00048466001,
+                4.0: 6.4789885e-05,
             }
         }
     def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
@@ -245,8 +255,9 @@ class BrownianMotionDiffTarget(Target):
                 return torch.tensor(0.00225)
         elif self.cfg.example.sde_steps in [3, 5]:
             value_dct = self.quadrature_values[self.cfg.example.sde_steps]
-            if alpha in value_dct:
-                return torch.tensor(value_dct[alpha])
+            alpha_float = alpha.item()
+            if alpha_float in value_dct:
+                return torch.tensor(value_dct[alpha_float])
             raise NotImplementedError
         else:
             raise NotImplementedError

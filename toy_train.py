@@ -439,7 +439,14 @@ class ToyTrainer:
         elif isinstance(self.example, StudentTExampleConfig):
             dataset = torch.load('student_t_dataset.pt', map_location=device, weights_only=True)
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
-            dataset = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
+            if self.cfg.example.sde_steps == 3:
+                dataset = torch.load('bm_dataset_3.pt', map_location=device, weights_only=True)
+            elif self.cfg.example.sde_steps == 5:
+                dataset = torch.load('bm_dataset_5.pt', map_location=device, weights_only=True)
+            elif self.cfg.example.sde_steps == 104:
+                dataset = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
+            else:
+                raise NotImplementedError
         else:
             raise NotImplementedError
 
