@@ -186,7 +186,7 @@ def importance_sample(cfg):
         # save config
         torch.save(
             cfg_str,
-            f'{save_dir}/alpha={alpha}_round_{cfg.start_round}_config.txt'
+            cfg_obj.get_config_file(save_dir, alpha, cfg.start_round)
         )
 
         ##################################################

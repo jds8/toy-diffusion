@@ -177,6 +177,9 @@ class SampleConfig(BaseConfig):
     num_hutchinson_samples: int = 1
     figs_dir: str = 'figs'
 
+    def get_config_file(self, save_dir, alpha, start_round):
+        return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'
+
 
 @dataclass
 class SMCSampleConfig(SampleConfig):

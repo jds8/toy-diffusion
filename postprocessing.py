@@ -542,10 +542,14 @@ def plot_pct_not_in_region(args, title, xlabel):
         plt.xlabel(xlabel)
         ax = plt.gca()
         ax.set_xscale('log')
-        cfg_str = torch.load(f'{directory}/alpha={alpha}_config.txt', weights_only=True)
-        pattern = re.compile('num_samples: ([0-9]+)')
-        result = re.search(pattern, cfg_str)
-        num_saps = int(result[1]) if result else 0
+        num_saps = 0
+        cfg_obj = OmegaConf.to_object(args)
+        for rnd in args.num_rounds:
+            cfg_file = cfg_obj.get_config_file(directory, alpha, rnd)
+            cfg_str = torch.load(cfg_file, weights_only=True)
+            pattern = re.compile('num_samples: ([0-9]+)')
+            result = re.search(pattern, cfg_str)
+            num_saps += int(result[1]) if result else 0
         plt.ylabel(f'Percentage out of {num_saps} Samples')
         plt.title(title+f' (alpha={alpha})')
         directory = '{}/effort_v_performance'.format(args.figs_dir)
