@@ -186,25 +186,26 @@ def process_performance_data(figs_dir, model_name, args):
             target_rel_errors.quantile(0.05),
             target_rel_errors.quantile(0.95)
         ])
-        diffusion = torch.stack(diffusion_alpha_map[alpha])
-        diffusion_rel_errors = torch.abs(diffusion - true) / true
-        diffusion_performance_data = torch.stack([
-            diffusion_rel_errors.quantile(0.5),
-            diffusion_rel_errors.quantile(0.05),
-            diffusion_rel_errors.quantile(0.95)
-        ])
         target_path = '{}/{}'.format(
             directory,
             target_is_performance(
                 alpha
             )
         )
-        diffusion_path = '{}/{}'.format(
-            directory,
-            diffusion_is_performance(alpha)
-        )
         torch.save(target_performance_data, target_path)
-        torch.save(diffusion_performance_data, diffusion_path)
+        if args.use_diffusion:
+            diffusion = torch.stack(diffusion_alpha_map[alpha])
+            diffusion_rel_errors = torch.abs(diffusion - true) / true
+            diffusion_performance_data = torch.stack([
+                diffusion_rel_errors.quantile(0.5),
+                diffusion_rel_errors.quantile(0.05),
+                diffusion_rel_errors.quantile(0.95)
+            ])
+            diffusion_path = '{}/{}'.format(
+                directory,
+                diffusion_is_performance(alpha)
+            )
+            torch.save(diffusion_performance_data, diffusion_path)
 
 def old_plot_effort_v_performance(args, title, xlabel):
     dims = get_dims(args)

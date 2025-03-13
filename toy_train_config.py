@@ -211,6 +211,7 @@ class PostProcessingConfig(SampleConfig):
     xlabel: str = ''
     samples: List[int] = field(default_factory=list)
     total_rounds: int = 100
+    use_diffusion: bool = False
 
 
 def get_target(cfg):
