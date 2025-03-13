@@ -278,9 +278,9 @@ def plot_effort_v_performance(args, title, xlabel):
             target_means = []
             target_upr = []
             target_lwr = []
-            diffusion_means = []
-            diffusion_upr = []
-            diffusion_lwr = []
+            # diffusion_means = []
+            # diffusion_upr = []
+            # diffusion_lwr = []
             directory = f'{args.figs_dir}/{models_by_dim[dim][0]}'
             true, _ = get_true_tail_prob(directory, alpha)
             for model_name in models_by_dim[dim]:
@@ -294,14 +294,15 @@ def plot_effort_v_performance(args, title, xlabel):
                 target_lwr.append(mean_quantiles[1].cpu())
                 target_upr.append(mean_quantiles[2].cpu())
 
-                diffusion_file = '{}/{}'.format(
-                    directory,
-                    diffusion_is_performance(alpha)
-                )
-                mean_quantiles = torch.load(diffusion_file, weights_only=True)
-                diffusion_means.append(mean_quantiles[0].cpu())
-                diffusion_lwr.append(mean_quantiles[1].cpu())
-                diffusion_upr.append(mean_quantiles[2].cpu())
+                # if args.use_diffusion:
+                #     diffusion_file = '{}/{}'.format(
+                #         directory,
+                #         diffusion_is_performance(alpha)
+                #     )
+                #     mean_quantiles = torch.load(diffusion_file, weights_only=True)
+                #     diffusion_means.append(mean_quantiles[0].cpu())
+                #     diffusion_lwr.append(mean_quantiles[1].cpu())
+                #     diffusion_upr.append(mean_quantiles[2].cpu())
             models_as_num = [int(x) for x in model_idxs_by_dim[dim]]
             ax.plot(
                 models_as_num,
@@ -749,8 +750,8 @@ def make_performance_v_samples(cfg):
 
 @hydra.main(version_base=None, config_path="conf", config_name="pp_config")
 def main(cfg):
-    # make_effort_v_performance(cfg)
-    make_performance_v_samples(cfg)
+    make_effort_v_performance(cfg)
+    # make_performance_v_samples(cfg)
 
 
 if __name__ == '__main__':
