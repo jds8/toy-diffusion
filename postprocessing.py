@@ -281,7 +281,7 @@ def plot_effort_v_performance(args, title, xlabel):
             diffusion_means = []
             diffusion_upr = []
             diffusion_lwr = []
-            directory = f'{args.figs_dir, models_by_dim[dim][0]}'
+            directory = f'{args.figs_dir}/{models_by_dim[dim][0]}'
             true, _ = get_true_tail_prob(directory, alpha)
             for model_name in models_by_dim[dim]:
                 directory = '{}/{}'.format(args.figs_dir, model_name)
