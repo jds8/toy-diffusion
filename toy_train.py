@@ -701,7 +701,7 @@ def train(cfg):
     else:
         raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
 
-    logger.info(f'Num model params: {trainer.get_num_params()}')
+    logger.info(f'Num model params: {trainer.num_params}')
 
     trainer.train()
 
