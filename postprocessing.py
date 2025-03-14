@@ -488,6 +488,23 @@ def process_pct_saps_data(figs_dir, model_name):
         )
         torch.save(pct_all_saps_data, pct_saps_path)
 
+def powers_of_two(n):
+    if n < 1:
+        # No valid power of two for numbers less than 1
+        return 0
+    power = 1
+    powers = []
+    powers.append(power)
+    while power * 2 <= n:
+        power *= 2
+        powers.append(power)
+    return powers
+
+def get_dim_mults(model_name: str):
+    model_dim = int(re.search('.*([0-1])Example.*')[1])
+    pwrs = powers_of_two(model_dim)
+    return str(pwrs)
+
 def dim_to_param(args, dim: int, model_name: str):
     # create model to get parameter count
     args.diffusion.dim = dim
@@ -495,6 +512,7 @@ def dim_to_param(args, dim: int, model_name: str):
     idx = args.diffusion._target_[::-1].find('.')
     target_prefix = args.diffusion._target_[::-1][idx+1:][::-1]
     args.diffusion._target_ = f'{target_prefix}.{model_target}'
+    args.diffusion.dim_mults = get_dim_mults(model_name)
     diffusion_model = hydra.utils.instantiate(
         args.diffusion,
         d_model=torch.tensor(1),
