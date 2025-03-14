@@ -538,7 +538,7 @@ def plot_pct_not_in_region(args, title, xlabel):
         ax.set_xscale('log')
         num_saps = 0
         cfg_obj = OmegaConf.to_object(args)
-        for rnd in range(args.num_rounds):
+        for rnd in range(args.total_rounds):
             cfg_file = cfg_obj.get_config_file(directory, alpha, rnd)
             try:
                 cfg_str = torch.load(cfg_file, weights_only=True)
