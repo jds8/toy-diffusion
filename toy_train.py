@@ -92,20 +92,12 @@ class ToyTrainer:
         self.dl = None
         self.dl_iter = None
         self.initialize_optimizer()
-        self.num_params = self.get_num_params()
+        self.num_params = self.diffusion_model.get_num_params()
 
         self.cfg.models_to_save = sorted(self.cfg.models_to_save)
 
         if self.cfg.model_name:
             self.load_model()
-
-    def get_num_params(self):
-        model_parameters = filter(
-            lambda p: p.requires_grad,
-            self.diffusion_model.parameters()
-        )
-        num_params = sum([np.prod(p.size()) for p in model_parameters])
-        return num_params
 
     def load_metadata(self, model_path, map_location):
         model = torch.load('{}'.format(model_path), map_location=map_location)

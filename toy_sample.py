@@ -71,16 +71,7 @@ class ToyEvaluator:
 
         self.cond = torch.tensor([self.cfg.cond], device=device) if self.cfg.cond is not None and self.cfg.cond >= 0. else None
 
-        self.num_params = self.get_num_params()
         self.load_model()
-
-    def get_num_params(self):
-        model_parameters = filter(
-            lambda p: p.requires_grad,
-            self.diffusion_model.parameters()
-        )
-        num_params = sum([np.prod(p.size()) for p in model_parameters])
-        return num_params
 
     def load_model_state_dict(self, model_path, map_location):
         model = torch.load(
@@ -90,7 +81,7 @@ class ToyEvaluator:
         )
         if 'model_state_dict' in model:
             self.diffusion_model.load_state_dict(model['model_state_dict'])
-            num_params = self.get_num_params()
+            num_params = self.diffusion_model.get_num_params()
             logger = logging.getLogger("main")
             logger.info('loaded model with {} parameters'.format(num_params))
         else:

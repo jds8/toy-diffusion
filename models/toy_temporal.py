@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import numpy as np
 import einops
 from einops.layers.torch import Rearrange
 
@@ -194,7 +195,20 @@ class ResidualTemporalTrajectoryBlock(nn.Module):
         return out + self.residual_conv(x)
 
 
-class TemporalIDK(nn.Module):
+class AbstractTemporalModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def get_num_params(self):
+        model_parameters = filter(
+            lambda p: p.requires_grad,
+            self.parameters()
+        )
+        num_params = sum([np.prod(p.size()) for p in model_parameters])
+        return num_params
+
+
+class TemporalIDK(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -262,7 +276,7 @@ class TemporalIDK(nn.Module):
         return x
 
 
-class TemporalUnet(nn.Module):
+class TemporalUnet(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -394,7 +408,7 @@ class TemporalUnet(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
-class TemporalGaussianUnetAlpha(nn.Module):
+class TemporalGaussianUnetAlpha(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -525,7 +539,7 @@ class TemporalGaussianUnetAlpha(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
-class TemporalUnetAlpha(nn.Module):
+class TemporalUnetAlpha(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -660,7 +674,7 @@ class TemporalUnetAlpha(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
-class TemporalNNet(nn.Module):
+class TemporalNNet(AbstractTemporalModel):
     def __init__(
         self,
         d_model,
@@ -768,7 +782,7 @@ class TemporalNNet(nn.Module):
         return x[:b_dim, :h_dim, :t_dim]
 
 
-class DiffusionBlock(nn.Module):
+class DiffusionBlock(AbstractTemporalModel):
     def __init__(self, nunits):
         super(DiffusionBlock, self).__init__()
         self.linear = nn.Linear(nunits, nunits)
@@ -779,7 +793,7 @@ class DiffusionBlock(nn.Module):
         return x
 
 
-class DiffusionModel(nn.Module):
+class DiffusionModel(AbstractTemporalModel):
     def __init__(self, nfeatures: int, nblocks: int = 2, nunits: int = 64):
         super(DiffusionModel, self).__init__()
 
@@ -796,7 +810,7 @@ class DiffusionModel(nn.Module):
         return val
 
 
-class TemporalClassifier(nn.Module):
+class TemporalClassifier(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -884,7 +898,7 @@ class TemporalClassifier(nn.Module):
         return y
 
 
-class NewTemporalClassifier(nn.Module):
+class NewTemporalClassifier(AbstractTemporalModel):
 
     def __init__(
         self,
@@ -965,7 +979,7 @@ class NewTemporalClassifier(nn.Module):
         return self.final_layer(x[..., 0])
 
 
-class TemporalTransformerUnet(nn.Module):
+class TemporalTransformerUnet(AbstractTemporalModel):
 
     def __init__(
         self,

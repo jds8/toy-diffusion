@@ -489,19 +489,17 @@ def process_pct_saps_data(figs_dir, model_name):
         torch.save(pct_all_saps_data, pct_saps_path)
 
 def dim_to_param(args, dim: int, model_name: str):
-    gaussian_dict = {
-        32: 3996833,
-        40: 6238601,
-        64: 15946049
-    }
-    bm_dict = {
-        32: 4147809,
-        40: 6474361,
-        64: 16549057
-    }
-    if 'gaussian' in model_name.lower():
-        return gaussian_dict[dim]
-    return bm_dict[dim]
+    # create model to get parameter count
+    args.diffusion.dim = dim
+    model_target = re.search('.*_(Temporal.*)_.*', model_name)[1]
+    args.diffusion._target_ = model_target
+    diffusion_model = hydra.utils.instantiate(
+        args.diffusion,
+        d_model=torch.tensor(1),
+        device=device
+    )
+    num_params = diffusion_model.get_num_params()
+    return num_params
 
 def plot_pct_not_in_region(args, title, xlabel):
     dims = get_dims(args)
