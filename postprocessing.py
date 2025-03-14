@@ -512,12 +512,12 @@ def dim_to_param(args, dim: int, model_name: str):
     idx = args.diffusion._target_[::-1].find('.')
     target_prefix = args.diffusion._target_[::-1][idx+1:][::-1]
     args.diffusion._target_ = f'{target_prefix}.{model_target}'
-    args.diffusion.dim_mults = get_dim_mults(model_name)
     diffusion_model = hydra.utils.instantiate(
         args.diffusion,
         d_model=torch.tensor(1),
         device=device
     )
+    diffusion_model.dim_mults = get_dim_mults(model_name)
     num_params = diffusion_model.get_num_params()
     return num_params
 
