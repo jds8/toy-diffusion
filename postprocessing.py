@@ -492,8 +492,8 @@ def dim_to_param(args, dim: int, model_name: str):
     # create model to get parameter count
     args.diffusion.dim = dim
     model_target = re.search('.*_(Temporal.*)_dim.*', model_name)[1]
-    idx = args.diffusion._target_.reversed().find('.')
-    target_prefix = args.diffusion._target_.reversed()[idx+1:].reversed()
+    idx = args.diffusion._target_[::-1].find('.')
+    target_prefix = args.diffusion._target_[::-1][idx+1:][::-1]
     args.diffusion._target_ = f'{target_prefix}.{model_target}'
     diffusion_model = hydra.utils.instantiate(
         args.diffusion,
