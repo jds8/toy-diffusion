@@ -501,7 +501,7 @@ def powers_of_two(n):
     return powers
 
 def get_dim_mults(model_name: str):
-    model_dim = int(re.search('.*([0-1])Example.*', model_name)[1])
+    model_dim = int(re.search('.*([0-9])Example.*', model_name)[1])
     pwrs = powers_of_two(model_dim)
     return str(pwrs)
 
