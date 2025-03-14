@@ -22,8 +22,8 @@ from toy_is import iterative_importance_estimate
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def performance_v_samples(alpha):
-    return f'alpha={alpha}_performance_v_samples'
+def performance_v_samples(alpha, title):
+    return f'alpha={alpha}_{title}_performance_v_samples'
 
 def pct_all_saps_not_in_region(alpha):
     return f'alpha={alpha}_pct_all_saps_not_in_region.pt'
@@ -247,7 +247,7 @@ def old_plot_effort_v_performance(args, title, xlabel):
             plt.plot(
                 models_as_num,
                 target_means,
-                label='params={}'.format(dim_to_param(dim, model_name)),
+                label='params={}'.format(dim_to_param(args, dim, model_name)),
                 marker='x'
             )
             plt.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
@@ -308,7 +308,7 @@ def plot_effort_v_performance(args, title, xlabel):
             ax.plot(
                 models_as_num,
                 target_means,
-                label='params={}'.format(dim_to_param(dim, model_name)),
+                label='params={}'.format(dim_to_param(args, dim, model_name)),
                 marker='x'
             )
             ax.fill_between(models_as_num, target_lwr, target_upr, alpha=0.3)
@@ -356,7 +356,7 @@ def plot_effort_v_performance(args, title, xlabel):
         os.makedirs(directory, exist_ok=True)
         error_bar_file = '{}/{}.pdf'.format(
             directory,
-            performance_v_samples(alpha)
+            performance_v_samples(alpha, title)
         )
         plt.savefig(error_bar_file)
         plt.clf()
@@ -400,7 +400,7 @@ def make_effort_v_performance(args):
         process_performance_data(args.figs_dir, model_name, args)
         process_pct_saps_data(args.figs_dir, model_name)
     title = get_performance_v_effort_title(args)
-    save_dir = plot_effort_v_performance(
+    save_dir = old_plot_effort_v_performance(
         args,
         title,
         xlabel='Training Samples'
@@ -447,14 +447,8 @@ def get_dims(args) -> List[int]:
 
 def get_title(args, title):
     model_prefix = args.model_names[0]
-    GAUSSIAN = 'Gaussian'
-    BM = 'BrownianMotion'
-    if GAUSSIAN in model_prefix:
-        return ' '.join([GAUSSIAN, title])
-    elif BM in model_prefix:
-        return ' '.join([BM, title])
-    else:
-        raise NotImplementedError
+    name = re.search('.*_(.*)Example.*', model_prefix)[1]
+    return ' '.join([name, title])
 
 
 def get_performance_v_effort_title(args):
@@ -494,7 +488,7 @@ def process_pct_saps_data(figs_dir, model_name):
         )
         torch.save(pct_all_saps_data, pct_saps_path)
 
-def dim_to_param(dim: int, model_name: str):
+def dim_to_param(args, dim: int, model_name: str):
     gaussian_dict = {
         32: 3996833,
         40: 6238601,
@@ -534,7 +528,7 @@ def plot_pct_not_in_region(args, title, xlabel):
             plt.plot(
                 models_as_num,
                 pct_means,
-                label='params={}'.format(dim_to_param(dim, model_name), model_name),
+                label='params={}'.format(dim_to_param(args, dim, model_name), model_name),
                 marker='x'
             )
             plt.fill_between(models_as_num, pct_lwr, pct_upr, alpha=0.3)
@@ -544,9 +538,12 @@ def plot_pct_not_in_region(args, title, xlabel):
         ax.set_xscale('log')
         num_saps = 0
         cfg_obj = OmegaConf.to_object(args)
-        for rnd in args.num_rounds:
+        for rnd in range(args.num_rounds):
             cfg_file = cfg_obj.get_config_file(directory, alpha, rnd)
-            cfg_str = torch.load(cfg_file, weights_only=True)
+            try:
+                cfg_str = torch.load(cfg_file, weights_only=True)
+            except:
+                continue
             pattern = re.compile('num_samples: ([0-9]+)')
             result = re.search(pattern, cfg_str)
             num_saps += int(result[1]) if result else 0
@@ -747,7 +744,7 @@ def make_performance_v_samples(cfg):
         os.makedirs(directory, exist_ok=True)
         error_bar_file = '{}/{}.pdf'.format(
             directory,
-            performance_v_samples(alpha)
+            performance_v_samples(alpha, title)
         )
         plt.savefig(error_bar_file)
         plt.clf()
