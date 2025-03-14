@@ -37,8 +37,8 @@ def diffusion_is_performance(alpha):
 def true_tail_prob(alpha):
     return f'alpha={alpha}_tail_prob.pt'
 
-def effort_v_performance_plot_name(alpha):
-    return f'alpha={alpha}_effort_v_performance'
+def effort_v_performance_plot_name(alpha, title):
+    return f'alpha={alpha}_{title}_effort_v_performance'
 
 def pct_not_in_region_plot_name(alpha):
     return f'alpha={alpha}_pct_outside_region'
