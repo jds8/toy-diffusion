@@ -676,7 +676,7 @@ def train(cfg):
     job_id = os.getenv("SLURM_JOB_ID")
     if job_id is not None:
         subprocess.Popen(
-            f'nvidia-smi --loop=900 --filename={job_id}-gpu_util.txt',
+            f'nvidia-smi --loop=60 --filename={job_id}-gpu_util.txt',
             shell=True
         )
 
