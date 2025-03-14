@@ -503,7 +503,7 @@ def powers_of_two(n):
 def get_dim_mults(model_name: str):
     model_dim = int(re.search('.*([0-9])Example.*', model_name)[1])
     pwrs = powers_of_two(model_dim)
-    return str(pwrs)
+    return pwrs
 
 def dim_to_param(args, dim: int, model_name: str):
     # create model to get parameter count
@@ -515,9 +515,9 @@ def dim_to_param(args, dim: int, model_name: str):
     diffusion_model = hydra.utils.instantiate(
         args.diffusion,
         d_model=torch.tensor(1),
-        device=device
+        dim_mults=get_dim_mults(model_name),
+        device=device,
     )
-    diffusion_model.dim_mults = get_dim_mults(model_name)
     num_params = diffusion_model.get_num_params()
     return num_params
 
