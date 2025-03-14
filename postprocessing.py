@@ -491,8 +491,10 @@ def process_pct_saps_data(figs_dir, model_name):
 def dim_to_param(args, dim: int, model_name: str):
     # create model to get parameter count
     args.diffusion.dim = dim
-    model_target = re.search('.*_(Temporal.*)_.*', model_name)[1]
-    args.diffusion._target_ = model_target
+    model_target = re.search('.*_(Temporal.*)_dim.*', model_name)[1]
+    idx = args.diffusion._target_.reversed().find('.')
+    target_prefix = args.diffusion._target_.reversed()[idx+1:].reversed()
+    args.diffusion._target_ = f'{target_prefix}.{model_target}'
     diffusion_model = hydra.utils.instantiate(
         args.diffusion,
         d_model=torch.tensor(1),
