@@ -93,7 +93,7 @@ class ToyTrainer:
         self.dl = None
         self.dl_iter = None
         self.initialize_optimizer()
-        self.num_params = self.diffusion_model.get_num_params()
+        self.num_params = self.diffusion_model.module.get_num_params()
 
         self.cfg.models_to_save = sorted(self.cfg.models_to_save)
 
