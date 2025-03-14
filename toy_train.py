@@ -4,6 +4,7 @@ import logging
 import warnings
 import wandb
 import os
+import subprocess
 from pathlib import Path
 import re
 
@@ -674,7 +675,10 @@ def train(cfg):
 
     job_id = os.getenv("SLURM_JOB_ID")
     if job_id is not None:
-        os.system(f'nvidia-smi --loop=900 --filename={job_id}-gpu_util.txt')
+        subprocess.Popen(
+            f'nvidia-smi --loop=900 --filename={job_id}-gpu_util.txt',
+            shell=True
+        )
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 
