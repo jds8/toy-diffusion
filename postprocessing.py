@@ -260,7 +260,13 @@ def old_plot_effort_v_performance(args, title, xlabel):
         plt.title(title+f' (alpha={alpha})')
         directory = '{}/effort_v_performance'.format(args.figs_dir)
         os.makedirs(directory, exist_ok=True)
-        fig_file = '{}/{}.pdf'.format(directory, effort_v_performance_plot_name(alpha))
+        fig_file = '{}/{}.pdf'.format(
+            directory,
+            effort_v_performance_plot_name(
+                alpha,
+                title
+            )
+        )
         plt.savefig(fig_file)
         plt.clf()
     return directory
