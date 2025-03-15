@@ -922,7 +922,6 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     ))
 
     errors = std.compute_all_sample_errors(sample_trajs, alpha)
-    import pdb; pdb.set_trace()
 
     cond = std.cond if std.cond else torch.tensor([-1.])
     mu = torch.tensor(cfg.example.mu)
