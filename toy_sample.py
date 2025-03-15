@@ -415,6 +415,64 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=sol, fevals=fevals)
 
+    def compute_bins(self, samples: torch.tensor, num_comparisons: int):
+        all_props = []
+        all_bins = []
+        min_sample = samples.min().numpy()
+        max_sample = samples.max().numpy()
+        subsamples_idxs = np.linspace(10, samples.shape[0], num_comparisons)
+        for subsample_idx in subsamples_idxs:
+            num_bins = int(np.sqrt(subsample_idx))
+            sub_samples, bins = np.histogram(
+                samples[:subsample_idx.astype(int)].numpy(),
+                bins=num_bins,
+                range=(min_sample, max_sample)
+            )
+            props = sub_samples / subsample_idx
+            all_props.append(props)
+            all_bins.append(bins)
+        return all_props, all_bins
+
+    def compute_sample_error(
+        self,
+        empirical_props: np.ndarray,
+        bins: np.ndarray,
+        dim: int,
+        alpha: np.ndarray,
+        sample_min: float,
+        sample_max: float,
+    ):
+        analytical_props = stats.chi(dim).cdf(bins[1:]) - stats.chi(dim).cdf(bins[:-1])
+        normalizing_constant = 1 - stats.chi(dim).cdf(alpha)
+        analytical_props /= normalizing_constant
+        worst_error = np.max(np.abs((analytical_props - empirical_props) / analytical_props))
+        return worst_error
+
+    def compute_all_sample_errors(
+        self,
+        total_raw_samples: torch.tensor,  # [B, D, 1]
+        alpha: torch.tensor,
+        num_comparisons: int = 10
+    ):
+        dim = total_raw_samples.shape[1]
+        total_samples = total_raw_samples.norm(dim=[1, 2])  # [B]
+        all_props, all_bins = self.compute_bins(
+            total_samples,
+            num_comparisons=num_comparisons
+        )
+        errors = []
+        for empirical_props, bins in zip(all_props, all_bins):
+            error = self.compute_sample_error(
+                empirical_props,
+                bins,
+                dim,
+                alpha.numpy(),
+                sample_min=total_samples.min(),
+                sample_max=total_samples.max()
+            )
+            errors.append(error)
+        return errors
+
     def sample_trajectories(self, **kwargs):
         print('sampling trajectories...')
         if self.cfg.integrator_type == IntegratorType.ProbabilityFlow:
@@ -863,6 +921,9 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         std.likelihood.alpha,
     ))
 
+    errors = std.compute_all_sample_errors(sample_trajs, alpha)
+    import pdb; pdb.set_trace()
+
     cond = std.cond if std.cond else torch.tensor([-1.])
     mu = torch.tensor(cfg.example.mu)
     sigma = torch.tensor(cfg.example.sigma)
@@ -897,6 +958,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         plot_ellipsoid(end_time, cfg, sample_trajs, std)
         plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
         generate_diffusion_video(ode_llk[0], all_trajs, cfg)
+
     import pdb; pdb.set_trace()
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
