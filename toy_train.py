@@ -18,6 +18,8 @@ import torch.distributions as dist
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
+import torch.multiprocessing as mp
+import torch.distributed as distributed
 
 
 from toy_train_config import TrainConfig, get_model_path, ExampleConfig, \
@@ -70,16 +72,20 @@ class AlphaModelInput(ModelInput):
 
 
 class ToyTrainer:
-    def __init__(self, cfg: TrainConfig, diffusion_model):
+    def __init__(self, rank: int, world_size: int, cfg: TrainConfig, diffusion_model):
+        self.rank = rank
         self.cfg = cfg
-        self.diffusion_model = diffusion_model
+        self.diffusion_model = diffusion_model.to(rank)
 
         self.sampler = hydra.utils.instantiate(cfg.sampler)
 
         self.likelihood = hydra.utils.instantiate(cfg.likelihood)
         self.example = OmegaConf.to_object(cfg.example)
 
-        self.diffusion_model = nn.parallel.DataParallel(diffusion_model).to(device)
+        torch.distributed.init_process_group(
+            backend='gloo', rank=rank, world_size=world_size
+        )
+        self.diffusion_model = nn.parallel.DistributedDataParallel(diffusion_model, device_ids=[rank])
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
@@ -657,8 +663,43 @@ class TrajectoryConditionTrainer(ToyTrainer):
         return AlphaModelInput(x0_in, None, None)
 
 
+def train(rank, world_size, cfg):
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = "29500"
+
+    cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
+
+    d_model = torch.tensor(1)
+    torch.cuda.set_device(rank)
+    device = torch.cuda.current_device()
+    diffusion_model = hydra.utils.instantiate(
+        cfg.diffusion,
+        d_model=d_model,
+        device=device
+    )
+    if isinstance(diffusion_model, TemporalUnet):
+        trainer = ThresholdConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
+    if isinstance(diffusion_model, TemporalIDK):
+        trainer = ThresholdConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
+    elif isinstance(diffusion_model, TemporalUnetAlpha):
+        trainer = AlphaConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
+    elif isinstance(diffusion_model, TemporalGaussianUnetAlpha):
+        trainer = AlphaConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
+    elif isinstance(diffusion_model, TemporalTransformerUnet):
+        trainer = TrajectoryConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
+    else:
+        raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
+
+    logger = logging.getLogger("main")
+    logger.info(f'Num model params: {trainer.num_params}')
+
+    trainer.train()
+
+    distributed.destroy_process_group()
+
+
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_multivariate_64_train_config")
-def train(cfg):
+def train_setup(cfg):
     logger = logging.getLogger("main")
     logger.info('run type: train')
     logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
@@ -680,30 +721,8 @@ def train(cfg):
             shell=True
         )
 
-    cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
-
-    d_model = torch.tensor(1)
-    diffusion_model = hydra.utils.instantiate(
-        cfg.diffusion,
-        d_model=d_model,
-        device=device
-    )
-    if isinstance(diffusion_model, TemporalUnet):
-        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
-    if isinstance(diffusion_model, TemporalIDK):
-        trainer = ThresholdConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
-    elif isinstance(diffusion_model, TemporalUnetAlpha):
-        trainer = AlphaConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
-    elif isinstance(diffusion_model, TemporalGaussianUnetAlpha):
-        trainer = AlphaConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
-    elif isinstance(diffusion_model, TemporalTransformerUnet):
-        trainer = TrajectoryConditionTrainer(cfg=cfg, diffusion_model=diffusion_model)
-    else:
-        raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
-
-    logger.info(f'Num model params: {trainer.num_params}')
-
-    trainer.train()
+    world_size = torch.cuda.device_count()
+    mp.spawn(train, args=(world_size, cfg), nprocs=world_size, join=True)
 
 
 if __name__ == "__main__":
@@ -714,4 +733,4 @@ if __name__ == "__main__":
     cs = ConfigStore.instance()
     cs.store(name="vpsde_train_config", node=TrainConfig)
     register_configs()
-    train()
+    train_setup()
