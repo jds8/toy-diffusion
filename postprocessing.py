@@ -680,7 +680,7 @@ def make_performance_v_samples(cfg):
                 torch.zeros(batch_size, 1, 1),
                 scaled_x0.cumsum(dim=1)
             ], dim=1)
-            true = (sample_trajs > alpha).any(dim=1).to(sample_trajs.dtype).mean()
+            true = (sample_trajs.abs() > alpha).any(dim=1).to(sample_trajs.dtype).mean()
 
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars

@@ -669,14 +669,28 @@ def train(rank, world_size, cfg):
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 
+    try:
+        torch.cuda.set_device(rank)
+        device = torch.cuda.current_device()
+        end = False
+    except:
+        device = 'cpu'
+        end = True
+
     d_model = torch.tensor(1)
-    torch.cuda.set_device(rank)
-    device = torch.cuda.current_device()
     diffusion_model = hydra.utils.instantiate(
         cfg.diffusion,
         d_model=d_model,
         device=device
     )
+
+    logger = logging.getLogger("main")
+    logger.info(f'Num model params: {diffusion_model.get_num_params()}')
+
+    if end:
+        logger.info('Cannot train on CPU; terminating...')
+        return
+
     if isinstance(diffusion_model, TemporalUnet):
         trainer = ThresholdConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
     if isinstance(diffusion_model, TemporalIDK):
@@ -689,9 +703,6 @@ def train(rank, world_size, cfg):
         trainer = TrajectoryConditionTrainer(rank, world_size, cfg=cfg, diffusion_model=diffusion_model)
     else:
         raise NotImplementedError('(New?) Diffusion model type does not correspond to a Trainer')
-
-    logger = logging.getLogger("main")
-    logger.info(f'Num model params: {trainer.num_params}')
 
     trainer.train()
 
@@ -722,7 +733,10 @@ def train_setup(cfg):
         )
 
     world_size = torch.cuda.device_count()
-    mp.spawn(train, args=(world_size, cfg), nprocs=world_size, join=True)
+    if world_size:
+        mp.spawn(train, args=(world_size, cfg), nprocs=world_size, join=True)
+    else:
+        train(0, 0, cfg)
 
 
 if __name__ == "__main__":
