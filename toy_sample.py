@@ -426,7 +426,7 @@ class ContinuousEvaluator(ToyEvaluator):
         min_sample = samples.min().numpy()
         max_sample = samples.max().numpy()
         for subsample_size in subsample_sizes:
-            num_bins = int(np.sqrt(subsample_size))
+            num_bins = int(np.log(subsample_size))
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].numpy(),
                 bins=num_bins,
