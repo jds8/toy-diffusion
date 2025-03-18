@@ -43,6 +43,10 @@ SampleOutput = namedtuple('SampleOutput', 'samples fevals')
 
 SDEConfig = namedtuple('SDEConfig', 'drift diffusion sde_steps end_time')
 DiffusionConfig = namedtuple('DiffusionConfig', 'f g')
+HistogramErrorsOutput = namedtuple(
+    'HistogramErrorsOutput',
+    'errors subsample_sizes all_num_bins'
+)
 
 DEBUG = False
 
@@ -415,23 +419,24 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=sol, fevals=fevals)
 
-    def compute_bins(self, samples: torch.tensor, num_comparisons: int):
+    def compute_bins(self, samples: torch.tensor, subsample_sizes: np.ndarray):
         all_props = []
         all_bins = []
+        all_num_bins = []
         min_sample = samples.min().numpy()
         max_sample = samples.max().numpy()
-        subsamples_idxs = np.linspace(10, samples.shape[0], num_comparisons)
-        for subsample_idx in subsamples_idxs:
-            num_bins = int(np.sqrt(subsample_idx))
-            sub_samples, bins = np.histogram(
-                samples[:subsample_idx.astype(int)].numpy(),
+        for subsample_size in subsample_sizes:
+            num_bins = int(np.sqrt(subsample_size))
+            subsamples, bins = np.histogram(
+                samples[:subsample_size.astype(int)].numpy(),
                 bins=num_bins,
                 range=(min_sample, max_sample)
             )
-            props = sub_samples / subsample_idx
+            props = subsamples / subsample_size
             all_props.append(props)
             all_bins.append(bins)
-        return all_props, all_bins
+            all_num_bins.append(num_bins)
+        return all_props, all_bins, all_num_bins
 
     def compute_sample_error(
         self,
@@ -452,13 +457,13 @@ class ContinuousEvaluator(ToyEvaluator):
         self,
         total_raw_samples: torch.tensor,  # [B, D, 1]
         alpha: torch.tensor,
-        num_comparisons: int = 10
+        subsample_sizes: np.ndarray,
     ):
         dim = total_raw_samples.shape[1]
         total_samples = total_raw_samples.norm(dim=[1, 2])  # [B]
-        all_props, all_bins = self.compute_bins(
+        all_props, all_bins, all_num_bins = self.compute_bins(
             total_samples,
-            num_comparisons=num_comparisons
+            subsample_sizes
         )
         errors = []
         for empirical_props, bins in zip(all_props, all_bins):
@@ -471,7 +476,7 @@ class ContinuousEvaluator(ToyEvaluator):
                 sample_max=total_samples.max()
             )
             errors.append(error)
-        return errors
+        return errors, all_num_bins
 
     def sample_trajectories(self, **kwargs):
         print('sampling trajectories...')
@@ -641,6 +646,27 @@ def compute_ode_log_likelihood(
         index=False
     )
     return ode_llk
+
+def plot_histogram_errors(sample_trajs, alpha, std):
+    all_subsample_sizes = np.linspace(50, 5000, 100)
+    subsample_sizes = all_subsample_sizes[
+        (all_subsample_sizes <= sample_trajs.shape[0]).nonzero()[0]
+    ]
+    errors, all_num_bins = std.compute_all_sample_errors(
+        sample_trajs,
+        alpha,
+        subsample_sizes=subsample_sizes
+    )
+    plt.clf()
+    plt.plot(subsample_sizes, errors, label='Error')
+    plt.xlabel('Sample Size')
+    plt.ylabel('Relative Error')
+    plt.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
+    plt.legend()
+
+    plt.title('Histogram Approximation Error vs. Sample Size')
+    plt.savefig('{}/histogram_approx_error.pdf'.format(HydraConfig.get().run.dir))
+    return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/gaussian_sample_trajs.pt')
@@ -921,7 +947,11 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         std.likelihood.alpha,
     ))
 
-    errors = std.compute_all_sample_errors(sample_trajs, alpha)
+    hist_errors_output = plot_histogram_errors(
+        sample_trajs,
+        alpha,
+        std
+    )
 
     cond = std.cond if std.cond else torch.tensor([-1.])
     mu = torch.tensor(cfg.example.mu)
@@ -1008,6 +1038,12 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         save_dir,
         alpha_str,
     ))
+
+    hist_error_output = plot_histogram_errors(
+        sample_trajs,
+        alpha,
+        std
+    )
 
     # turn state diffs into Brownian motion
     bm_trajs = torch.cat([
