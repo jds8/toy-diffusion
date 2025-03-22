@@ -3,6 +3,7 @@ import os
 import warnings
 import logging
 import time as timer
+from typing_extensions import Callable
 
 from pathlib import Path
 
@@ -48,13 +49,46 @@ HistogramErrorsOutput = namedtuple(
     'errors subsample_sizes all_num_bins'
 )
 
-DEBUG = False
+DEBUG = True
 
 
 #########################
 #########################
 def suppresswarning():
     warnings.warn("user", UserWarning)
+
+
+class ErrorMeasure:
+    def __call__(self, analytical_props, empirical_props):
+        return self.error(analytical_props, empirical_props)
+class MaxError(ErrorMeasure):
+    def error(self, analytical_props, empirical_props):
+        return np.max(np.abs(
+            (analytical_props - empirical_props) / analytical_props
+        ))
+    def label(self):
+        return 'Maximum Error Across All Bins'
+class SumError(ErrorMeasure):
+    def error(self, analytical_props, empirical_props):
+        return np.sum(np.abs(
+            (analytical_props - empirical_props) / analytical_props
+        ))
+    def label(self):
+        return 'Sum of Errors Across All Bins'
+class ForwardKLError(ErrorMeasure):
+    def error(self, analytical_props, empirical_props):
+        if not np.all(empirical_props):
+            return np.array(100)
+        return np.sum(analytical_props * (np.log(analytical_props) - np.log(empirical_props)))
+    def label(self):
+        return 'Forward KL Divergence'
+class ReverseKLError(ErrorMeasure):
+    def error(self, analytical_props, empirical_props):
+        if not np.all(empirical_props):
+            return np.array(100)
+        return np.sum(empirical_props * (np.log(empirical_props) - np.log(analytical_props)))
+    def label(self):
+        return 'Reverse KL Divergence'
 
 
 class ToyEvaluator:
@@ -423,20 +457,22 @@ class ContinuousEvaluator(ToyEvaluator):
         all_props = []
         all_bins = []
         all_num_bins = []
+        all_subsamples = []
         min_sample = samples.min().numpy()
         max_sample = samples.max().numpy()
         for subsample_size in subsample_sizes:
-            num_bins = int(np.log(subsample_size))
+            num_bins = int(subsample_size ** .75)
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].numpy(),
                 bins=num_bins,
                 range=(min_sample, max_sample)
             )
             props = subsamples / subsample_size
+            all_subsamples.append(subsamples)
             all_props.append(props)
             all_bins.append(bins)
             all_num_bins.append(num_bins)
-        return all_props, all_bins, all_num_bins
+        return all_subsamples, all_props, all_bins, all_num_bins
 
     def compute_sample_error(
         self,
@@ -446,22 +482,26 @@ class ContinuousEvaluator(ToyEvaluator):
         alpha: np.ndarray,
         sample_min: float,
         sample_max: float,
+        analytical_dist,
+        error_measure: ErrorMeasure,
     ):
-        analytical_props = stats.chi(dim).cdf(bins[1:]) - stats.chi(dim).cdf(bins[:-1])
+        analytical_props = analytical_dist.cdf(bins[1:]) - analytical_dist.cdf(bins[:-1])
         normalizing_constant = 1 - stats.chi(dim).cdf(alpha)
         analytical_props /= normalizing_constant
-        worst_error = np.max(np.abs((analytical_props - empirical_props) / analytical_props))
-        return worst_error
+        error = error_measure(analytical_props, empirical_props)
+        return error
 
     def compute_all_sample_errors(
         self,
         total_raw_samples: torch.tensor,  # [B, D, 1]
-        alpha: torch.tensor,
+        alpha: np.ndarray,
         subsample_sizes: np.ndarray,
+        analytical_dist,
+        error_measure: ErrorMeasure,
     ):
         dim = total_raw_samples.shape[1]
         total_samples = total_raw_samples.norm(dim=[1, 2])  # [B]
-        all_props, all_bins, all_num_bins = self.compute_bins(
+        all_subsamples, all_props, all_bins, all_num_bins = self.compute_bins(
             total_samples,
             subsample_sizes
         )
@@ -471,12 +511,14 @@ class ContinuousEvaluator(ToyEvaluator):
                 empirical_props,
                 bins,
                 dim,
-                alpha.numpy(),
+                alpha,
                 sample_min=total_samples.min(),
-                sample_max=total_samples.max()
+                sample_max=total_samples.max(),
+                analytical_dist=analytical_dist,
+                error_measure=error_measure,
             )
             errors.append(error)
-        return errors, all_num_bins
+        return errors, all_subsamples, all_props, all_bins, all_num_bins
 
     def sample_trajectories(self, **kwargs):
         print('sampling trajectories...')
@@ -647,25 +689,68 @@ def compute_ode_log_likelihood(
     )
     return ode_llk
 
-def plot_histogram_errors(sample_trajs, alpha, std):
-    all_subsample_sizes = np.linspace(50, 5000, 100)
+def plot_histogram_errors(
+        sample_trajs: torch.Tensor,
+        alpha: np.ndarray,
+        std,
+        analytical_dist,
+        error_measure: ErrorMeasure,
+):
+    max_samples = max(sample_trajs.shape[0], 5000)
+    all_subsample_sizes = np.linspace(50, max_samples, 100)
     subsample_sizes = all_subsample_sizes[
         (all_subsample_sizes <= sample_trajs.shape[0]).nonzero()[0]
     ]
-    errors, all_num_bins = std.compute_all_sample_errors(
+    errors, all_subsamples, all_props, all_bins, all_num_bins = std.compute_all_sample_errors(
         sample_trajs,
         alpha,
-        subsample_sizes=subsample_sizes
+        subsample_sizes=subsample_sizes,
+        analytical_dist=analytical_dist,
+        error_measure=error_measure,
     )
     plt.clf()
-    plt.plot(subsample_sizes, errors, label='Error')
-    plt.xlabel('Sample Size')
-    plt.ylabel('Relative Error')
-    plt.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
-    plt.legend()
+    fig, (ax1, ax2) = plt.subplots(2, 1)
+    ax1.plot(subsample_sizes, errors, label=error_measure.label())
+    ax1.set_xlabel('Sample Size')
+    ax1.set_ylabel('Relative Error')
+    ax1.legend()
+    ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
+    ax2.set_xlabel('Sample Size')
+    ax2.set_ylabel('Num Bins')
+    ax2.legend()
+    fig.tight_layout()
 
     plt.title('Histogram Approximation Error vs. Sample Size')
     plt.savefig('{}/histogram_approx_error.pdf'.format(HydraConfig.get().run.dir))
+
+    plt.clf()
+    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    plt.bar(
+        all_bins[-1][:-1],
+        all_props[-1],
+        width=np.diff(all_bins[-1]),
+        edgecolor='black',
+    )
+    plt.hist(sample_levels, all_bins[-1].shape[0]-1, density=True)
+
+    # Plot analytical Chi distribution using scipy
+    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf = analytical_dist.pdf(x) / (1 - analytical_dist.cdf(alpha))
+        # Zero out values below alpha
+        pdf[x < alpha] = 0
+    else:
+        pdf = analytical_dist.pdf(x)
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Histogram of Samples with Analytical Tail Density')
+    plt.legend()
+    plt.savefig('{}/hist_and_analytical.pdf'.format(HydraConfig.get().run.dir))
+    import pdb; pdb.set_trace()
+
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
@@ -947,10 +1032,14 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         std.likelihood.alpha,
     ))
 
+    dd = stats.chi(cfg.example.d)
+    error = SumError()
     hist_errors_output = plot_histogram_errors(
         sample_trajs,
         alpha,
-        std
+        std,
+        analytical_dist=dd,
+        error_measure=error,
     )
 
     cond = std.cond if std.cond else torch.tensor([-1.])
@@ -1019,6 +1108,253 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
+def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
+    pdf_values_alpha_0 = {
+        0.0: 0.0,
+        0.15789473684210525: 0.5795196904863656,
+        0.3157894736842105: 0.5976371260885778,
+        0.47368421052631576: 0.5337496119807074,
+        0.631578947368421: 0.449429230090495,
+        0.7894736842105263: 0.36641284961277953,
+        0.9473684210526315: 0.29269526213384034,
+        1.1052631578947367: 0.23053849915680263,
+        1.263157894736842: 0.17971892374230924,
+        1.4210526315789473: 0.13900308676174247,
+        1.5789473684210527: 0.10684582675371875,
+        1.7368421052631577: 0.0817162221894058,
+        1.894736842105263: 0.06223818729301089,
+        2.052631578947368: 0.04723809361156951,
+        2.2105263157894735: 0.03574695703165461,
+        2.3684210526315788: 0.02698205754090971,
+        2.526315789473684: 0.02032094030446038,
+        2.6842105263157894: 0.015274346681322335,
+        2.8421052631578947: 0.01146116617895019,
+        3.0: 0.008586649418716164,
+        3.1578947368421053: 0.0064241593219373835,
+        3.31578947368421: 0.0048002662531715255,
+        3.4736842105263155: 0.0035827903346954183,
+        3.631578947368421: 0.0026713349467518575,
+        3.789473684210526: 0.0019898687087269787,
+        3.9473684210526314: 0.0014809594942206885,
+        4.105263157894736: 0.0011013217699706558,
+        4.263157894736842: 0.0008183965808678937,
+        4.421052631578947: 0.0006077364910883234,
+        4.578947368421052: 0.0004510136348036058,
+        4.7368421052631575: 0.0003345073570777635,
+        4.894736842105263: 0.0002479592235078767,
+        5.052631578947368: 0.00018370830242811837,
+        5.2105263157894735: 0.00013603953505557406,
+        5.368421052631579: 0.00010069363098638352,
+        5.526315789473684: 7.449908512228999e-05,
+        5.684210526315789: 5.509631358689123e-05,
+        5.842105263157895: 4.0731136448879986e-05,
+        6.0: 3.0100370273918436e-05,
+    }
+    pdf_values_alpha_0_5 = {
+        0.5: 0.37619077268291284,
+        0.7291666865348816: 0.3096987748685167,
+        0.9583333730697632: 0.25484910928912724,
+        1.1875: 0.2096262767485637,
+        1.4166667461395264: 0.17235883027285984,
+        1.6458333730697632: 0.14166175179709684,
+        1.875: 0.1163881078891707,
+        2.1041667461395264: 0.09558874753565412,
+        2.3333334922790527: 0.07847877503945266,
+        2.5625: 0.06440950190405638,
+        2.7916667461395264: 0.05284504319530714,
+        3.0208334922790527: 0.04334306464836997,
+        3.25: 0.03553859914823392,
+        3.4791665077209473: 0.029130650703896373,
+        3.7083332538604736: 0.023871123063553705,
+        3.9375: 0.019555643571518337,
+        4.166666507720947: 0.01601590324848395,
+        4.395833492279053: 0.01311335520276954,
+        4.625: 0.010734028897254277,
+        4.854166507720947: 0.008784178302587889,
+        5.083333492279053: 0.007186735715201387,
+        5.3125: 0.005878377486727052,
+        5.541666507720947: 0.004807074533522419,
+        5.770833492279053: 0.003930106812054279,
+        6.0: 0.003212408391295243,
+    }
+    pdf_values_alpha_1 = {
+        1.0: 0.4386501643370356,
+        1.2272727489471436: 0.3869704272630482,
+        1.454545497894287: 0.34050492859992193,
+        1.6818182468414307: 0.2989066830781868,
+        1.9090909957885742: 0.2618097359593341,
+        2.1363637447357178: 0.2288429156153011,
+        2.3636364936828613: 0.19964001114914537,
+        2.590909242630005: 0.17384705427030575,
+        2.8181819915771484: 0.15112730442946787,
+        3.045454502105713: 0.13116452855716956,
+        3.2727272510528564: 0.11366475396445842,
+        3.5: 0.09835716463772771,
+        3.7272727489471436: 0.0849941314556779,
+        3.954545497894287: 0.07335064401553772,
+        4.181818008422852: 0.06322341473190064,
+        4.409090995788574: 0.05442968808854418,
+        4.636363506317139: 0.046805931752790686,
+        4.863636493682861: 0.040206312572102595,
+        5.090909004211426: 0.03450135433982147,
+        5.318181991577148: 0.029576357423338945,
+        5.545454502105713: 0.025330148076634893,
+        5.7727274894714355: 0.021673592359594533,
+        6.0: 0.018528483098884982,
+    }
+    pdf_values_alpha_1_5 = {
+        1.5: 0.3639970017420213,
+        1.725000023841858: 0.33371059351287247,
+        1.9500000476837158: 0.3058928493351337,
+        2.174999952316284: 0.28042877969920743,
+        2.4000000953674316: 0.2563666042354015,
+        2.625: 0.23371332445590431,
+        2.8499999046325684: 0.21272021493258308,
+        3.075000047683716: 0.19330394006140056,
+        3.299999952316284: 0.17538220040559988,
+        3.5249998569488525: 0.15887345783789586,
+        3.75: 0.1436971240243751,
+        3.9750001430511475: 0.129773756039519,
+        4.199999809265137: 0.11702535274192868,
+        4.425000190734863: 0.10537556599698579,
+        4.650000095367432: 0.09475022944171704,
+        4.875: 0.08507746177062411,
+        5.099999904632568: 0.07628803558695157,
+        5.324999809265137: 0.06831558279308689,
+        5.550000190734863: 0.06109678249536173,
+        5.775000095367432: 0.05457149462170306,
+        6.0: 0.0486828329176146,
+    }
+    pdf_values_alpha_2 = {
+        2.0: 0.30003671186037667,
+        2.222222328186035: 0.27536662030131115,
+        2.444444417953491: 0.2527755650793934,
+        2.6666667461395264: 0.23208081142395012,
+        2.8888888359069824: 0.2131123371379229,
+        3.1111111640930176: 0.19571649490342785,
+        3.3333332538604736: 0.1797556021188693,
+        3.555555582046509: 0.1651060736906634,
+        3.777777671813965: 0.15165670450390442,
+        4.0: 0.13930685396130205,
+        4.222222328186035: 0.12792897946126702,
+        4.44444465637207: 0.11745271053755796,
+        4.666666507720947: 0.10780460132310174,
+        4.888888835906982: 0.09891775585319663,
+        5.111111164093018: 0.09073134763319557,
+        5.333333492279053: 0.08318991495974558,
+        5.55555534362793: 0.07624282298220338,
+        5.777777671813965: 0.06984379601668292,
+        6.0: 0.06395047919880731,
+    }
+    pdf_values_alpha_2_5 = {
+        2.5: 0.2474310108171807,
+        2.71875: 0.22748613277830826,
+        2.9375: 0.20917762943475543,
+        3.15625: 0.19236251322999443,
+        3.375: 0.17691243400094878,
+        3.59375: 0.16271197762289277,
+        3.8125: 0.14965698444562492,
+        4.03125: 0.13765300728103663,
+        4.25: 0.1266141214975652,
+        4.46875: 0.11646189647079676,
+        4.6875: 0.10712456150806249,
+        4.90625: 0.09853641176031773,
+        5.125: 0.09063710318889796,
+        5.34375: 0.08337124974837096,
+        5.5625: 0.07668799534396699,
+        5.78125: 0.07054056460745847,
+        6.0: 0.06488596554505636,
+    }
+    pdf_values_alpha_3 = {
+        3.0: 0.2042268022388785,
+        3.2142856121063232: 0.18813544170543103,
+        3.4285714626312256: 0.1733233961937572,
+        3.642857074737549: 0.15968505974900848,
+        3.857142925262451: 0.14712474604735062,
+        4.0714287757873535: 0.13555550767078986,
+        4.285714149475098: 0.12489803458789318,
+        4.5: 0.11507969172521584,
+        4.714285850524902: 0.10603395815176615,
+        4.9285712242126465: 0.09769977534048153,
+        5.142857074737549: 0.09002094301044027,
+        5.357142925262451: 0.08294582086457405,
+        5.5714287757873535: 0.07642688564429309,
+        5.785714149475098: 0.0704203787026184,
+        6.0: 0.06488596554505636,
+    }
+    pdf_values_alpha_3_5 = {
+        3.5: 0.1686517873293061,
+        3.7083332538604736: 0.15573698668847072,
+        3.9166667461395264: 0.14381517811221253,
+        4.125: 0.13280861235162633,
+        4.333333492279053: 0.12264607819220187,
+        4.541666507720947: 0.11326227256800309,
+        4.75: 0.10459709412658486,
+        4.958333492279053: 0.09659529013301199,
+        5.166666507720947: 0.08920591512880673,
+        5.375: 0.08238196779455102,
+        5.583333492279053: 0.0760801331596377,
+        5.791666507720947: 0.07026044925587405,
+        6.0: 0.06488596554505636,
+    }
+    alpha_to_pdf = {
+        0.: pdf_values_alpha_0,
+        0.5: pdf_values_alpha_0_5,
+        1.: pdf_values_alpha_1,
+        1.5: pdf_values_alpha_1_5,
+        2.: pdf_values_alpha_2,
+        2.5: pdf_values_alpha_2_5,
+        3.: pdf_values_alpha_3,
+        3.5: pdf_values_alpha_3_5,
+    }
+
+    plt.clf()
+    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    num_bins = sample_trajs.shape[0] // 10
+    plt.hist(
+        sample_levels.numpy(),
+        bins=num_bins,
+        edgecolor='black',
+        density=True
+    )
+
+    # Plot analytical Chi distribution using scipy
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf_map = alpha_to_pdf[alpha.item()]
+        pdf = pdf_map.values()
+        x = pdf_map.keys()
+    else:
+        pdf_map = alpha_to_pdf[alpha.item()]
+        pdf = pdf_map.values()
+        x = pdf_map.keys()
+    plt.scatter(x, pdf, color='r', label='Analytical PDF')
+    plt.plot(x, pdf, color='r', linestyle='-')
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title('Histogram of Samples with Analytical Tail Density')
+    plt.legend()
+    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+
+    # plot points (ode_llk, sample_trajs) against analytical chi
+    plt.clf()
+    chi_ode_llk = ode_llk + ((cfg.example.sde_steps - 1) / 2) * torch.tensor(2 * np.pi).log() + \
+                 (cfg.example.sde_steps - 2) * sample_levels.log() - \
+                 ((cfg.example.sde_steps - 1) / 2 - 1) * torch.tensor(2.).log() - \
+                 scipy.special.loggamma((cfg.example.sde_steps - 1) / 2)
+
+    plt.scatter(sample_levels, chi_ode_llk.exp(), label='Density Estimates')
+    plt.scatter(x, pdf, color='r', label='Analytical PDF')
+    plt.plot(x, pdf, color='r', linestyle='-')
+    plt.legend()
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title(f'Density Estimate with Analytical {cfg.example.sde_steps} Step BM Tail Density')
+    plt.savefig('{}/chi_scatter_{}.pdf'.format(
+        HydraConfig.get().run.dir,
+        cfg.num_hutchinson_samples
+    ))
+
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/bm_sample_trajs.pt')
     dt = end_time / (cfg.example.sde_steps-1)
@@ -1039,10 +1375,14 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         alpha_str,
     ))
 
-    hist_error_output = plot_histogram_errors(
+    dd = stats.chi(cfg.example.d)
+    error = SumError()
+    hist_errors_output = plot_histogram_errors(
         sample_trajs,
         alpha,
-        std
+        std,
+        analytical_dist=dd,
+        error_measure=error,
     )
 
     # turn state diffs into Brownian motion
@@ -1090,14 +1430,23 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    ode_llk = compute_ode_log_likelihood(
-        analytical_llk,
-        sample_trajs,
-        std,
-        cfg,
-        alpha,
-        scale_fn,
-    )
+    if DEBUG:
+        ode_llk = torch.load('/home/jsefas/toy-diffusion/outputs/2025-03-19/19-43-48/VPSDEVelocitySampler_TemporalUnetAlpha_dim_120_BrownianMotionDiff3ExampleConfig_v10240000000_ode_llk.pt')
+        ode_llk = (ode_llk, 0)
+        sample_trajs = torch.load('/home/jsefas/toy-diffusion/outputs/2025-03-19/19-43-48/bm_sample_trajs.pt')
+        print("DEBUG mode is on!")
+    else:
+        ode_llk = compute_ode_log_likelihood(
+            analytical_llk,
+            sample_trajs,
+            std,
+            cfg,
+            alpha,
+            scale_fn,
+        )
+
+    if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
+        plot_bm_pdf_estimate(sample_trajs, ode_llk[0][-1], alpha, cfg)
 
     import pdb; pdb.set_trace()
 
@@ -1387,11 +1736,25 @@ def sample(cfg):
             class A:
                 def __init__(self, samples):
                     self.samples = samples
-            sample_traj_out = A(torch.randn(10*cfg.num_samples, cfg.example.d, 1))
+            if type(std.example) == MultivariateGaussianExampleConfig:
+                dim = cfg.example.d
+            elif type(std.example) == BrownianMotionDiffExampleConfig:
+                dim = cfg.example.sde_steps - 1
+            sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
             if std.cond == 1:
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples.unsqueeze(0)
+            dd = stats.chi(dim)
+            error = ForwardKLError()
+            errors = plot_histogram_errors(
+                sample_traj_out.samples[-1],
+                np.array(1.),
+                std,
+                analytical_dist=dd,
+                error_measure=error,
+            )
+            import pdb; pdb.set_trace()
         else:
             sample_traj_out = std.sample_trajectories(
                 cond=std.cond,
