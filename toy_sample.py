@@ -891,7 +891,7 @@ def plot_chi_from_sample_trajs(
     ))
 
 def generate_diffusion_video(ode_llk, all_trajs, cfg):
-    samples = all_trajs.squeeze()
+    samples = all_trajs.squeeze().cpu()
     # generate gif of samples where each index in samples represents a frame
     import matplotlib.animation as animation
     import matplotlib.colors as colors
@@ -1063,11 +1063,12 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         scale_fn,
     )
 
-    plot_chi_from_sample_trajs(cfg, sample_trajs, std, ode_llk[0][-1])
+    cpu_sample_trajs = sample_trajs.cpu()
+    plot_chi_from_sample_trajs(cfg, cpu_sample_trajs, std, ode_llk[0][-1].cpu())
     if cfg.example.d == 2:
-        plot_ellipsoid(end_time, cfg, sample_trajs, std)
-        plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std)
-        generate_diffusion_video(ode_llk[0], all_trajs, cfg)
+        plot_ellipsoid(end_time, cfg, cpu_sample_trajs, std)
+        plot_theta_from_sample_trajs(end_time, cfg, cpu_sample_trajs, std)
+        generate_diffusion_video(ode_llk[0].cpu(), all_trajs, cfg)
 
     import pdb; pdb.set_trace()
 
