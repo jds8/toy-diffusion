@@ -723,8 +723,8 @@ def plot_histogram_errors(
     plt.savefig('{}/histogram_approx_error.pdf'.format(HydraConfig.get().run.dir))
 
     plt.clf()
-    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
-    plt.hist(sample_levels.cpu(), all_bins[-1].shape[0]-1, density=True)
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
+    plt.hist(sample_levels, all_bins[-1].shape[0]-1, density=True)
 
     # Plot analytical Chi distribution using scipy
     x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
