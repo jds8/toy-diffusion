@@ -49,8 +49,6 @@ HistogramErrorsOutput = namedtuple(
     'errors subsample_sizes all_num_bins'
 )
 
-DEBUG = False
-
 
 #########################
 #########################
@@ -1424,7 +1422,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    if DEBUG:
+    if cfg.debug:
         ode_llk = torch.load('/home/jsefas/toy-diffusion/outputs/2025-03-19/19-43-48/VPSDEVelocitySampler_TemporalUnetAlpha_dim_120_BrownianMotionDiff3ExampleConfig_v10240000000_ode_llk.pt')
         ode_llk = (ode_llk, 0)
         sample_trajs = torch.load('/home/jsefas/toy-diffusion/outputs/2025-03-19/19-43-48/bm_sample_trajs.pt')
@@ -1726,7 +1724,7 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
-        if DEBUG:
+        if cfg.debug:
             class A:
                 def __init__(self, samples):
                     self.samples = samples
@@ -1750,6 +1748,7 @@ def sample(cfg):
                 analytical_dist=dd,
                 error_measure=error,
             )
+            print('DEBUG is on!')
             import pdb; pdb.set_trace()
         else:
             sample_traj_out = std.sample_trajectories(

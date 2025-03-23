@@ -168,6 +168,7 @@ class IntegratorType(Enum):
 
 @dataclass
 class SampleConfig(BaseConfig):
+    debug: bool = False
     num_samples: int = 100
     cond: Optional[float] = None
     guidance: GuidanceType = GuidanceType.NoGuidance
