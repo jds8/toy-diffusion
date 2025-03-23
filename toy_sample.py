@@ -456,13 +456,13 @@ class ContinuousEvaluator(ToyEvaluator):
         all_bins = []
         all_num_bins = []
         all_subsamples = []
-        min_sample = samples.min().numpy()
-        max_sample = samples.max().numpy()
+        min_sample = samples.min().cpu().numpy()
+        max_sample = samples.max().cpu().numpy()
         for subsample_size in subsample_sizes:
             # num_bins = int(subsample_size ** .75)
             num_bins = 125
             subsamples, bins = np.histogram(
-                samples[:subsample_size.astype(int)].numpy(),
+                samples[:subsample_size.astype(int)].cpu().numpy(),
                 bins=num_bins,
                 range=(min_sample, max_sample)
             )
@@ -672,7 +672,7 @@ def compute_ode_log_likelihood(
         'num hutchinson trace samples'
     ]
     data = [[
-        avg_rel_error.numpy(),
+        avg_rel_error.cpu().numpy(),
         eval_time,
         cfg.model_name,
         cfg.sampler.diffusion_timesteps,
@@ -758,10 +758,10 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
 
     # plot_histogram of sample_trajs under analytical distribution
     plt.clf()
-    plt.hist(sample_trajs.squeeze().numpy(), bins=100, edgecolor='black', density=True)
+    plt.hist(sample_trajs.squeeze().cpu().numpy(), bins=100, edgecolor='black', density=True)
     x = np.linspace(-sample_trajs.max().item(), sample_trajs.max().item(), 1000)
     pdf = stats.norm.pdf(x) / (1 - stats.norm.cdf(std.likelihood.alpha))
-    pdf[np.abs(x) < std.likelihood.alpha.numpy()] = 0
+    pdf[np.abs(x) < std.likelihood.alpha.cpu().numpy()] = 0
     plt.plot(x, pdf, color='red', label='Analytical PDF')
     plt.savefig('{}/gaussian_hist_w_analytical.pdf'.format(HydraConfig.get().run.dir))
 
@@ -832,7 +832,7 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     theta = torch.atan2(sample_trajs[..., 1, :], sample_trajs[..., 0, :])
     plt.clf()
     plt.hist(
-        theta.numpy(),
+        theta.cpu().numpy(),
         bins=sample_trajs.shape[0] // 10,
         edgecolor='black',
         density=True
@@ -850,7 +850,7 @@ def plot_chi_from_sample_trajs(
     sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
-        sample_levels.numpy(),
+        sample_levels.cpu().numpy(),
         bins=num_bins,
         edgecolor='black',
         density=True
@@ -987,13 +987,13 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     Z = torch.einsum('...i,ij,...j->...', diff, precision_matrix, diff)  # Shape: (500, 500)
 
     # Convert to NumPy for plotting
-    Z = Z.sqrt().numpy()
+    Z = Z.sqrt().cpu().numpy()
 
     # Plot the level curves
     plt.figure(figsize=(8, 6))
     contour = plt.contour(
-        X.numpy(),
-        Y.numpy(),
+        X.cpu().numpy(),
+        Y.cpu().numpy(),
         Z,
         levels=levels,
         colors='red'
@@ -1304,7 +1304,7 @@ def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
     sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
-        sample_levels.numpy(),
+        sample_levels.cpu().numpy(),
         bins=num_bins,
         edgecolor='black',
         density=True
@@ -1354,7 +1354,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     trajs = sample_trajs * dt.sqrt()
 
     # make histogram
-    data = sample_trajs.reshape(-1).numpy()
+    data = sample_trajs.reshape(-1).cpu().numpy()
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of brownian motion state diffs')
@@ -1386,7 +1386,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     # plot trajectories
     plt.clf()
     times = torch.linspace(0., 1., bm_trajs.shape[1])
-    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
+    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].cpu().numpy().T)
     plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
@@ -1398,8 +1398,8 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     dtimes = exit_idx * dt
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
-    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
-    plt.scatter(dtimes.numpy(), states, marker='o', color='red')
+    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].cpu().numpy().T, alpha=0.2)
+    plt.scatter(dtimes.cpu().numpy(), states, marker='o', color='red')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
@@ -1417,7 +1417,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     uncond_analytical_llk = (
         dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()
     ).sum(1).squeeze()
-    tail = get_target(std).analytical_prob(alpha) if alpha.numpy() else torch.tensor(1.)
+    tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
     print(f'true tail prob: {tail}')
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
@@ -1524,7 +1524,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
     trajs = sample_trajs * dt.sqrt()
 
     # make histogram
-    data = sample_trajs.reshape(-1).numpy()
+    data = sample_trajs.reshape(-1).cpu().numpy()
     plt.clf()
     plt.hist(data, bins=30, edgecolor='black')
     plt.title('Histogram of Student T state diffs')
@@ -1545,7 +1545,7 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
     # plot trajectories
     plt.clf()
     times = torch.linspace(0., 1., st_trajs.shape[1])
-    plt.plot(times.numpy(), st_trajs[..., 0].numpy().T)
+    plt.plot(times.cpu().numpy(), st_trajs[..., 0].cpu().numpy().T)
     os.makedirs(save_dir, exist_ok=True)
     plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
@@ -1558,8 +1558,8 @@ def test_student_t_diff(end_time, cfg, sample_trajs, std):
     times = torch.linspace(0., 1., st_trajs.shape[1])
     dtimes = exit_idx * dt
     states = st_trajs[torch.arange(st_trajs.shape[0]), exit_idx.squeeze()]
-    plt.plot(times.numpy(), st_trajs[..., 0].numpy().T, alpha=0.2)
-    plt.scatter(dtimes.numpy(), states, marker='o', color='red')
+    plt.plot(times.cpu().numpy(), st_trajs[..., 0].cpu().numpy().T, alpha=0.2)
+    plt.scatter(dtimes.cpu().numpy(), states, marker='o', color='red')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
@@ -1615,7 +1615,7 @@ def test_transformer_bm(end_time, std):
         import pdb; pdb.set_trace()
 
         # # make histogram
-        # data = sample_trajs.reshape(-1).numpy()
+        # data = sample_trajs.reshape(-1).cpu().numpy()
         # plt.clf()
         # plt.hist(data, bins=30, edgecolor='black')
         # plt.title('Histogram of brownian motion state diffs')
@@ -1655,7 +1655,7 @@ def test_transformer_bm(end_time, std):
         plt.clf()
         for i, traj in enumerate(trajs_vec):
             alpha = alphas[i][j]
-            plt.plot(times.numpy(), traj.numpy().T, label=f'alpha={alpha}', color=colors[i])
+            plt.plot(times.cpu().numpy(), traj.cpu().numpy().T, label=f'alpha={alpha}', color=colors[i])
         plt.legend()
         os.makedirs(save_dir, exist_ok=True)
         plt.savefig('{}/brownian_motion_smc_samples_{}.pdf'.format(
