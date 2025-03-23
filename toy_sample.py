@@ -1050,7 +1050,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     # alpha == r^2 as indicated by how the `exited` variable is defined
     # at the top of this function
     tail = torch.exp(-alpha / 2)
-    non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)) - tail.log()
+    non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - tail.log()
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.logdet()
