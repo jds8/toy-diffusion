@@ -49,7 +49,7 @@ HistogramErrorsOutput = namedtuple(
     'errors subsample_sizes all_num_bins'
 )
 
-DEBUG = True
+DEBUG = False
 
 
 #########################
@@ -461,7 +461,8 @@ class ContinuousEvaluator(ToyEvaluator):
         min_sample = samples.min().numpy()
         max_sample = samples.max().numpy()
         for subsample_size in subsample_sizes:
-            num_bins = int(subsample_size ** .75)
+            # num_bins = int(subsample_size ** .75)
+            num_bins = 125
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].numpy(),
                 bins=num_bins,
@@ -725,12 +726,6 @@ def plot_histogram_errors(
 
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
-    plt.bar(
-        all_bins[-1][:-1],
-        all_props[-1],
-        width=np.diff(all_bins[-1]),
-        edgecolor='black',
-    )
     plt.hist(sample_levels, all_bins[-1].shape[0]-1, density=True)
 
     # Plot analytical Chi distribution using scipy
@@ -749,7 +744,6 @@ def plot_histogram_errors(
     plt.title('Histogram of Samples with Analytical Tail Density')
     plt.legend()
     plt.savefig('{}/hist_and_analytical.pdf'.format(HydraConfig.get().run.dir))
-    import pdb; pdb.set_trace()
 
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
 
@@ -1744,9 +1738,11 @@ def sample(cfg):
             if std.cond == 1:
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
-                sample_traj_out.samples = cond_samples.unsqueeze(0)
+                sample_traj_out.samples = cond_samples
+                print(sample_traj_out.samples.shape)
+            sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
             dd = stats.chi(dim)
-            error = ForwardKLError()
+            error = SumError()
             errors = plot_histogram_errors(
                 sample_traj_out.samples[-1],
                 np.array(1.),

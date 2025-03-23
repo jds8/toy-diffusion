@@ -213,6 +213,7 @@ def old_plot_effort_v_performance(args, title, xlabel):
     models_by_dim = {dim: [model for model in model_names if 'dim_{}'.format(str(dim)) in model] for dim in dims}
     model_idxs_by_dim = {dim: get_model_idx(args, dim) for dim in dims}
     alphas = args.alphas
+    directory = None
     for alpha in alphas:
         for dim in dims:
             target_means = []
