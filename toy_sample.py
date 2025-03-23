@@ -847,10 +847,10 @@ def plot_chi_from_sample_trajs(
         ode_llk,
 ):
     plt.clf()
-    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
-        sample_levels.cpu().numpy(),
+        sample_levels.numpy(),
         bins=num_bins,
         edgecolor='black',
         density=True
@@ -1035,9 +1035,9 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
     )
 
     cond = std.cond if std.cond else torch.tensor([-1.])
-    mu = torch.tensor(cfg.example.mu)
-    sigma = torch.tensor(cfg.example.sigma)
-    L = torch.linalg.cholesky(sigma)
+    mu = torch.tensor(cfg.example.mu).to(sample_trajs.device)
+    sigma = torch.tensor(cfg.example.sigma).to(sample_trajs.device)
+    L = torch.linalg.cholesky(sigma).to(sample_trajs.device)
     traj = torch.matmul(L, sample_trajs) + mu  # Shape: (N, d, 1)
 
     try:
