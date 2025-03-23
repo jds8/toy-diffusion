@@ -305,8 +305,8 @@ class ContinuousEvaluator(ToyEvaluator):
                 conditional_output = self.diffusion_model(
                     x=x.to(device),
                     time=t.to(device),
-                    cond=kwargs['cond'],
-                    alpha=kwargs['alpha'],
+                    cond=kwargs['cond'].to(device),
+                    alpha=kwargs['alpha'].to(device),
                 )
                 cond_sf_est = self.sampler.get_classifier_free_sf_estimator(
                     xt=x.to(device),
