@@ -517,7 +517,6 @@ class ContinuousEvaluator(ToyEvaluator):
                 error_measure=error_measure,
             )
             errors.append(error)
-        import pdb; pdb.set_trace()
         return errors, all_subsamples, all_props, all_bins, all_num_bins
 
     def sample_trajectories(self, **kwargs):
@@ -1734,16 +1733,14 @@ def sample(cfg):
                 dim = cfg.example.d
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
-            # sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
-            sample_traj_out = A(torch.rand(10*cfg.num_samples, 1, 1))
+            sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
             if std.cond == 1:
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
                 print(sample_traj_out.samples.shape)
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            # dd = stats.chi(dim)
-            dd = stats.uniform(0., 1.)
+            dd = stats.chi(dim)
             error = SumError()
             errors = plot_histogram_errors(
                 sample_traj_out.samples[-1],
