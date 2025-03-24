@@ -649,14 +649,14 @@ def compute_ode_log_likelihood(
         alpha=alpha,
         exact=cfg.compute_exact_trace,
         num_hutchinson_samples=cfg.num_hutchinson_samples,
-    )
+    ).cpu()
     # ode_llk = torch.zeros(1,1,sample_trajs.shape[0])
     eval_time = timer.time() - tm
     scaled_ode_llk = scale_fn(ode_llk[0][-1])
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
-    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
+    avg_rel_error = torch.expm1(analytical_llk.cpu() - scaled_ode_llk.cpu()).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
     torch.save(
@@ -1744,7 +1744,7 @@ def sample(cfg):
             error = SumError()
             errors = plot_histogram_errors(
                 sample_traj_out.samples[-1],
-                np.array(1.),
+                std.likelihood.alpha,
                 std,
                 analytical_dist=dd,
                 error_measure=error,
