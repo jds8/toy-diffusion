@@ -485,7 +485,7 @@ class ContinuousEvaluator(ToyEvaluator):
         error_measure: ErrorMeasure,
     ):
         analytical_props = analytical_dist.cdf(bins[1:]) - analytical_dist.cdf(bins[:-1])
-        normalizing_constant = 1 - stats.chi(dim).cdf(alpha)
+        normalizing_constant = 1 - analytical_dist.cdf(alpha)
         analytical_props /= normalizing_constant
         error = error_measure(analytical_props, empirical_props)
         return error
@@ -517,6 +517,7 @@ class ContinuousEvaluator(ToyEvaluator):
                 error_measure=error_measure,
             )
             errors.append(error)
+        import pdb; pdb.set_trace()
         return errors, all_subsamples, all_props, all_bins, all_num_bins
 
     def sample_trajectories(self, **kwargs):
@@ -726,7 +727,7 @@ def plot_histogram_errors(
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.hist(sample_levels, all_bins[-1].shape[0]-1, density=True)
 
-    # Plot analytical Chi distribution using scipy
+    # Plot analytical distribution using scipy
     x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
     alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
     if alpha > 0:
@@ -1733,14 +1734,16 @@ def sample(cfg):
                 dim = cfg.example.d
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
-            sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+            # sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+            sample_traj_out = A(torch.rand(10*cfg.num_samples, 1, 1))
             if std.cond == 1:
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
                 print(sample_traj_out.samples.shape)
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            dd = stats.chi(dim)
+            # dd = stats.chi(dim)
+            dd = stats.uniform(0., 1.)
             error = SumError()
             errors = plot_histogram_errors(
                 sample_traj_out.samples[-1],
