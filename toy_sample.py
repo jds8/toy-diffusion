@@ -1348,6 +1348,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
     os.makedirs(save_dir, exist_ok=True)
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+    alpha = alpha.cpu()
     alpha_str = '%.1f' % alpha.item()
     plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
         save_dir,
@@ -1366,14 +1367,14 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
 
     # turn state diffs into Brownian motion
     bm_trajs = torch.cat([
-        torch.zeros(trajs.shape[0], 1, 1, device=trajs.device),
-        trajs.cumsum(dim=-2)
+        torch.zeros(trajs.shape[0], 1, 1, device='cpu'),
+        trajs.cumsum(dim=-2).cpu()
     ], dim=1)
 
     # plot trajectories
     plt.clf()
-    times = torch.linspace(0., 1., bm_trajs.shape[1])
-    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].cpu().numpy().T)
+    times = torch.linspace(0., 1., bm_trajs.shape[1]).cpu()
+    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T)
     plt.savefig('{}/alpha={}_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
@@ -1385,7 +1386,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     times = torch.linspace(0., 1., bm_trajs.shape[1])
     dtimes = exit_idx * dt
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
-    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].cpu().numpy().T, alpha=0.2)
+    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.cpu().numpy(), states, marker='o', color='red')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
