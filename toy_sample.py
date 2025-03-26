@@ -1336,7 +1336,7 @@ def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/bm_sample_trajs.pt')
-    dt = end_time / (cfg.example.sde_steps-1)
+    dt = end_time.cpu() / (cfg.example.sde_steps-1)
     # de-standardize data
     trajs = sample_trajs * dt.sqrt()
 
@@ -1383,10 +1383,9 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     # plot cut off trajectories
     exit_idx = (bm_trajs.abs() > alpha).to(float).argmax(dim=1)
     plt.clf()
-    times = torch.linspace(0., 1., bm_trajs.shape[1])
     dtimes = exit_idx * dt
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
-    plt.plot(times.cpu().numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
+    plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.cpu().numpy(), states, marker='o', color='red')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
