@@ -1294,10 +1294,10 @@ def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
     }
 
     plt.clf()
-    sample_levels = sample_trajs.norm(dim=[1, 2])  # [B]
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu().numpy()  # [B]
     num_bins = sample_trajs.shape[0] // 10
     plt.hist(
-        sample_levels.cpu().numpy(),
+        sample_levels,
         bins=num_bins,
         edgecolor='black',
         density=True
@@ -1317,7 +1317,8 @@ def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     plt.clf()
-    chi_ode_llk = ode_llk + ((cfg.example.sde_steps - 1) / 2) * torch.tensor(2 * np.pi).log() + \
+    chi_ode_llk = ode_llk.cpu() + ((cfg.example.sde_steps - 1) / 2) * \
+                 torch.tensor(2 * np.pi).log() + \
                  (cfg.example.sde_steps - 2) * sample_levels.log() - \
                  ((cfg.example.sde_steps - 1) / 2 - 1) * torch.tensor(2.).log() - \
                  scipy.special.loggamma((cfg.example.sde_steps - 1) / 2)
