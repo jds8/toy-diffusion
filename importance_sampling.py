@@ -184,6 +184,7 @@ class BrownianMotionDiffTarget(Target):
         )
         self.quadrature_values = {
             3: {
+                0.5: 0.74586752299,
                 1.: 0.37064871,
                 1.5: 0.146098491,
                 2.0: 0.047321563,
@@ -197,6 +198,7 @@ class BrownianMotionDiffTarget(Target):
                 6.0: 1.97317518e-09,
             },
             5: {
+                0.5: 0.83965139265,
                 1.: 0.4216649,
                 1.5: 0.1655791,
                 2.0: 0.0531212,

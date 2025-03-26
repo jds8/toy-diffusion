@@ -888,9 +888,10 @@ def plot_chi_from_sample_trajs(
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.d}D Tail Density')
+    num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
     plt.savefig('{}/chi_scatter_{}.pdf'.format(
         HydraConfig.get().run.dir,
-        cfg.num_hutchinson_samples
+        num_hutchinson_samples
     ))
 
 def generate_diffusion_video(ode_llk, all_trajs, cfg):
@@ -1104,7 +1105,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
-def plot_bm_pdf_histogram_estimate(sample_trajs, ode_llk, alpha, cfg):
+def plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg):
     pdf_values_alpha_0_0 = {
         0.0: 0.0,
         0.2222222222222222: 0.21680244001503354,
@@ -1295,7 +1296,7 @@ def plot_bm_pdf_histogram_estimate(sample_trajs, ode_llk, alpha, cfg):
 
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu().numpy()  # [B]
-    num_bins = sample_trajs.shape[0] // 10
+    num_bins = 125
     plt.hist(
         sample_levels,
         bins=num_bins,
@@ -1313,7 +1314,7 @@ def plot_bm_pdf_histogram_estimate(sample_trajs, ode_llk, alpha, cfg):
     plt.ylabel('Probability Density')
     plt.title('Histogram of Samples with Analytical Tail Density')
     plt.legend()
-    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+    plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
     return sample_levels, x, pdf
 
 def plot_bm_pdf_pfode_estimate(sample_levels, ode_llk, x, pdf, cfg):
@@ -1332,9 +1333,10 @@ def plot_bm_pdf_pfode_estimate(sample_levels, ode_llk, x, pdf, cfg):
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.sde_steps} Step BM Tail Density')
-    plt.savefig('{}/chi_scatter_{}.pdf'.format(
+    num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
+    plt.savefig('{}/chi_pfode_estimate_{}.pdf'.format(
         HydraConfig.get().run.dir,
-        cfg.num_hutchinson_samples
+        num_hutchinson_samples
     ))
 
 def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
