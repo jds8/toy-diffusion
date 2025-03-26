@@ -1319,7 +1319,7 @@ def plot_bm_pdf_estimate(sample_trajs, ode_llk, alpha, cfg):
     plt.clf()
     chi_ode_llk = ode_llk.cpu() + ((cfg.example.sde_steps - 1) / 2) * \
                  torch.tensor(2 * np.pi).log() + \
-                 (cfg.example.sde_steps - 2) * sample_levels.log() - \
+                 (cfg.example.sde_steps - 2) * np.log(sample_levels) - \
                  ((cfg.example.sde_steps - 1) / 2 - 1) * torch.tensor(2.).log() - \
                  scipy.special.loggamma((cfg.example.sde_steps - 1) / 2)
 
