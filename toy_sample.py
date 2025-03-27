@@ -1041,7 +1041,7 @@ def plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg):
     )
 
     # Plot analytical Chi distribution using scipy
-    pdf_map = get_pdf_map(alpha.item())
+    pdf_map = get_pdf_map(alpha)
     pdf = pdf_map.values()
     x = pdf_map.keys()
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
