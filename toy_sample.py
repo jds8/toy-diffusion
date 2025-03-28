@@ -35,6 +35,7 @@ from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
 from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConfig, ContinuousSamplerConfig
+from compute_quadratures import get_2d_pdf
 from histogram_error_utils import get_pdf_map, \
     AnalyticalPropsCalculator, DensityCalculator, TrapezoidCalculator, \
     ErrorMeasure, SumError, MaxError, ForwardKLError, ReverseKLError
@@ -421,20 +422,23 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=sol, fevals=fevals)
 
-    def compute_bins(self, samples: torch.tensor, subsample_sizes: np.ndarray):
+    def compute_bins(
+            self,
+            alpha: np.ndarray:
+            samples: torch.tensor,
+            subsample_sizes: np.ndarray
+    ):
         all_props = []
         all_bins = []
         all_num_bins = []
         all_subsamples = []
-        min_sample = samples.min().cpu().numpy()
         max_sample = samples.max().cpu().numpy()
         for subsample_size in subsample_sizes:
-            # num_bins = int(subsample_size ** .75)
             num_bins = 125
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].cpu().numpy(),
                 bins=num_bins,
-                range=(min_sample, max_sample)
+                range=(alpha, max_sample)
             )
             props = subsamples / subsample_size
             all_subsamples.append(subsamples)
@@ -454,6 +458,7 @@ class ContinuousEvaluator(ToyEvaluator):
         dim = total_raw_samples.shape[1]
         total_samples = total_raw_samples.norm(dim=[1, 2])  # [B]
         all_subsamples, all_props, all_bins, all_num_bins = self.compute_bins(
+            alpha,
             total_samples,
             subsample_sizes
         )
@@ -657,6 +662,8 @@ def plot_histogram_errors(
     ax1.plot(subsample_sizes, errors, label=error_measure.label())
     ax1.set_xlabel('Sample Size')
     ax1.set_ylabel('Relative Error')
+    increment_size = np.diff(all_subsample_sizes)[0]
+    ax1.set_title(f'Error vs. Sample Size (increments of {increment_size})')
     ax1.legend()
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
@@ -664,7 +671,7 @@ def plot_histogram_errors(
     ax2.legend()
     fig.tight_layout()
 
-    plt.title('Histogram Approximation Error vs. Sample Size')
+    ax2.set_title('Histogram Approximation Error vs. Sample Size')
     plt.savefig('{}/histogram_approx_error.pdf'.format(HydraConfig.get().run.dir))
 
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
@@ -793,7 +800,7 @@ def plot_chi_from_sample_trajs(
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
-    plt.title('Histogram of Samples with Analytical Tail Density')
+    plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
     plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
 
@@ -1048,7 +1055,7 @@ def plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg):
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
-    plt.title('Histogram of Samples with Analytical Tail Density')
+    plt.title(f'Histogram of {sample_trajs.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
     plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
     return sample_levels, x, pdf
