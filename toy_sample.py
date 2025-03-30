@@ -38,6 +38,7 @@ from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConf
 from compute_quadratures import get_2d_pdf
 from histogram_error_utils import get_pdf_map, \
     AnalyticalPropsCalculator, DensityCalculator, TrapezoidCalculator, \
+    SimpsonsRuleCalculator, \
     ErrorMeasure, SumError, MaxError, ForwardKLError, ReverseKLError
 
 
@@ -424,7 +425,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def compute_bins(
             self,
-            alpha: np.ndarray:
+            alpha: np.ndarray,
             samples: torch.tensor,
             subsample_sizes: np.ndarray
     ):
@@ -438,7 +439,7 @@ class ContinuousEvaluator(ToyEvaluator):
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].cpu().numpy(),
                 bins=num_bins,
-                range=(alpha, max_sample)
+                range=(alpha.item(), max_sample)
             )
             props = subsamples / subsample_size
             all_subsamples.append(subsamples)
@@ -662,7 +663,7 @@ def plot_histogram_errors(
     ax1.plot(subsample_sizes, errors, label=error_measure.label())
     ax1.set_xlabel('Sample Size')
     ax1.set_ylabel('Relative Error')
-    increment_size = np.diff(all_subsample_sizes)[0]
+    increment_size = int(np.diff(all_subsample_sizes)[0])
     ax1.set_title(f'Error vs. Sample Size (increments of {increment_size})')
     ax1.legend()
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
@@ -1103,7 +1104,7 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         alpha_str,
     ))
 
-    calculator = TrapezoidCalculator()
+    calculator = SimpsonsRuleCalculator()
     error = SumError()
     hist_errors_output = plot_histogram_errors(
         sample_trajs,
