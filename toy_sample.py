@@ -36,7 +36,7 @@ from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelih
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
 from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConfig, ContinuousSamplerConfig
 from compute_quadratures import get_2d_pdf
-from histogram_error_utils import get_pdf_map, \
+from histogram_error_utils import get_bm_pdf_map, \
     AnalyticalPropsCalculator, DensityCalculator, TrapezoidCalculator, \
     SimpsonsRuleCalculator, \
     ErrorMeasure, SumError, MaxError, ForwardKLError, ReverseKLError
@@ -1037,7 +1037,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
-def plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg):
+def plot_bm_pdf_histogram_estimate(sample_trajs, pdf_map, cfg):
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu().numpy()  # [B]
     num_bins = 125
@@ -1049,7 +1049,6 @@ def plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg):
     )
 
     # Plot analytical Chi distribution using scipy
-    pdf_map = get_pdf_map(alpha)
     pdf = pdf_map.values()
     x = pdf_map.keys()
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
@@ -1158,7 +1157,12 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        sample_levels, x, pdf = plot_bm_pdf_histogram_estimate(sample_trajs, alpha, cfg)
+        pdf_map = calculator.get_pdf_map()
+        sample_levels, x, pdf = plot_bm_pdf_histogram_estimate(
+            sample_trajs,
+            pdf_map,
+            cfg,
+        )
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
     if cfg.debug:
