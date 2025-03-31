@@ -35,7 +35,6 @@ from models.toy_sampler import AbstractSampler, interpolate_schedule
 from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelihood
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
 from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConfig, ContinuousSamplerConfig
-from compute_quadratures import get_2d_pdf
 from histogram_error_utils import get_bm_pdf_map, \
     AnalyticalPropsCalculator, DensityCalculator, TrapezoidCalculator, \
     SimpsonsRuleCalculator, \
