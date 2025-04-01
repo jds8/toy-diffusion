@@ -664,6 +664,7 @@ def plot_histogram_errors(
         analytical_calculator=analytical_calculator,
         error_measure=error_measure,
     )
+    error_measure.clean_up()
     plt.clf()
     fig, (ax1, ax2) = plt.subplots(2, 1)
     ax1.plot(subsample_sizes, errors, label=title_prefix)
@@ -839,6 +840,7 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     plt.clf()
 
 def plot_chi_from_sample_trajs(
+        title_prefix,
         cfg,
         sample_trajs,
         std,
@@ -1014,7 +1016,7 @@ def test_multivariate_gaussian(
 
     title_prefix = f'{cfg.example.d}D_MVN_diffusion'
     dd = stats.chi(cfg.example.d)
-    calculator = DensityCalculator(dd)
+    calculator = DensityCalculator(dd, alpha)
     error = MISE()
     hist_errors_output = plot_histogram_errors(
         title_prefix,
@@ -1579,17 +1581,20 @@ def sample(cfg):
                     self.samples = samples
             if type(std.example) == MultivariateGaussianExampleConfig:
                 dim = cfg.example.d
+                dist_type = 'MVN'
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
+                dist_type = 'BM'
             sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
             if std.cond == 1:
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            title_prefix = 'analytical'
+            title_prefix = f'analytical_{dim}D_{dist_type}'
             dd = stats.chi(dim)
-            calculator = DensityCalculator(dd)
+            alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+            calculator = DensityCalculator(dd, alpha)
             error = MISE()
             errors = plot_histogram_errors(
                 title_prefix,
@@ -1600,7 +1605,7 @@ def sample(cfg):
                 error_measure=error,
                 other_histogram_data=other_histogram_data,
             )
-            other_histogram_data = HistogramData(errors, 'analytical')
+            other_histogram_data = HistogramData(errors, title_prefix)
             print('DEBUG is on!')
 
         sample_traj_out = std.sample_trajectories(

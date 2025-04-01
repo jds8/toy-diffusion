@@ -6,8 +6,38 @@ import einops
 from compute_quadratures import get_2d_pdf
 from hydra.core.hydra_config import HydraConfig
 import scipy.integrate as integrate
-
+import matplotlib.pyplot as plt
+import einops
 from typing import Optional
+
+import os
+
+import re
+import imageio
+
+
+# provenance: https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+
+def _create_gif(file_dir, gif_name=None):
+    filenames = os.listdir(file_dir)
+    filenames.sort(key=natural_keys)
+    gif_name = gif_name if gif_name is not None else filenames[0]
+    images = []
+    for filename in filenames:
+        jpg = os.path.join(file_dir, filename)
+        if jpg.endswith('.jpg'):
+            images.append(imageio.imread(jpg))
+    imageio.mimsave('{}/{}.gif'.format(file_dir, gif_name), images)
 
 
 #########################
@@ -20,9 +50,9 @@ class AnalyticalCalculator:
         raise NotImplementedError
 
 class DensityCalculator(AnalyticalCalculator):
-    def __init__(self, dist):
+    def __init__(self, dist, alpha):
         """ dist should be a scipy distribution """
-        self.dist = dist
+        self.dist = lambda x: dist.pdf(x) / (1 - dist.cdf(alpha))
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
         analytical_props = self.dist.cdf(bins[1:]) - \
             self.dist.cdf(bins[:-1])
@@ -1319,6 +1349,8 @@ class ErrorMeasure:
         return self.error(analytical_props, empirical_props, bins)
     def error(self, analytical_props, empirical_props, bins):
         raise NotImplementedError
+    def clean_up(self):
+        return
 
 # class MaxError(ErrorMeasure):
 #     def error(self, analytical_props, empirical_props):
@@ -1364,6 +1396,9 @@ class SimpsonsMISE(ErrorMeasure):
         return 'SimpsonsMISE'
 
 class MISE(ErrorMeasure):
+    def __init__(self):
+        self.hist_approx_dir = f'{HydraConfig.get().run.dir}/histogram_approximations'
+        os.makedirs(self.hist_approx_dir, exist_ok=True)
     def error(
         self,
         analytical_calculator: AnalyticalCalculator,
@@ -1371,10 +1406,18 @@ class MISE(ErrorMeasure):
         bins: np.ndarray
     ):
         x_grid = np.linspace(bins[:-1], bins[1:], 20)
-        mse = ((analytical_calculator.dist.pdf(x_grid) - empirical_props) ** 2).sum()
+        mse = ((analytical_calculator.dist(x_grid) - empirical_props) ** 2).sum()
+        x_unique, idx = np.unique(einops.rearrange(x_grid, 'b w -> (w b)'), return_index=True)
+        props = einops.repeat(empirical_props, 'c -> (c w)', w=x_grid.shape[0])
+        plt.plot(x_unique, props[idx])
+        plt.plot(x_unique, analytical_calculator.dist(x_unique))
+        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{len(bins)}.jpg')
+        plt.clf()
         return mse
     def label(self):
         return 'Integrated MSE'
+    def clean_up(self):
+        _create_gif(self.hist_approx_dir)
 
 #########################
 #### /Error Measures ####
