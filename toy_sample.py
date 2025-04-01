@@ -1044,7 +1044,7 @@ def test_multivariate_gaussian(
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - tail.log()
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
-    scale_fn = lambda ode: ode - L.logdet()
+    scale_fn = lambda ode: ode - L.to(ode.device).logdet()
     ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
