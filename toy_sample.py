@@ -673,10 +673,10 @@ def plot_histogram_errors(
             other_histogram_data.histogram_errors_output.errors,
             label=other_histogram_data.label
         )
-    ax1.set_xlabel('Sample Size')
-    ax1.set_ylabel('Error')
     increment_size = int(np.diff(all_subsample_sizes)[0])
-    ax1.set_title(f'{error_measure.label()} vs. Sample Size (increments of {increment_size})')
+    ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
+    ax1.set_ylabel('Error')
+    ax1.set_title(f'{error_measure.label()} vs. Sample Size')
 
     # Compute theoretical rate x^(-2/3)
     theoretical_rate = subsample_sizes**(-2/3)
@@ -697,9 +697,10 @@ def plot_histogram_errors(
     ax2.legend()
     fig.tight_layout()
     ax2.set_title('Histogram Approximation Error vs. Sample Size')
-    plt.savefig('{}/{}_histogram_approx_error.pdf'.format(
+    plt.savefig('{}/{}_{}_histogram_approx_error.pdf'.format(
         HydraConfig.get().run.dir,
-        title_prefix
+        title_prefix,
+        alpha.item()
     ))
 
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
