@@ -1012,7 +1012,7 @@ def test_multivariate_gaussian(
         std.likelihood.alpha,
     ))
 
-    title_prefix = 'MVN_diffusion'
+    title_prefix = f'{cfg.example.d}D_MVN_diffusion'
     dd = stats.chi(cfg.example.d)
     calculator = DensityCalculator(dd)
     error = MISE()
