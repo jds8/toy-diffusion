@@ -36,9 +36,9 @@ from toy_likelihoods import Likelihood, ClassifierLikelihood, GeneralDistLikelih
 from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, TemporalNNet, DiffusionModel
 from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConfig, ContinuousSamplerConfig
 from histogram_error_utils import get_bm_pdf_map, \
-    AnalyticalPropsCalculator, DensityCalculator, TrapezoidCalculator, \
-    SimpsonsRuleCalculator, \
-    ErrorMeasure, SumError, MaxError, ForwardKLError, ReverseKLError
+    AnalyticalCalculator, DensityCalculator, TrapezoidCalculator, \
+    SimpsonsRuleCalculator, MISE, \
+    ErrorMeasure#, SumError, MaxError, ForwardKLError, ReverseKLError
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -434,13 +434,14 @@ class ContinuousEvaluator(ToyEvaluator):
         all_subsamples = []
         max_sample = samples.max().cpu().numpy()
         for subsample_size in subsample_sizes:
-            num_bins = 125
+            bin_width = subsample_size ** (-1/3)
+            num_bins = int((max_sample - alpha.item()) / bin_width)
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].cpu().numpy(),
                 bins=num_bins,
                 range=(alpha.item(), max_sample)
             )
-            props = subsamples / subsample_size
+            props = subsamples / (subsample_size * bin_width)
             all_subsamples.append(subsamples)
             all_props.append(props)
             all_bins.append(bins)
@@ -452,7 +453,7 @@ class ContinuousEvaluator(ToyEvaluator):
         total_raw_samples: torch.tensor,  # [B, D, 1]
         alpha: np.ndarray,
         subsample_sizes: np.ndarray,
-        analytical_props_calculator: AnalyticalPropsCalculator,
+        analytical_calculator: AnalyticalCalculator,
         error_measure: ErrorMeasure,
     ):
         dim = total_raw_samples.shape[1]
@@ -464,8 +465,11 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         errors = []
         for empirical_props, bins in zip(all_props, all_bins):
-            analytical_props = analytical_props_calculator(bins, alpha)
-            error = error_measure(analytical_props, empirical_props)
+            error = error_measure(
+                analytical_calculator,
+                empirical_props,
+                bins
+            )
             errors.append(error)
         return errors, all_subsamples, all_props, all_bins, all_num_bins
 
@@ -639,13 +643,14 @@ def compute_ode_log_likelihood(
     return ode_llk
 
 def plot_histogram_errors(
+        title_prefix: str,
         sample_trajs: torch.Tensor,
         alpha: np.ndarray,
         std,
-        analytical_props_calculator: AnalyticalPropsCalculator,
+        analytical_calculator: AnalyticalCalculator,
         error_measure: ErrorMeasure,
 ):
-    max_samples = max(sample_trajs.shape[0], 5000)
+    max_samples = max(sample_trajs.shape[0], 50000)
     all_subsample_sizes = np.linspace(50, max_samples, 100)
     subsample_sizes = all_subsample_sizes[
         (all_subsample_sizes <= sample_trajs.shape[0]).nonzero()[0]
@@ -654,27 +659,80 @@ def plot_histogram_errors(
         sample_trajs,
         alpha,
         subsample_sizes=subsample_sizes,
-        analytical_props_calculator=analytical_props_calculator,
+        analytical_calculator=analytical_calculator,
         error_measure=error_measure,
     )
     plt.clf()
     fig, (ax1, ax2) = plt.subplots(2, 1)
     ax1.plot(subsample_sizes, errors, label=error_measure.label())
     ax1.set_xlabel('Sample Size')
-    ax1.set_ylabel('Relative Error')
+    ax1.set_ylabel('Error')
     increment_size = int(np.diff(all_subsample_sizes)[0])
-    ax1.set_title(f'Error vs. Sample Size (increments of {increment_size})')
+    ax1.set_title(f'{error_measure.label()} vs. Sample Size (increments of {increment_size})')
+
+    # Compute theoretical rate x^(-2/3)
+    theoretical_rate = subsample_sizes**(-2/3)
+    # Normalize to match MISE scale
+    theoretical_rate *= errors[0] / theoretical_rate[0]
+    ax1.plot(
+        subsample_sizes,
+        theoretical_rate,
+        label='x^(-2/3) (normalized)',
+        linestyle='--',
+        color='r'
+    )
     ax1.legend()
+
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
     ax2.set_ylabel('Num Bins')
     ax2.legend()
     fig.tight_layout()
-
     ax2.set_title('Histogram Approximation Error vs. Sample Size')
-    plt.savefig('{}/histogram_approx_error.pdf'.format(HydraConfig.get().run.dir))
+    plt.savefig('{}/{}_histogram_approx_error.pdf'.format(
+        HydraConfig.get().run.dir,
+        title_prefix
+    ))
+
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
+    bin_width = sample_trajs.shape[0] ** (-1/3)
+    sample_min = sample_levels.min()
+    sample_max = sample_levels.max()
+    num_bins = int((sample_max - sample_min) / bin_width)
+    dim = int(sample_trajs.shape[1])
+
+    plot_chi_hist(sample_levels, num_bins, std, dim)
 
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
+
+def plot_chi_hist(sample_levels, num_bins, std, dim):
+    plt.clf()
+    plt.hist(
+        sample_levels.numpy(),
+        bins=num_bins,
+        edgecolor='black',
+        density=True,
+        label=f'{num_bins} bins'
+    )
+
+    # Plot analytical Chi distribution using scipy
+    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
+    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf = stats.chi(dim).pdf(x) / (1 - stats.chi(dim).cdf(alpha))
+        # Zero out values below alpha
+        pdf[x < alpha] = 0
+    else:
+        pdf = stats.chi(dim).pdf(x)
+    plt.plot(x, pdf, 'r-', label='Analytical PDF')
+    plt.xlabel('Radius')
+    plt.ylabel('Probability Density')
+    plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
+    plt.legend()
+    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+
+    return x, pdf
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/gaussian_sample_trajs.pt')
@@ -780,29 +838,8 @@ def plot_chi_from_sample_trajs(
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     num_bins = sample_trajs.shape[0] // 10
-    plt.hist(
-        sample_levels.numpy(),
-        bins=num_bins,
-        edgecolor='black',
-        density=True
-    )
-
-    # Plot analytical Chi distribution using scipy
-    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
-    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
-    if alpha > 0:
-        # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.chi(cfg.example.d).pdf(x) / (1 - stats.chi(cfg.example.d).cdf(alpha))
-        # Zero out values below alpha
-        pdf[x < alpha] = 0
-    else:
-        pdf = stats.chi(cfg.example.d).pdf(x)
-    plt.plot(x, pdf, 'r-', label='Analytical PDF')
-    plt.xlabel('Radius')
-    plt.ylabel('Probability Density')
-    plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
-    plt.legend()
-    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+    dim = int(sample_trajs.shape[1])
+    x, pdf = plot_chi_hist(sample_levels, num_bins, std, dim)
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     # ode_llk represents the log product (sum of logs) density of
@@ -834,8 +871,8 @@ def generate_diffusion_video(ode_llk, all_trajs, cfg):
     fig, ax = plt.subplots()
     
     # Set up plot limits based on data range
-    x_min, x_max = samples[..., 0].min(), samples[..., 0].max()
     y_min, y_max = samples[..., 1].min(), samples[..., 1].max()
+    x_min, x_max = samples[..., 0].min(), samples[..., 0].max()
     margin = 0.1 * max(x_max - x_min, y_max - y_min)
     ax.set_xlim(x_min - margin, x_max + margin)
     ax.set_ylim(y_min - margin, y_max + margin)
@@ -958,14 +995,16 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         std.likelihood.alpha,
     ))
 
+    title_prefix = 'MVN_diffusion'
     dd = stats.chi(cfg.example.d)
     calculator = DensityCalculator(dd)
-    error = SumError()
+    error = MISE()
     hist_errors_output = plot_histogram_errors(
+        title_prefix,
         sample_trajs,
         alpha,
         std,
-        analytical_props_calculator=calculator,
+        analytical_calculator=calculator,
         error_measure=error,
     )
 
@@ -1103,12 +1142,13 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
     ))
 
     calculator = SimpsonsRuleCalculator()
-    error = SumError()
+    error = MISE()
+    title_prefix = 'BM_diffusion'
     hist_errors_output = plot_histogram_errors(
         sample_trajs,
         alpha,
         std,
-        analytical_props_calculator=calculator,
+        analytical_calculator=calculator,
         error_measure=error,
     )
 
@@ -1484,15 +1524,17 @@ def sample(cfg):
                 cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
-                print(sample_traj_out.samples.shape)
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
+            title_prefix = 'analytical'
             dd = stats.chi(dim)
-            error = SumError()
+            calculator = DensityCalculator(dd)
+            error = MISE()
             errors = plot_histogram_errors(
+                title_prefix,
                 sample_traj_out.samples[-1],
                 std.likelihood.alpha,
                 std,
-                analytical_dist=dd,
+                analytical_calculator=calculator,
                 error_measure=error,
             )
             print('DEBUG is on!')

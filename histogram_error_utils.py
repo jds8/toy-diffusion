@@ -5,75 +5,32 @@ import torch
 import einops
 from compute_quadratures import get_2d_pdf
 from hydra.core.hydra_config import HydraConfig
+import scipy.integrate as integrate
 
 from typing import Optional
 
-#########################
-##### Error Measures ####
-#########################
-class ErrorMeasure:
-    def __call__(self, analytical_props, empirical_props):
-        return self.error(analytical_props, empirical_props)
-    def error(self, analytical_props, empirical_props):
-        raise NotImplementedError
-
-class MaxError(ErrorMeasure):
-    def error(self, analytical_props, empirical_props):
-        return np.max(np.abs(
-            (analytical_props - empirical_props) / analytical_props
-        ))
-    def label(self):
-        return 'Maximum Error Across All Bins'
-
-class SumError(ErrorMeasure):
-    def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
-        return np.sum(np.abs(
-            (analytical_props - empirical_props) / analytical_props
-        ))
-    def label(self):
-        return 'Sum of Errors Across All Bins'
-
-class ForwardKLError(ErrorMeasure):
-    def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
-        if not np.all(empirical_props):
-            return np.array(100)
-        return np.sum(analytical_props * (np.log(analytical_props) - np.log(empirical_props)))
-    def label(self):
-        return 'Forward KL Divergence'
-
-class ReverseKLError(ErrorMeasure):
-    def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
-        if not np.all(empirical_props):
-            return np.array(100)
-        return np.sum(empirical_props * (np.log(empirical_props) - np.log(analytical_props)))
-    def label(self):
-        return 'Reverse KL Divergence'
-
-#########################
-#### /Error Measures ####
-#########################
 
 #########################
 #### Prop Calculator ####
 #########################
-class AnalyticalPropsCalculator:
+class AnalyticalCalculator:
     def __call__(self, bins: np.ndarray, alpha: np.ndarray):
         return self.compute(bins, alpha)
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
         raise NotImplementedError
 
-class DensityCalculator(AnalyticalPropsCalculator):
-    def __init__(self, analytical_dist):
-        """ analytical_dist should be a scipy distribution """
-        self.analytical_dist = analytical_dist
+class DensityCalculator(AnalyticalCalculator):
+    def __init__(self, dist):
+        """ dist should be a scipy distribution """
+        self.dist = dist
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
-        analytical_props = self.analytical_dist.cdf(bins[1:]) - \
-            self.analytical_dist.cdf(bins[:-1])
-        normalizing_constant = 1 - self.analytical_dist.cdf(alpha)
+        analytical_props = self.dist.cdf(bins[1:]) - \
+            self.dist.cdf(bins[:-1])
+        normalizing_constant = 1 - self.dist.cdf(alpha)
         normalized_props = analytical_props / normalizing_constant
         return normalized_props
 
-class SimpsonsRuleCalculator(AnalyticalPropsCalculator):
+class SimpsonsRuleCalculator(AnalyticalCalculator):
     def __init__(self, pdf_values_file: Optional[str]=None):
         self.pdf_values = None
         self.save_pdf_values = True
@@ -105,7 +62,7 @@ class SimpsonsRuleCalculator(AnalyticalPropsCalculator):
     def get_pdf_map(self):
         return self.pdf_values
 
-class TrapezoidCalculator(AnalyticalPropsCalculator):
+class TrapezoidCalculator(AnalyticalCalculator):
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
         pdf_values = get_bm_pdf_map(alpha)
         x_vals = torch.tensor(list(pdf_values.keys()))  # D
@@ -1353,3 +1310,72 @@ def get_bm_pdf_map(alpha: np.ndarray):
         3.5: pdf_values_alpha_3_5,
     }
     return alpha_to_pdf[alpha.item()]
+
+#########################
+##### Error Measures ####
+#########################
+class ErrorMeasure:
+    def __call__(self, analytical_props, empirical_props, bins):
+        return self.error(analytical_props, empirical_props, bins)
+    def error(self, analytical_props, empirical_props, bins):
+        raise NotImplementedError
+
+# class MaxError(ErrorMeasure):
+#     def error(self, analytical_props, empirical_props):
+#         return np.max(np.abs(
+#             (analytical_props - empirical_props) / analytical_props
+#         ))
+#     def label(self):
+#         return 'Maximum Error Across All Bins'
+
+# class SumError(ErrorMeasure):
+#     def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
+#         return np.sum(np.abs(
+#             (analytical_props - empirical_props) / analytical_props
+#         ))
+#     def label(self):
+#         return 'Sum of Errors Across All Bins'
+
+# class ForwardKLError(ErrorMeasure):
+#     def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
+#         if not np.all(empirical_props):
+#             return np.array(100)
+#         return np.sum(analytical_props * (np.log(analytical_props) - np.log(empirical_props)))
+#     def label(self):
+#         return 'Forward KL Divergence'
+
+# class ReverseKLError(ErrorMeasure):
+#     def error(self, analytical_props: np.ndarray, empirical_props: np.ndarray):
+#         if not np.all(empirical_props):
+#             return np.array(100)
+#         return np.sum(empirical_props * (np.log(empirical_props) - np.log(analytical_props)))
+#     def label(self):
+#         return 'Reverse KL Divergence'
+
+class SimpsonsMISE(ErrorMeasure):
+    def error(self, analytical_pdf_values: np.ndarray, empirical_props: np.ndarray):
+        # computes an approximate to the mean integrated squared error
+        # using Simpson's rule with f(x) = (g_hat(x) - g(x)) ** 2
+        # where f is the integrand for Simpson's rule and g is the pdf for MISE
+        return (analytical_pdf_values[:-2:2] - empirical_props) ** 2 + \
+               (analytical_pdf_values[1:-1:2] - empirical_props) ** 2 + \
+               (analytical_pdf_values[2::2] - empirical_props) ** 2
+    def label(self):
+        return 'SimpsonsMISE'
+
+class MISE(ErrorMeasure):
+    def error(
+            self,
+            analytical_calculator: AnalyticalCalculator,
+            empirical_props: np.ndarray,
+            bins: np.ndarray
+    ):
+        x_grid = np.linspace(bins[:-1], bins[1:], 20)
+        mse = ((analytical_calculator.dist.pdf(x_grid) - empirical_props) ** 2).sum()
+        return mse
+    def label(self):
+        return 'Mean Integrated Squared Error'
+
+#########################
+#### /Error Measures ####
+#########################
