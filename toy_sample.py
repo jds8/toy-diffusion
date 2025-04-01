@@ -709,11 +709,11 @@ def plot_histogram_errors(
     num_bins = int((sample_max - sample_min) / bin_width)
     dim = int(sample_trajs.shape[1])
 
-    plot_chi_hist(sample_levels, num_bins, std, dim)
+    plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim)
 
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
 
-def plot_chi_hist(sample_levels, num_bins, std, dim):
+def plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim):
     plt.clf()
     plt.hist(
         sample_levels.numpy(),
@@ -738,7 +738,7 @@ def plot_chi_hist(sample_levels, num_bins, std, dim):
     plt.ylabel('Probability Density')
     plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
-    plt.savefig('{}/chi_hist.pdf'.format(HydraConfig.get().run.dir))
+    plt.savefig('{}/{}_chi_hist.pdf'.format(HydraConfig.get().run.dir, title_prefix))
 
     return x, pdf
 
