@@ -1374,7 +1374,7 @@ class MISE(ErrorMeasure):
         mse = ((analytical_calculator.dist.pdf(x_grid) - empirical_props) ** 2).sum()
         return mse
     def label(self):
-        return 'Mean Integrated Squared Error'
+        return 'Integrated MSE'
 
 #########################
 #### /Error Measures ####

@@ -3,7 +3,7 @@ import os
 import warnings
 import logging
 import time as timer
-from typing_extensions import Callable
+from typing_extensions import Callable, Optional
 
 from pathlib import Path
 
@@ -51,6 +51,7 @@ HistogramErrorsOutput = namedtuple(
     'HistogramErrorsOutput',
     'errors subsample_sizes all_num_bins'
 )
+HistogramData = namedtuple('HistogramData', 'histogram_errors_output label')
 
 
 #########################
@@ -649,6 +650,7 @@ def plot_histogram_errors(
         std,
         analytical_calculator: AnalyticalCalculator,
         error_measure: ErrorMeasure,
+        other_histogram_data: Optional[HistogramData],
 ):
     max_samples = max(sample_trajs.shape[0], 50000)
     all_subsample_sizes = np.linspace(50, max_samples, 100)
@@ -664,7 +666,13 @@ def plot_histogram_errors(
     )
     plt.clf()
     fig, (ax1, ax2) = plt.subplots(2, 1)
-    ax1.plot(subsample_sizes, errors, label=error_measure.label())
+    ax1.plot(subsample_sizes, errors, label=title_prefix)
+    if other_histogram_data is not None:
+        ax1.plot(
+            subsample_sizes,
+            other_histogram_data.histogram_errors_output.errors,
+            label=other_histogram_data.label
+        )
     ax1.set_xlabel('Sample Size')
     ax1.set_ylabel('Error')
     increment_size = int(np.diff(all_subsample_sizes)[0])
@@ -837,7 +845,8 @@ def plot_chi_from_sample_trajs(
 ):
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
-    num_bins = sample_trajs.shape[0] // 10
+    bin_width = sample_levels.shape[0] ** (-1/3)
+    num_bins = int((sample_levels.max() - sample_levels.min()) / bin_width)
     dim = int(sample_trajs.shape[1])
     x, pdf = plot_chi_hist(sample_levels, num_bins, std, dim)
 
@@ -982,7 +991,14 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
-def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
+def test_multivariate_gaussian(
+        end_time,
+        cfg,
+        sample_trajs,
+        std,
+        all_trajs,
+        other_histogram_data,
+):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
@@ -1006,6 +1022,7 @@ def test_multivariate_gaussian(end_time, cfg, sample_trajs, std, all_trajs):
         std,
         analytical_calculator=calculator,
         error_measure=error,
+        other_histogram_data=other_histogram_data,
     )
 
     cond = std.cond if std.cond else torch.tensor([-1.])
@@ -1120,26 +1137,20 @@ def plot_bm_pdf_pfode_estimate(sample_levels, ode_llk, x, pdf, cfg):
         num_hutchinson_samples
     ))
 
-def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
+def test_brownian_motion_diff(
+        end_time,
+        cfg,
+        sample_trajs,
+        std,
+        other_histogram_data,
+):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/bm_sample_trajs.pt')
     dt = end_time.cpu() / (cfg.example.sde_steps-1)
     # de-standardize data
     trajs = sample_trajs * dt.sqrt()
 
-    # make histogram
-    data = sample_trajs.reshape(-1).cpu().numpy()
-    plt.clf()
-    plt.hist(data, bins=30, edgecolor='black')
-    plt.title('Histogram of brownian motion state diffs')
-    save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
-    os.makedirs(save_dir, exist_ok=True)
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     alpha = alpha.cpu()
-    alpha_str = '%.1f' % alpha.item()
-    plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
-        save_dir,
-        alpha_str,
-    ))
 
     calculator = SimpsonsRuleCalculator()
     error = MISE()
@@ -1150,7 +1161,21 @@ def test_brownian_motion_diff(end_time, cfg, sample_trajs, std):
         std,
         analytical_calculator=calculator,
         error_measure=error,
+        other_histogram_data=other_histogram_data,
     )
+
+    # make histogram
+    data = sample_trajs.reshape(-1).cpu().numpy()
+    plt.clf()
+    plt.hist(data, bins=30, edgecolor='black')
+    plt.title('Histogram of brownian motion state diffs')
+    save_dir = '{}/{}'.format(HydraConfig.get().run.dir, cfg.model_name)
+    os.makedirs(save_dir, exist_ok=True)
+    alpha_str = '%.1f' % alpha.item()
+    plt.savefig('{}/alpha={}_brownian_motion_diff_hist.pdf'.format(
+        save_dir,
+        alpha_str,
+    ))
 
     # turn state diffs into Brownian motion
     bm_trajs = torch.cat([
@@ -1451,17 +1476,46 @@ def test_transformer_bm(end_time, std):
         ))
     import pdb; pdb.set_trace()
 
-def test(end_time, cfg, out_trajs, std, all_trajs):
+def test(end_time, cfg, out_trajs, std, all_trajs, other_histogram_data):
     if type(std.example) == GaussianExampleConfig:
-        test_gaussian(end_time, cfg, out_trajs, std)
+        test_gaussian(
+            end_time,
+            cfg,
+            out_trajs,
+            std,
+            other_histogram_data,
+        )
     elif type(std.example) == MultivariateGaussianExampleConfig:
-        test_multivariate_gaussian(end_time, cfg, out_trajs, std, all_trajs)
+        test_multivariate_gaussian(
+            end_time,
+            cfg,
+            out_trajs,
+            std,
+            all_trajs,
+            other_histogram_data,
+        )
     elif type(std.example) == BrownianMotionDiffExampleConfig:
-        test_brownian_motion_diff(end_time, cfg, out_trajs, std)
+        test_brownian_motion_diff(
+            end_time,
+            cfg,
+            out_trajs,
+            std,
+            other_histogram_data,
+        )
     elif type(std.example) == UniformExampleConfig:
-        test_uniform(end_time, cfg, out_trajs, std)
+        test_uniform(
+            end_time,
+            cfg,
+            out_trajs,
+            std
+        )
     elif type(std.example) == StudentTExampleConfig:
-        test_student_t(end_time, cfg, out_trajs, std)
+        test_student_t(
+            end_time,
+            cfg,
+            out_trajs,
+            std
+        )
     else:
         raise NotImplementedError
 
@@ -1511,6 +1565,7 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
+        other_histogram_data = None
         if cfg.debug:
             class A:
                 def __init__(self, samples):
@@ -1536,13 +1591,15 @@ def sample(cfg):
                 std,
                 analytical_calculator=calculator,
                 error_measure=error,
+                other_histogram_data=other_histogram_data,
             )
+            other_histogram_data = HistogramData(errors, 'analytical')
             print('DEBUG is on!')
-        else:
-            sample_traj_out = std.sample_trajectories(
-                cond=std.cond,
-                alpha=std.likelihood.alpha.reshape(-1, 1),
-            )
+
+        sample_traj_out = std.sample_trajectories(
+            cond=std.cond,
+            alpha=std.likelihood.alpha.reshape(-1, 1),
+        )
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
         # plot_ode_trajectories(ode_trajs)
@@ -1554,7 +1611,7 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std, sample_trajs)
+        test(end_time, cfg, out_trajs, std, sample_trajs, other_histogram_data)
         import pdb; pdb.set_trace()
 
 
@@ -1567,7 +1624,6 @@ if __name__ == "__main__":
     cs.store(name="vpsde_sample_config", node=SampleConfig)
     cs.store(name="vpsde_smc_sample_config", node=SMCSampleConfig)
     register_configs()
-
 
     with torch.no_grad():
         sample()
