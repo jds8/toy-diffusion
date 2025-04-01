@@ -849,7 +849,7 @@ def plot_chi_from_sample_trajs(
     bin_width = sample_levels.shape[0] ** (-1/3)
     num_bins = int((sample_levels.max() - sample_levels.min()) / bin_width)
     dim = int(sample_trajs.shape[1])
-    x, pdf = plot_chi_hist(sample_levels, num_bins, std, dim)
+    x, pdf = plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim)
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     # ode_llk represents the log product (sum of logs) density of
@@ -1056,7 +1056,13 @@ def test_multivariate_gaussian(
     )
 
     cpu_sample_trajs = sample_trajs.cpu()
-    plot_chi_from_sample_trajs(cfg, cpu_sample_trajs, std, ode_llk[0][-1].cpu())
+    plot_chi_from_sample_trajs(
+        title_prefix,
+        cfg,
+        cpu_sample_trajs,
+        std,
+        ode_llk[0][-1].cpu()
+    )
     if cfg.example.d == 2:
         plot_ellipsoid(end_time, cfg, cpu_sample_trajs, std)
         plot_theta_from_sample_trajs(end_time, cfg, cpu_sample_trajs, std)

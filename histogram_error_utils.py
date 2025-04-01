@@ -1365,10 +1365,10 @@ class SimpsonsMISE(ErrorMeasure):
 
 class MISE(ErrorMeasure):
     def error(
-            self,
-            analytical_calculator: AnalyticalCalculator,
-            empirical_props: np.ndarray,
-            bins: np.ndarray
+        self,
+        analytical_calculator: AnalyticalCalculator,
+        empirical_props: np.ndarray,
+        bins: np.ndarray
     ):
         x_grid = np.linspace(bins[:-1], bins[1:], 20)
         mse = ((analytical_calculator.dist.pdf(x_grid) - empirical_props) ** 2).sum()
