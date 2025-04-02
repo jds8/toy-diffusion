@@ -50,9 +50,12 @@ class AnalyticalCalculator:
         raise NotImplementedError
 
 class DensityCalculator(AnalyticalCalculator):
-    def __init__(self, dist, alpha):
+    def __init__(self, dist):
         """ dist should be a scipy distribution """
-        self.dist = lambda x: dist.pdf(x) / (1 - dist.cdf(alpha))
+        self.dist = dist
+    def compute(self, bins: np.ndarray, alpha: np.ndarray):
+        x_grid = np.linspace(bins[:-1], bins[1:], 20)
+        return self.dist.pdf(x_grid) / (1 - self.dist.cdf(alpha)), x_grid
 
 class SimpsonsRuleCalculator(AnalyticalCalculator):
     def __init__(self, pdf_values_file: Optional[str]=None):
@@ -70,19 +73,20 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
                 alpha=alpha,
                 num_divisions=num_divisions
             )
-        x_vals = np.array(list(self.pdf_values.keys())).squeeze()  # D
-        assert np.max(np.abs(bins - x_vals[::2])) < 1e-5
-        assert np.max(np.abs((bins[:-1] + bins[1:]) / 2 - x_vals[1:-1:2])) < 1e-5
-        values = np.array(list(self.pdf_values.values())).squeeze()  # D
-        # Simpson's Rule
-        areas = np.diff(x_vals[::2]) / 6 * (values[:-2:2] + 4 * values[1:-1:2] + values[2::2])
         pdf_values_file = '{}/{}'.format(
             HydraConfig.get().run.dir,
             f'simpsons_rule_pdf_values_alpha_{alpha.item()}.pt'
         )
         if self.save_pdf_values:
             torch.save(self.pdf_values, pdf_values_file)
-        return areas
+        keys = np.array(list(self.pdf_values.keys()))
+        values = np.array(list(self.pdf_values.values()))
+        try:
+            x_grid = einops.rearrange(keys, 'b -> d 3')
+            pdf_values = einops.rearrange(values, 'b -> d 3')
+        except:
+            import pdb; pdb.set_trace()
+        return pdf_values, x_grid
     def get_pdf_map(self):
         return self.pdf_values
 
@@ -1339,12 +1343,55 @@ def get_bm_pdf_map(alpha: np.ndarray):
 ##### Error Measures ####
 #########################
 class ErrorMeasure:
-    def __call__(self, analytical_props, empirical_props, bins):
-        return self.error(analytical_props, empirical_props, bins)
-    def error(self, analytical_props, empirical_props, bins):
+    def __init__(self):
+        self.hist_approx_dir = f'{HydraConfig.get().run.dir}/histogram_approximations'
+        os.makedirs(self.hist_approx_dir, exist_ok=True)
+    def __call__(
+        self,
+        analytical_props,
+        empirical_props,
+        bins,
+        alpha
+    ):
+        return self.error(analytical_props, empirical_props, bins, alpha)
+    def error(
+        self,
+        analytical_props,
+        empirical_props,
+        bins,
+        alpha
+    ):
         raise NotImplementedError
+    def plot(
+        self,
+        x_grid: np.ndarray,
+        pdf_values: np.ndarray,
+        empirical_props: np.ndarray,
+        num_bins: int
+    ):
+        """
+        x_grid has shape d x b
+        pdf_values has shape d x b
+        empirical_props has shape b
+        """
+        try:
+            x_unique, idx = np.unique(
+                einops.rearrange(
+                    x_grid,
+                    'b w -> (w b)'
+                ),
+                return_index=True
+            )
+            props = einops.repeat(empirical_props, 'c -> (c w)', w=x_grid.shape[0])
+            values = einops.rearrange(pdf_values, 'c w -> (c w)')
+        except:
+            import pdb; pdb.set_trace()
+        plt.plot(x_unique, props[idx])
+        plt.plot(x_unique, values[idx])
+        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
+        plt.clf()
     def clean_up(self):
-        return
+        _create_gif(self.hist_approx_dir)
 
 # class MaxError(ErrorMeasure):
 #     def error(self, analytical_props, empirical_props):
@@ -1379,39 +1426,38 @@ class ErrorMeasure:
 #         return 'Reverse KL Divergence'
 
 class SimpsonsMISE(ErrorMeasure):
-    def error(self, analytical_pdf_values: np.ndarray, empirical_props: np.ndarray):
-        # computes an approximate to the mean integrated squared error
-        # using Simpson's rule with f(x) = (g_hat(x) - g(x)) ** 2
-        # where f is the integrand for Simpson's rule and g is the pdf for MISE
-        return (analytical_pdf_values[:-2:2] - empirical_props) ** 2 + \
-               (analytical_pdf_values[1:-1:2] - empirical_props) ** 2 + \
-               (analytical_pdf_values[2::2] - empirical_props) ** 2
-    def label(self):
-        return 'SimpsonsMISE'
-
-class MISE(ErrorMeasure):
-    def __init__(self):
-        self.hist_approx_dir = f'{HydraConfig.get().run.dir}/histogram_approximations'
-        os.makedirs(self.hist_approx_dir, exist_ok=True)
     def error(
         self,
         analytical_calculator: AnalyticalCalculator,
         empirical_props: np.ndarray,
-        bins: np.ndarray
+        bins: np.ndarray,
+        alpha: np.ndarray
     ):
-        x_grid = np.linspace(bins[:-1], bins[1:], 20)
-        mse = ((analytical_calculator.dist(x_grid) - empirical_props) ** 2).sum()
-        x_unique, idx = np.unique(einops.rearrange(x_grid, 'b w -> (w b)'), return_index=True)
-        props = einops.repeat(empirical_props, 'c -> (c w)', w=x_grid.shape[0])
-        plt.plot(x_unique, props[idx])
-        plt.plot(x_unique, analytical_calculator.dist(x_unique))
-        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{len(bins)}.jpg')
-        plt.clf()
+        pdf_values, x_grid = analytical_calculator(bins, alpha)
+        # \int_a^b f^2(x)dx \approx (b-a)/6 * (f^2(a) + 4*f^2((b+a)/2) + f^2(b))
+        mse_vec = (pdf_values[:-2:2] - empirical_props) ** 2 + \
+                  4 * (pdf_values[1:-1:2] - empirical_props) ** 2 + \
+                  (pdf_values[2::2] - empirical_props) ** 2
+        mse = mse_vec.sum()
+        self.plot(x_grid, pdf_values, empirical_props, len(bins))
+        return mse
+    def label(self):
+        return 'Simpson\'s MISE'
+
+class MISE(ErrorMeasure):
+    def error(
+        self,
+        analytical_calculator: AnalyticalCalculator,
+        empirical_props: np.ndarray,
+        bins: np.ndarray,
+        alpha: np.ndarray
+    ):
+        pdf_values, x_grid = analytical_calculator(bins, alpha)
+        mse = ((pdf_values - empirical_props) ** 2).sum()
+        self.plot(x_grid, pdf_values, empirical_props, len(bins))
         return mse
     def label(self):
         return 'Integrated MSE'
-    def clean_up(self):
-        _create_gif(self.hist_approx_dir)
 
 #########################
 #### /Error Measures ####
