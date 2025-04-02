@@ -53,12 +53,6 @@ class DensityCalculator(AnalyticalCalculator):
     def __init__(self, dist, alpha):
         """ dist should be a scipy distribution """
         self.dist = lambda x: dist.pdf(x) / (1 - dist.cdf(alpha))
-    def compute(self, bins: np.ndarray, alpha: np.ndarray):
-        analytical_props = self.dist.cdf(bins[1:]) - \
-            self.dist.cdf(bins[:-1])
-        normalizing_constant = 1 - self.dist.cdf(alpha)
-        normalized_props = analytical_props / normalizing_constant
-        return normalized_props
 
 class SimpsonsRuleCalculator(AnalyticalCalculator):
     def __init__(self, pdf_values_file: Optional[str]=None):

@@ -666,7 +666,8 @@ def plot_histogram_errors(
     )
     error_measure.clean_up()
     plt.clf()
-    fig, (ax1, ax2) = plt.subplots(2, 1)
+    fig, ((ax1, ax3), (ax2, ax4)) = plt.subplots(2, 2)
+    fig.delaxes(ax4)
     ax1.plot(subsample_sizes, errors, label=title_prefix)
     if other_histogram_data is not None:
         ax1.plot(
@@ -692,12 +693,38 @@ def plot_histogram_errors(
     )
     ax1.legend()
 
+    ax3.plot(subsample_sizes, errors, label=title_prefix)
+    if other_histogram_data is not None:
+        ax3.plot(
+            subsample_sizes,
+            other_histogram_data.histogram_errors_output.errors,
+            label=other_histogram_data.label
+        )
+    increment_size = int(np.diff(all_subsample_sizes)[0])
+    ax3.set_xlabel(f'Sample Size (increments of {increment_size})')
+    ax3.set_ylabel('Log Error')
+    ax3.set_title(f'{error_measure.label()} vs. Sample Size')
+
+    # Compute theoretical rate x^(-2/3)
+    theoretical_rate = subsample_sizes**(-2/3)
+    # Normalize to match MISE scale
+    theoretical_rate *= errors[0] / theoretical_rate[0]
+    ax3.plot(
+        subsample_sizes,
+        theoretical_rate,
+        label='x^(-2/3) (normalized)',
+        linestyle='--',
+        color='r'
+    )
+    ax3.set_yscale('log')
+    ax3.legend()
+
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
     ax2.set_ylabel('Num Bins')
     ax2.legend()
     fig.tight_layout()
-    ax2.set_title('Histogram Approximation Error vs. Sample Size')
+    ax2.set_title('Num Bins vs. Sample Size')
     plt.savefig('{}/{}_{}_histogram_approx_error.pdf'.format(
         HydraConfig.get().run.dir,
         title_prefix,
@@ -1591,7 +1618,7 @@ def sample(cfg):
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            title_prefix = f'analytical_{dim}D_{dist_type}'
+            title_prefix = f'{dim}D_{dist_type}_analytical'
             dd = stats.chi(dim)
             alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
             calculator = DensityCalculator(dd, alpha)
