@@ -703,7 +703,7 @@ def plot_histogram_errors(
     increment_size = int(np.diff(all_subsample_sizes)[0])
     ax3.set_xlabel(f'Sample Size (increments of {increment_size})')
     ax3.set_ylabel('Log Error')
-    ax3.set_title(f'{error_measure.label()} vs. Sample Size')
+    ax3.set_title(f'Log Error vs. Sample Size')
 
     # Compute theoretical rate x^(-2/3)
     theoretical_rate = subsample_sizes**(-2/3)
