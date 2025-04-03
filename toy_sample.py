@@ -719,6 +719,7 @@ def plot_histogram_errors(
         color='r'
     )
     ax3.set_yscale('log')
+    ax3.set_xscale('log')
 
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
