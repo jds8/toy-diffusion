@@ -722,7 +722,6 @@ def plot_histogram_errors(
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
     ax2.set_ylabel('Num Bins')
-    ax2.legend()
     fig.tight_layout()
     ax2.set_title('Num Bins vs. Sample Size')
     dim = int(sample_trajs.shape[1])
