@@ -435,7 +435,8 @@ class ContinuousEvaluator(ToyEvaluator):
         all_subsamples = []
         max_sample = samples.max().cpu().numpy()
         for subsample_size in subsample_sizes:
-            bin_width = subsample_size ** (-1/3)
+            # bin_width = subsample_size ** (-1/3)
+            bin_width = 1 / np.log2(subsample_size)
             num_bins = int((max_sample - alpha.item()) / bin_width)
             subsamples, bins = np.histogram(
                 samples[:subsample_size.astype(int)].cpu().numpy(),
@@ -682,7 +683,8 @@ def plot_histogram_errors(
     ax1.set_title(f'{error_measure.label()} vs. Sample Size')
 
     # Compute theoretical rate x^(-2/3)
-    theoretical_rate = subsample_sizes**(-2/3)
+    # theoretical_rate = subsample_sizes**(-2/3)
+    theoretical_rate = np.log2(subsample_sizes)/subsample_sizes
     # Normalize to match MISE scale
     theoretical_rate *= errors[0] / theoretical_rate[0]
     ax1.plot(
@@ -707,7 +709,8 @@ def plot_histogram_errors(
     ax3.set_title(f'Log Error vs. Sample Size')
 
     # Compute theoretical rate x^(-2/3)
-    theoretical_rate = subsample_sizes**(-2/3)
+    # theoretical_rate = subsample_sizes**(-2/3)
+    theoretical_rate = np.log2(subsample_sizes)/subsample_sizes
     # Normalize to match MISE scale
     theoretical_rate *= errors[0] / theoretical_rate[0]
     ax3.plot(
@@ -743,7 +746,8 @@ def plot_chi_hist(
     std: ToyEvaluator
 ):
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
-    bin_width = sample_trajs.shape[0] ** (-1/3)
+    # bin_width = sample_trajs.shape[0] ** (-1/3)
+    bin_width = 1 / np.log2(sample_trajs.shape[0])
     sample_max = sample_levels.max()
     num_bins = int((sample_max - alpha.item()) / bin_width)
     dim = int(sample_trajs.shape[1])

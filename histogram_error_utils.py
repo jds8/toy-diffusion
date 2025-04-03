@@ -1378,18 +1378,15 @@ class ErrorMeasure:
         pdf_values has shape d x b
         empirical_props has shape b
         """
-        try:
-            x_unique, idx = np.unique(
-                einops.rearrange(
-                    x_grid,
-                    'b w -> (w b)'
-                ),
-                return_index=True
-            )
-            props = einops.repeat(empirical_props, 'c -> (c w)', w=x_grid.shape[0])
-            values = einops.rearrange(pdf_values, 'c w -> (c w)')
-        except:
-            import pdb; pdb.set_trace()
+        x_unique, idx = np.unique(
+            einops.rearrange(
+                x_grid,
+                'b w -> (w b)'
+            ),
+            return_index=True
+        )
+        props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
+        values = einops.rearrange(pdf_values, 'd b -> (b d)')
         plt.plot(x_unique, props[idx])
         plt.plot(x_unique, values[idx])
         plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
