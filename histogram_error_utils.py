@@ -58,34 +58,38 @@ class DensityCalculator(AnalyticalCalculator):
         return self.dist.pdf(x_grid) / (1 - self.dist.cdf(alpha)), x_grid
 
 class SimpsonsRuleCalculator(AnalyticalCalculator):
-    def __init__(self, pdf_values_file: Optional[str]=None):
+    def __init__(self, pdf_values_dir: Optional[str]=None):
         self.pdf_values = None
         self.save_pdf_values = True
-        if pdf_values_file is not None:
-            self.pdf_values = torch.load(pdf_values_file)
+        self.load_pdf_values = pdf_values_dir != ''
+        if pdf_values_dir:
+            self.pdf_values_map = torch.load(pdf_values_dir)
             self.save_pdf_values = False
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
         # for Simpson's Rule
         num_divisions = 2 * (bins.shape[0] - 1) + 1
-        if self.pdf_values is None:
+        # If not loading pdf_values, do quadrature even if pdf_values is set
+        if not (self.load_pdf_values and self.pdf_values):
             self.pdf_values = get_2d_pdf(
                 max_sample=bins[-1],
                 alpha=alpha,
                 num_divisions=num_divisions
             )
+        save_dir = f'{HydraConfig.get().run.dir}/simpsons_rule_pdf_values/'
+        os.makedirs(save_dir, exist_ok=True)
         pdf_values_file = '{}/{}'.format(
-            HydraConfig.get().run.dir,
-            f'simpsons_rule_pdf_values_alpha_{alpha.item()}.pt'
+            save_dir,
+            f'simpsons_rule_pdf_values_alpha_{alpha.item()}_bin_size_{len(bins)}.pt'
         )
         if self.save_pdf_values:
             torch.save(self.pdf_values, pdf_values_file)
-        keys = np.array(list(self.pdf_values.keys()))
-        values = np.array(list(self.pdf_values.values()))
-        try:
-            x_grid = einops.rearrange(keys, 'b -> d 3')
-            pdf_values = einops.rearrange(values, 'b -> d 3')
-        except:
-            import pdb; pdb.set_trace()
+        keys = np.array(list(self.pdf_values.keys())).squeeze()
+        values = np.array(list(self.pdf_values.values())).squeeze()
+        copy_idx = np.arange(2, len(values)-2, 2)
+        copied_keys = np.insert(keys, copy_idx, keys[copy_idx])
+        copied_values = np.insert(values, copy_idx, values[copy_idx])
+        x_grid = einops.rearrange(copied_keys, '(d c) -> c d', c=3)
+        pdf_values = einops.rearrange(copied_values, '(d c) -> c d', c=3)
         return pdf_values, x_grid
     def get_pdf_map(self):
         return self.pdf_values
@@ -1436,8 +1440,8 @@ class SimpsonsMISE(ErrorMeasure):
         pdf_values, x_grid = analytical_calculator(bins, alpha)
         # \int_a^b f^2(x)dx \approx (b-a)/6 * (f^2(a) + 4*f^2((b+a)/2) + f^2(b))
         mse_vec = (pdf_values[:-2:2] - empirical_props) ** 2 + \
-                  4 * (pdf_values[1:-1:2] - empirical_props) ** 2 + \
-                  (pdf_values[2::2] - empirical_props) ** 2
+                4 * (pdf_values[1:-1:2] - empirical_props) ** 2 + \
+                (pdf_values[2::2] - empirical_props) ** 2
         mse = mse_vec.sum()
         self.plot(x_grid, pdf_values, empirical_props, len(bins))
         return mse

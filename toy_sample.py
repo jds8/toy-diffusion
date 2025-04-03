@@ -37,7 +37,7 @@ from models.toy_temporal import TemporalTransformerUnet, TemporalClassifier, Tem
 from models.toy_diffusion_models_config import GuidanceType, DiscreteSamplerConfig, ContinuousSamplerConfig
 from histogram_error_utils import get_bm_pdf_map, \
     AnalyticalCalculator, DensityCalculator, TrapezoidCalculator, \
-    SimpsonsRuleCalculator, MISE, \
+    SimpsonsRuleCalculator, MISE, SimpsonsMISE, \
     ErrorMeasure#, SumError, MaxError, ForwardKLError, ReverseKLError
 
 
@@ -469,7 +469,8 @@ class ContinuousEvaluator(ToyEvaluator):
             error = error_measure(
                 analytical_calculator,
                 empirical_props,
-                bins
+                bins,
+                alpha,
             )
             errors.append(error)
         return errors, all_subsamples, all_props, all_bins, all_num_bins
@@ -647,7 +648,7 @@ def plot_histogram_errors(
         title_prefix: str,
         sample_trajs: torch.Tensor,
         alpha: np.ndarray,
-        std,
+        std: ToyEvaluator,
         analytical_calculator: AnalyticalCalculator,
         error_measure: ErrorMeasure,
         other_histogram_data: Optional[HistogramData],
@@ -717,7 +718,6 @@ def plot_histogram_errors(
         color='r'
     )
     ax3.set_yscale('log')
-    ax3.legend()
 
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
@@ -725,36 +725,43 @@ def plot_histogram_errors(
     ax2.legend()
     fig.tight_layout()
     ax2.set_title('Num Bins vs. Sample Size')
-    plt.savefig('{}/{}_{}_histogram_approx_error.pdf'.format(
+    dim = int(sample_trajs.shape[1])
+    plt.savefig('{}/{}D_{}_{}_histogram_approx_error.pdf'.format(
         HydraConfig.get().run.dir,
+        dim,
         title_prefix,
         alpha.item()
     ))
 
-    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
-    bin_width = sample_trajs.shape[0] ** (-1/3)
-    sample_min = sample_levels.min()
-    sample_max = sample_levels.max()
-    num_bins = int((sample_max - sample_min) / bin_width)
-    dim = int(sample_trajs.shape[1])
-
-    plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim)
+    plot_chi_hist(title_prefix, sample_trajs, alpha, std)
 
     return HistogramErrorsOutput(errors, subsample_sizes, all_num_bins)
 
-def plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim):
+def plot_chi_hist(
+    title_prefix: str,
+    sample_trajs: np.ndarray,
+    alpha: np.ndarray,
+    std: ToyEvaluator
+):
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
+    bin_width = sample_trajs.shape[0] ** (-1/3)
+    sample_max = sample_levels.max()
+    num_bins = int((sample_max - alpha.item()) / bin_width)
+    dim = int(sample_trajs.shape[1])
+
+    sample_max = sample_levels.max().item()
     plt.clf()
     plt.hist(
         sample_levels.numpy(),
         bins=num_bins,
         edgecolor='black',
         density=True,
-        label=f'{num_bins} bins'
+        label=f'{num_bins} bins',
+        range=(alpha.item(), sample_max)
     )
 
     # Plot analytical Chi distribution using scipy
-    x = np.linspace(0, sample_levels.max().item(), 1000)  # [1000]
-    alpha = std.likelihood.alpha.item() if std.cond == 1. else 0.
+    x = np.linspace(0, sample_max, 1000)  # [1000]
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
         pdf = stats.chi(dim).pdf(x) / (1 - stats.chi(dim).cdf(alpha))
@@ -767,7 +774,12 @@ def plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim):
     plt.ylabel('Probability Density')
     plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
-    plt.savefig('{}/{}_chi_hist.pdf'.format(HydraConfig.get().run.dir, title_prefix))
+    plt.savefig('{}/{}D_{}_{}_chi_hist.pdf'.format(
+        HydraConfig.get().run.dir,
+        dim,
+        title_prefix,
+        alpha
+    ))
 
     return x, pdf
 
@@ -867,18 +879,22 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
     plt.clf()
 
 def plot_chi_from_sample_trajs(
-        title_prefix,
+        title_prefix: str,
         cfg,
-        sample_trajs,
-        std,
-        ode_llk,
+        sample_trajs: np.ndarray,
+        std: ToyEvaluator,
+        ode_llk: torch.Tensor,
+        alpha: np.ndarray,
 ):
-    plt.clf()
+    x, pdf = plot_chi_hist(
+        title_prefix,
+        sample_trajs,
+        alpha,
+        std,
+    )
+
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
-    bin_width = sample_levels.shape[0] ** (-1/3)
-    num_bins = int((sample_levels.max() - sample_levels.min()) / bin_width)
     dim = int(sample_trajs.shape[1])
-    x, pdf = plot_chi_hist(title_prefix, sample_levels, num_bins, std, dim)
 
     # plot points (ode_llk, sample_trajs) against analytical chi
     # ode_llk represents the log product (sum of logs) density of
@@ -895,8 +911,10 @@ def plot_chi_from_sample_trajs(
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.d}D Tail Density')
     num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
-    plt.savefig('{}/chi_scatter_{}.pdf'.format(
+    plt.savefig('{}/{}D_{}_chi_scatter_{}.pdf'.format(
         HydraConfig.get().run.dir,
+        dim,
+        title_prefix,
         num_hutchinson_samples
     ))
 
@@ -1041,14 +1059,14 @@ def test_multivariate_gaussian(
         std.likelihood.alpha,
     ))
 
-    title_prefix = f'{cfg.example.d}D_MVN_diffusion'
+    title_prefix = 'MVN_diffusion'
     dd = stats.chi(cfg.example.d)
-    calculator = DensityCalculator(dd, alpha)
+    calculator = DensityCalculator(dd)
     error = MISE()
     hist_errors_output = plot_histogram_errors(
         title_prefix,
         sample_trajs,
-        alpha,
+        alpha.numpy().squeeze(),
         std,
         analytical_calculator=calculator,
         error_measure=error,
@@ -1090,7 +1108,8 @@ def test_multivariate_gaussian(
         cfg,
         cpu_sample_trajs,
         std,
-        ode_llk[0][-1].cpu()
+        ode_llk[0][-1].cpu(),
+        alpha.numpy(),
     )
     if cfg.example.d == 2:
         plot_ellipsoid(end_time, cfg, cpu_sample_trajs, std)
@@ -1128,15 +1147,22 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
         plt_llk(sample_trajs, analytical_llk.exp(), HydraConfig.get().run.dir, plot_type='line')
     import pdb; pdb.set_trace()
 
-def plot_bm_pdf_histogram_estimate(sample_trajs, pdf_map, cfg):
+def plot_bm_pdf_histogram_estimate(
+    sample_trajs: np.ndarray,
+    pdf_map: dict,
+    alpha: np.ndarray,
+):
     plt.clf()
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu().numpy()  # [B]
-    num_bins = 125
+    bin_width = sample_trajs.shape[0] ** (-1/3)
+    max_sample = sample_levels.max()
+    num_bins = int((max_sample - alpha) / bin_width)
     plt.hist(
         sample_levels,
         bins=num_bins,
         edgecolor='black',
-        density=True
+        density=True,
+        range=(alpha, max_sample)
     )
 
     # Plot analytical Chi distribution using scipy
@@ -1188,12 +1214,13 @@ def test_brownian_motion_diff(
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     alpha = alpha.cpu()
 
-    calculator = SimpsonsRuleCalculator()
-    error = MISE()
+    calculator = SimpsonsRuleCalculator(cfg.pdf_values_dir)
+    error = SimpsonsMISE()
     title_prefix = 'BM_diffusion'
     hist_errors_output = plot_histogram_errors(
+        title_prefix,
         sample_trajs,
-        alpha,
+        alpha.numpy().squeeze(),
         std,
         analytical_calculator=calculator,
         error_measure=error,
@@ -1261,7 +1288,7 @@ def test_brownian_motion_diff(
         sample_levels, x, pdf = plot_bm_pdf_histogram_estimate(
             sample_trajs,
             pdf_map,
-            cfg,
+            alpha.numpy().squeeze(),
         )
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
@@ -1569,7 +1596,8 @@ def viz_trajs(cfg, std, out_trajs, end_time):
 def sample(cfg):
     logger = logging.getLogger("main")
     logger.info('run type: sample')
-    logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}")
+    logger.info(f"CONFIG\n{OmegaConf.to_yaml(cfg)}\n")
+    logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
 
     os.system('echo git commit: $(git rev-parse HEAD)')
 
@@ -1601,44 +1629,56 @@ def sample(cfg):
         #     observed_idx=observed_idx,
         # )
 
+        # Plot convergence of histogram from analytical samples
+        # Use these samples to debug if the debug flag is set
         other_histogram_data = None
-        if cfg.debug:
-            class A:
-                def __init__(self, samples):
-                    self.samples = samples
-            if type(std.example) == MultivariateGaussianExampleConfig:
-                dim = cfg.example.d
-                dist_type = 'MVN'
-            elif type(std.example) == BrownianMotionDiffExampleConfig:
-                dim = cfg.example.sde_steps - 1
-                dist_type = 'BM'
-            sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
-            if std.cond == 1:
-                cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
-                cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
-                sample_traj_out.samples = cond_samples
-            sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            title_prefix = f'{dim}D_{dist_type}_analytical'
+        class A:
+            def __init__(self, samples):
+                self.samples = samples
+        saps = None
+        if type(std.example) == MultivariateGaussianExampleConfig:
+            dim = cfg.example.d
+            dist_type = 'MVN'
             dd = stats.chi(dim)
-            alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-            calculator = DensityCalculator(dd, alpha)
+            calculator = DensityCalculator(dd)
             error = MISE()
-            errors = plot_histogram_errors(
-                title_prefix,
-                sample_traj_out.samples[-1],
-                std.likelihood.alpha,
-                std,
-                analytical_calculator=calculator,
-                error_measure=error,
-                other_histogram_data=other_histogram_data,
-            )
-            other_histogram_data = HistogramData(errors, title_prefix)
-            print('DEBUG is on!')
-
-        sample_traj_out = std.sample_trajectories(
-            cond=std.cond,
-            alpha=std.likelihood.alpha.reshape(-1, 1),
+        elif type(std.example) == BrownianMotionDiffExampleConfig:
+            dim = cfg.example.sde_steps - 1
+            dist_type = 'BM'
+            calculator = SimpsonsRuleCalculator(cfg.pdf_values_dir)
+            error = SimpsonsMISE()
+            if cfg.sample_file:
+                saps = torch.load(cfg.sample_file)
+        if saps is None:
+            sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+        else:
+            sample_traj_out = A(saps)
+        if std.cond == 1:
+            cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
+            cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
+            sample_traj_out.samples = cond_samples
+        sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
+        title_prefix = f'{dist_type}_analytical'
+        alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+        errors = plot_histogram_errors(
+            title_prefix,
+            sample_traj_out.samples[-1],
+            alpha.cpu().numpy().squeeze(),
+            std,
+            analytical_calculator=calculator,
+            error_measure=error,
+            other_histogram_data=other_histogram_data,
         )
+        other_histogram_data = HistogramData(errors, title_prefix)
+        if cfg.debug:
+            if type(std.example) == BrownianMotionDiffExampleConfig:
+                cfg.pdf_values_dir = calculator.pdf_values_dir
+            print('DEBUG is on!')
+        else:
+            sample_traj_out = std.sample_trajectories(
+                cond=std.cond,
+                alpha=std.likelihood.alpha.reshape(-1, 1),
+            )
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
         # plot_ode_trajectories(ode_trajs)

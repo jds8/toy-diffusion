@@ -169,6 +169,8 @@ class IntegratorType(Enum):
 @dataclass
 class SampleConfig(BaseConfig):
     debug: bool = False
+    sample_file: str = ''
+    pdf_values_dir: str = ''
     num_samples: int = 100
     cond: Optional[float] = None
     guidance: GuidanceType = GuidanceType.NoGuidance
