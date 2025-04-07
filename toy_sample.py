@@ -684,16 +684,39 @@ def plot_histogram_errors(
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure.label()} vs. Sample Size')
 
+    m, b = np.polyfit(subsample_sizes, errors, 1)
+    # Plot the data
+    plt.scatter(subsample_sizes, errors, label="Data", color="blue")
+    # Plot the best fit line
+    plt.plot(subsample_sizes, m*subsample_sizes + b, label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}", color="red")
+
     # Compute theoretical rate
     bin_width = subsample_sizes ** (-1/3)  # Optimal
     # bin_width = 1 / np.log2(subsample_sizes)  # Sturges Rule
-    theoretical_rate = 1 / (subsample_sizes * bin_width)
+    # theoretical_rate = 1 / (subsample_sizes * bin_width)
+    one_half_rate = 1 / (subsample_sizes ** (1/2))
+    two_thirds_rate = 1 / (subsample_sizes ** (2/3))
+    four_fifths_rate = 1 / (subsample_sizes ** (4/5))
     # Normalize to match MISE scale
-    theoretical_rate *= errors[0] / theoretical_rate[0]
+    two_thirds_rate *= errors[0] / two_thirds_rate[0]
     ax1.plot(
         subsample_sizes,
-        theoretical_rate,
+        one_half_rate,
+        label='x^(-1/2) (normalized)',
+        linestyle='--',
+        color='r'
+    )
+    ax1.plot(
+        subsample_sizes,
+        two_thirds_rate,
         label='x^(-2/3) (normalized)',
+        linestyle='--',
+        color='r'
+    )
+    ax1.plot(
+        subsample_sizes,
+        four_fifths_rate,
+        label='x^(-4/5) (normalized)',
         linestyle='--',
         color='r'
     )
@@ -713,8 +736,22 @@ def plot_histogram_errors(
 
     ax3.plot(
         subsample_sizes,
-        theoretical_rate,
+        one_half_rate,
+        label='x^(-1/2) (normalized)',
+        linestyle='--',
+        color='r'
+    )
+    ax3.plot(
+        subsample_sizes,
+        two_thirds_rate,
         label='x^(-2/3) (normalized)',
+        linestyle='--',
+        color='r'
+    )
+    ax3.plot(
+        subsample_sizes,
+        four_fifths_rate,
+        label='x^(-4/5) (normalized)',
         linestyle='--',
         color='r'
     )
