@@ -730,9 +730,9 @@ def plot_histogram_errors(
             label=other_histogram_data.label
         )
     increment_size = int(np.diff(all_subsample_sizes)[0])
-    ax3.set_xlabel(f'Sample Size (increments of {increment_size})')
+    ax3.set_xlabel(f'Log Sample Size')
     ax3.set_ylabel('Log Error')
-    ax3.set_title(f'Log Error vs. Sample Size')
+    ax3.set_title(f'Log Error vs. Log Sample Size')
 
     ax3.plot(
         subsample_sizes,
@@ -756,6 +756,7 @@ def plot_histogram_errors(
         color='r'
     )
     ax3.set_yscale('log')
+    ax3.set_xscale('log')
 
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
