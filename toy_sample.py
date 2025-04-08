@@ -671,7 +671,6 @@ def plot_histogram_errors(
     error_measure.clean_up()
     plt.clf()
     fig, ((ax1, ax3), (ax2, ax4)) = plt.subplots(2, 2)
-    fig.delaxes(ax4)
     ax1.plot(subsample_sizes, errors, label=title_prefix)
     if other_histogram_data is not None:
         ax1.plot(
@@ -684,43 +683,48 @@ def plot_histogram_errors(
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure.label()} vs. Sample Size')
 
-    m, b = np.polyfit(subsample_sizes, errors, 1)
-    # Plot the data
-    plt.scatter(subsample_sizes, errors, label="Data", color="blue")
-    # Plot the best fit line
-    plt.plot(subsample_sizes, m*subsample_sizes + b, label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}", color="red")
-
     # Compute theoretical rate
     bin_width = subsample_sizes ** (-1/3)  # Optimal
     # bin_width = 1 / np.log2(subsample_sizes)  # Sturges Rule
-    # theoretical_rate = 1 / (subsample_sizes * bin_width)
+    # jheoretical_rate = 1 / (subsample_sizes * bin_width)
     one_half_rate = 1 / (subsample_sizes ** (1/2))
     two_thirds_rate = 1 / (subsample_sizes ** (2/3))
     four_fifths_rate = 1 / (subsample_sizes ** (4/5))
     # Normalize to match MISE scale
+    one_half_rate *= errors[0] / one_half_rate[0]
     two_thirds_rate *= errors[0] / two_thirds_rate[0]
+    four_fifths_rate *= errors[0] / four_fifths_rate[0]
+    m, b = np.polyfit(np.log(subsample_sizes), np.log(errors), 1)
+    best_line = np.exp(m*np.log(subsample_sizes) + np.log(b))
+    best_line *= errors[0] / best_line[0]
+    ax1.plot(
+        subsample_sizes,
+        best_line,
+        label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
+        linestyle='--',
+        color='r'
+    )
     ax1.plot(
         subsample_sizes,
         one_half_rate,
-        label='x^(-1/2) (normalized)',
+        label='x^(-0.5) (normalized)',
         linestyle='--',
         color='r'
     )
     ax1.plot(
         subsample_sizes,
         two_thirds_rate,
-        label='x^(-2/3) (normalized)',
-        linestyle='--',
+        label='x^(-0.667) (normalized)',
+        linestyle='-',
         color='r'
     )
     ax1.plot(
         subsample_sizes,
         four_fifths_rate,
-        label='x^(-4/5) (normalized)',
-        linestyle='--',
+        label='x^(-0.8) (normalized)',
+        linestyle=':',
         color='r'
     )
-    ax1.legend()
 
     ax3.plot(subsample_sizes, errors, label=title_prefix)
     if other_histogram_data is not None:
@@ -734,25 +738,32 @@ def plot_histogram_errors(
     ax3.set_ylabel('Log Error')
     ax3.set_title(f'Log Error vs. Log Sample Size')
 
+    # Plot the best fit line
+    ax3.plot(
+        subsample_sizes,
+        best_line,
+        label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
+        color="green"
+    )
     ax3.plot(
         subsample_sizes,
         one_half_rate,
-        label='x^(-1/2) (normalized)',
+        label='x^(-0.5) (normalized)',
         linestyle='--',
         color='r'
     )
     ax3.plot(
         subsample_sizes,
         two_thirds_rate,
-        label='x^(-2/3) (normalized)',
-        linestyle='--',
+        label='x^(-0.667) (normalized)',
+        linestyle='-',
         color='r'
     )
     ax3.plot(
         subsample_sizes,
         four_fifths_rate,
-        label='x^(-4/5) (normalized)',
-        linestyle='--',
+        label='x^(-0.8) (normalized)',
+        linestyle=':',
         color='r'
     )
     ax3.set_yscale('log')
@@ -763,6 +774,21 @@ def plot_histogram_errors(
     ax2.set_ylabel('Num Bins')
     fig.tight_layout()
     ax2.set_title('Num Bins vs. Sample Size')
+
+    ax4.set_xticks([])
+    ax4.set_yticks([])
+    ax4.spines['top'].set_visible(False)
+    ax4.spines['right'].set_visible(False)
+    ax4.spines['bottom'].set_visible(False)
+    ax4.spines['left'].set_visible(False)
+
+    handles, labels = ax3.get_legend_handles_labels()
+    ax4.legend(
+        handles,
+        labels,
+        loc='center',
+    )
+
     dim = int(sample_trajs.shape[1])
     plt.savefig('{}/{}D_{}_{}_histogram_approx_error.pdf'.format(
         HydraConfig.get().run.dir,
