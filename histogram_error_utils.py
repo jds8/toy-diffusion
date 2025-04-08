@@ -62,10 +62,17 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
         self.pdf_values = None
         self.save_pdf_values = True
         self.load_pdf_values = pdf_values_dir != ''
+        self.pdf_values_dir = f'{HydraConfig.get().run.dir}/simpsons_rule_pdf_values/'
+        self.pdf_values_map = {}
         if pdf_values_dir:
-            self.pdf_values_map = torch.load(pdf_values_dir)
+            self.pdf_values_dir = pdf_values_dir
             self.save_pdf_values = False
+        os.makedirs(self.pdf_values_dir, exist_ok=True)
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
+        pdf_values_file = '{}/{}'.format(
+            self.pdf_values_dir,
+            f'simpsons_rule_pdf_values_alpha_{alpha.item()}_bin_size_{len(bins)}.pt'
+        )
         # for Simpson's Rule
         num_divisions = 2 * (bins.shape[0] - 1) + 1
         # If not loading pdf_values, do quadrature even if pdf_values is set
@@ -75,12 +82,9 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
                 alpha=alpha,
                 num_divisions=num_divisions
             )
-        save_dir = f'{HydraConfig.get().run.dir}/simpsons_rule_pdf_values/'
-        os.makedirs(save_dir, exist_ok=True)
-        pdf_values_file = '{}/{}'.format(
-            save_dir,
-            f'simpsons_rule_pdf_values_alpha_{alpha.item()}_bin_size_{len(bins)}.pt'
-        )
+        else:
+            self.pdf_values = torch.load(pdf_values_file)
+        self.pdf_values_map[len(bins)] = self.pdf_values
         if self.save_pdf_values:
             torch.save(self.pdf_values, pdf_values_file)
         keys = np.array(list(self.pdf_values.keys())).squeeze()
@@ -91,8 +95,12 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
         x_grid = einops.rearrange(copied_keys, '(d c) -> c d', c=3)
         pdf_values = einops.rearrange(copied_values, '(d c) -> c d', c=3)
         return pdf_values, x_grid
-    def get_pdf_map(self):
-        return self.pdf_values
+    def get_pdf_map(self, num_bins: int):
+        try:
+            return self.pdf_values_map[num_bins]
+        except Exception as e:
+            print(f'WARNING: Simpsons Rule pdf values not avaiable for {num_bins} bins')
+            return self.pdf_values
 
 class TrapezoidCalculator(AnalyticalCalculator):
     def compute(self, bins: np.ndarray, alpha: np.ndarray):

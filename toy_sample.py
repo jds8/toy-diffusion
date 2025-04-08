@@ -701,8 +701,7 @@ def plot_histogram_errors(
         subsample_sizes,
         best_line,
         label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
-        linestyle='--',
-        color='r'
+        color='g'
     )
     ax1.plot(
         subsample_sizes,
@@ -743,7 +742,7 @@ def plot_histogram_errors(
         subsample_sizes,
         best_line,
         label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
-        color="green"
+        color="g"
     )
     ax3.plot(
         subsample_sizes,
@@ -1215,7 +1214,7 @@ def test_brownian_motion(end_time, cfg, sample_trajs, std):
 
 def plot_bm_pdf_histogram_estimate(
     sample_trajs: np.ndarray,
-    pdf_map: dict,
+    calculator: SimpsonsRuleCalculator,
     alpha: np.ndarray,
 ):
     plt.clf()
@@ -1233,6 +1232,7 @@ def plot_bm_pdf_histogram_estimate(
         range=(alpha, max_sample)
     )
 
+    pdf_map = calculator.get_pdf_map(num_bins)
     # Plot analytical Chi distribution using scipy
     pdf = pdf_map.values()
     x = pdf_map.keys()
@@ -1352,10 +1352,9 @@ def test_brownian_motion_diff(
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        pdf_map = calculator.get_pdf_map()
         sample_levels, x, pdf = plot_bm_pdf_histogram_estimate(
             sample_trajs,
-            pdf_map,
+            calculator,
             alpha.numpy().squeeze(),
         )
 
