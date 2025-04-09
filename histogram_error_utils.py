@@ -1386,17 +1386,15 @@ class ErrorMeasure:
         pdf_values has shape d x b
         empirical_props has shape b
         """
-        x_unique, idx = np.unique(
-            einops.rearrange(
-                x_grid,
-                'b w -> (w b)'
-            ),
-            return_index=True
-        )
+        x_flattened = einops.rearrange(x_grid, 'b w -> (w b)')
+        x_unique, idx = np.unique(x_flattened, return_index=True)
         props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
         values = einops.rearrange(pdf_values, 'd b -> (b d)')
-        plt.plot(x_unique, props[idx])
-        plt.plot(x_unique, values[idx])
+        plt.clf()
+        plt.plot(x_flattened, props, c='orange')
+        plt.scatter(x_flattened, props, c='orange')
+        plt.plot(x_unique, values[idx], c='b')
+        plt.scatter(x_unique, values[idx], c='b')
         plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
         plt.clf()
     def clean_up(self):

@@ -81,7 +81,7 @@ def pdf_2d_quadrature(p: np.ndarray, alpha: np.ndarray):
         dx2 = np.sqrt(p**2 - dx1**2)
         x1 = dx1 * np.sqrt(dt)
         x2 = (dx1 + dx2) * np.sqrt(dt)
-        if x1 > alpha or x2 > alpha:
+        if np.abs(x1) > alpha or np.abs(x2) > alpha:
             return 4 * p * normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1) / dx2
         return 0.
     boundary = p

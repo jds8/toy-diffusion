@@ -179,6 +179,7 @@ class SampleConfig(BaseConfig):
     compute_exact_trace: bool = False
     num_hutchinson_samples: int = 1
     figs_dir: str = 'figs'
+    num_sample_batches: int = 1
 
 
     def get_config_file(self, save_dir, alpha, start_round):

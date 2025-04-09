@@ -9,6 +9,7 @@ from pathlib import Path
 
 from collections import namedtuple
 
+import einops
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
@@ -56,6 +57,10 @@ AllHistogramOutputs = namedtuple(
     'errors all_subsamples all_props all_bins all_num_bins subsample_sizes'
 )
 HistogramData = namedtuple('HistogramData', 'histogram_errors_output label')
+HistogramErrorBarOutput = namedtuple(
+    'HistogramErrorBarOutput',
+    'error_mu error_pct_5 error_pct_95 best_line best_line_label'
+)
 
 #########################
 #########################
@@ -151,7 +156,7 @@ class ToyEvaluator:
                 std.item(),
                 device
             ).sample([
-                self.cfg.num_samples,
+                self.cfg.num_samples*self.cfg.num_sample_batches,
                 1,
                 1
             ])
@@ -659,7 +664,6 @@ def compute_histogram_errors(
         std: ToyEvaluator,
         analytical_calculator: AnalyticalCalculator,
         error_measure: ErrorMeasure,
-        other_histogram_data: Optional[HistogramData]=None,
 ):
     max_samples = max(sample_trajs.shape[0], 50000)
     all_subsample_sizes = np.linspace(50, max_samples, 100)
@@ -683,14 +687,58 @@ def compute_histogram_errors(
         subsample_sizes,
     )
 
+def compute_multiple_histogram_errors(
+        sample_trajs_list: torch.Tensor,
+        alpha_np: np.ndarray,
+        std: ToyEvaluator,
+        analytical_calculator: AnalyticalCalculator,
+        error_measure: ErrorMeasure,
+        title_prefix: str,
+):
+    subsample_sizes_list = []
+    errors_list = []
+    other_histogram_data_list = []
+    for sample_trajs in sample_trajs_list:
+        all_hist_outputs = compute_histogram_errors(
+            sample_trajs,
+            alpha_np,
+            std,
+            analytical_calculator=analytical_calculator,
+            error_measure=error_measure
+        )
+        errors = all_hist_outputs.errors
+        subsample_sizes = all_hist_outputs.subsample_sizes
+        subsample_sizes_list.append(subsample_sizes)
+        errors_list.append(errors)
+        all_num_bins = all_hist_outputs.all_num_bins
+
+        heo = HistogramErrorsOutput(errors, subsample_sizes, all_hist_outputs.all_num_bins)
+        histogram_data = HistogramData(heo, title_prefix)
+        other_histogram_data_list.append(histogram_data)
+
+    all_subsample_sizes = np.array(subsample_sizes_list)
+    subsaps = einops.rearrange(all_subsample_sizes, 'n l -> (l n)')
+    all_errors = np.array(errors_list)
+    errs = einops.rearrange(all_errors, 'n l -> (l n)')
+    m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
+    best_line = np.exp(m*np.log(subsample_sizes) + b)
+    best_line_label = f"Best Fit Line: y = {m:.2f}x + {b:.2f}"
+    error_mu = np.array(errors_list).mean(0)
+    error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
+    error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
+    return HistogramErrorBarOutput(
+        error_mu,
+        error_pct_5,
+        error_pct_95,
+        best_line,
+        best_line_label,
+    ), other_histogram_data_list
+
 def plot_histogram_errors(
         alpha: np.ndarray,
         dim: int,
-        subsample_sizes_list: List,
-        error_mu: np.ndarray,
-        error_pct_5: np.ndarray,
-        error_pct_95: np.ndarray,
-        all_num_bins_list: List,
+        histogram_error_bar_output: HistogramErrorBarOutput,
+        histogram_errors_output: HistogramErrorsOutput,
         error_measure_label: str,
         title_prefix: str,
         other_histogram_data_list = [],
@@ -706,14 +754,23 @@ def plot_histogram_errors(
             label=other_histogram_data.label
         )
 
-    increment_size = int(np.diff(subsample_sizes_list[0])[0])
+    subsample_sizes = histogram_errors_output.subsample_sizes
+    all_num_bins = histogram_errors_output.all_num_bins
+
+    increment_size = int(np.diff(subsample_sizes)[0])
     ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure_label} vs. Sample Size')
 
+    error_mu = histogram_error_bar_output.error_mu
+    error_pct_5 = histogram_error_bar_output.error_pct_5
+    error_pct_95 = histogram_error_bar_output.error_pct_95
+    best_line = histogram_error_bar_output.best_line
+    best_line_label = histogram_error_bar_output.best_line_label
+
     lwr = error_mu - error_pct_5
     upr = error_pct_95 - error_mu
-    yerr = np.narray([lwr, upr]),
+    yerr = np.array([lwr, upr])
     ax1.errorbar(
         subsample_sizes,
         error_mu,
@@ -730,16 +787,14 @@ def plot_histogram_errors(
     two_thirds_rate = 1 / (subsample_sizes ** (2/3))
     four_fifths_rate = 1 / (subsample_sizes ** (4/5))
     # Normalize to match MISE scale
-    one_half_rate *= errors[0] / one_half_rate[0]
-    two_thirds_rate *= errors[0] / two_thirds_rate[0]
-    four_fifths_rate *= errors[0] / four_fifths_rate[0]
-    m, b = np.polyfit(np.log(subsample_sizes), np.log(error_mu), 1)
-    best_line = np.exp(m*np.log(subsample_sizes) + b)
+    one_half_rate *= error_mu[0] / one_half_rate[0]
+    two_thirds_rate *= error_mu[0] / two_thirds_rate[0]
+    four_fifths_rate *= error_mu[0] / four_fifths_rate[0]
 
     ax1.plot(
         subsample_sizes,
         best_line,
-        label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
+        label=best_line_label,
         color='g'
     )
     ax1.plot(
@@ -771,60 +826,59 @@ def plot_histogram_errors(
             label=other_histogram_data.label
         )
 
-    for i, (subsample_sizes, errors, all_num_bins) in enumerate(zip(
-            subsample_sizes_list,
-            errors_list,
-            all_num_bins_list
-    )):
-        ax3.plot(
-            subsample_sizes,
-            error_mu,
-            yerr=yerr,
-            label=title_prefix,
-            color='b',
-        )
-        ax3.set_xlabel(f'Log Sample Size')
-        ax3.set_ylabel('Log Error')
-        ax3.set_title(f'Log Error vs. Log Sample Size')
+    ax3.errorbar(
+        subsample_sizes,
+        error_mu,
+        yerr=yerr,
+        label=title_prefix,
+        color='b',
+    )
+    ax3.set_xlabel(f'Log Sample Size')
+    ax3.set_ylabel('Log Error')
+    ax3.set_title(f'Log Error vs. Log Sample Size')
 
-        # Plot the best fit line
-        # Compute theoretical rate
-        bin_width = subsample_sizes ** (-1/3)  # Optimal
-        two_thirds_rate = 1 / (subsample_sizes ** (2/3))
-        two_thirds_rate *= errors[0] / two_thirds_rate[0]
-        m, b = np.polyfit(np.log(subsample_sizes), np.log(errors), 1)
-        best_line = np.exp(m*np.log(subsample_sizes) + b)
+    # Plot the best fit line
+    # Compute theoretical rate
+    bin_width = subsample_sizes ** (-1/3)  # Optimal
+    one_half_rate = 1 / (subsample_sizes ** (1/2))
+    two_thirds_rate = 1 / (subsample_sizes ** (2/3))
+    four_fifths_rate = 1 / (subsample_sizes ** (4/5))
+    one_half_rate *= error_mu[0] / one_half_rate[0]
+    two_thirds_rate *= error_mu[0] / two_thirds_rate[0]
+    four_fifths_rate *= error_mu[0] / four_fifths_rate[0]
+    m, b = np.polyfit(np.log(subsample_sizes), np.log(error_mu), 1)
+    best_line = np.exp(m*np.log(subsample_sizes) + b)
 
-        ax3.plot(
-            subsample_sizes,
-            best_line,
-            label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
-            color="g"
-        )
-        ax3.plot(
-            subsample_sizes,
-            one_half_rate,
-            label='x^(-0.5)',
-            linestyle='--',
-            color='r'
-        )
-        ax3.plot(
-            subsample_sizes,
-            two_thirds_rate,
-            label='x^(-0.667) (theoretical rate)',
-            linestyle='-',
-            color='r'
-        )
-        ax3.plot(
-            subsample_sizes,
-            four_fifths_rate,
-            label='x^(-0.8)',
-            linestyle=':',
-            color='r'
-        )
+    ax3.plot(
+        subsample_sizes,
+        best_line,
+        label=best_line_label,
+        color="g"
+    )
+    ax3.plot(
+        subsample_sizes,
+        one_half_rate,
+        label='x^(-0.5)',
+        linestyle='--',
+        color='r'
+    )
+    ax3.plot(
+        subsample_sizes,
+        two_thirds_rate,
+        label='x^(-0.667) (theoretical rate)',
+        linestyle='-',
+        color='r'
+    )
+    ax3.plot(
+        subsample_sizes,
+        four_fifths_rate,
+        label='x^(-0.8)',
+        linestyle=':',
+        color='r'
+    )
 
-        ax3.set_yscale('log')
-        ax3.set_xscale('log')
+    ax3.set_yscale('log')
+    ax3.set_xscale('log')
 
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
@@ -853,19 +907,20 @@ def plot_histogram_errors(
         alpha.item()
     ))
 
-
-def plot_chi_hist(
+def plot_hist_w_analytical(
     title_prefix: str,
     sample_trajs: np.ndarray,
     alpha: np.ndarray,
-    std: ToyEvaluator
+    std: ToyEvaluator,
+    pdf_map,
 ):
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     # bin_width = sample_trajs.shape[0] ** (-1/3)  # Optimal
     # bin_width = 1 / np.log2(sample_trajs.shape[0])  # Sturge's Rule
     bin_width = 2. * scipy.stats.iqr(sample_levels) * sample_trajs.shape[0] ** (-1/3)  # Freedman-Diaconis
     sample_max = sample_levels.max()
-    num_bins = int((sample_max - alpha.item()) / bin_width)
+    sample_min = sample_levels.min()
+    num_bins = int((sample_max - sample_min) / bin_width)
     dim = int(sample_trajs.shape[1])
 
     sample_max = sample_levels.max().item()
@@ -880,20 +935,14 @@ def plot_chi_hist(
     )
 
     # Plot analytical Chi distribution using scipy
-    x = np.linspace(0, sample_max, 1000)  # [1000]
-    if alpha > 0:
-        # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.chi(dim).pdf(x) / (1 - stats.chi(dim).cdf(alpha))
-        # Zero out values below alpha
-        pdf[x < alpha] = 0
-    else:
-        pdf = stats.chi(dim).pdf(x)
+    x = np.array(pdf_map.keys())
+    pdf = np.array(pdf_map.values())
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Histogram of {sample_levels.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
-    plt.savefig('{}/{}D_{}_{}_chi_hist.pdf'.format(
+    plt.savefig('{}/{}D_{}_{}_analytical_w_hist.pdf'.format(
         HydraConfig.get().run.dir,
         dim,
         title_prefix,
@@ -901,6 +950,23 @@ def plot_chi_hist(
     ))
 
     return x, pdf
+
+def plot_chi_hist(
+    title_prefix: str,
+    sample_trajs: np.ndarray,
+    alpha: np.ndarray,
+):
+    dim = int(sample_trajs.shape[1])
+
+    if alpha > 0:
+        # For conditional distribution, need to normalize by P(X > alpha)
+        pdf = stats.chi(dim).pdf(x) / (1 - stats.chi(dim).cdf(alpha))
+        # Zero out values below alpha
+        pdf[x < alpha] = 0
+    else:
+        pdf = stats.chi(dim).pdf(x)
+
+    return plot_hist_w_analytical(title_prefix, sample_trajs, alpha, std, pdf)
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/gaussian_sample_trajs.pt')
@@ -1183,22 +1249,24 @@ def test_multivariate_gaussian(
     calculator = DensityCalculator(dd)
     error = MISE()
     alpha_np = alpha.numpy().squeeze()
-    all_hist_output = compute_histogram_errors(
+    sample_trajs_list = einops.rearrange(
         sample_trajs,
+        '(n c) b 1 -> n c b 1',
+        n=cfg.num_sample_batches
+    )
+    hebo, ohdl = compute_multiple_histogram_errors(
+        sample_trajs_list,
         alpha_np,
         std,
-        analytical_calculator=calculator,
-        error_measure=error,
-        other_histogram_data=other_histogram_data,
+        calculator,
+        error_measure,
+        title_prefix
     )
     plot_histogram_errors(
         alpha_np,
         cfg.example.d,
-        all_hist_output.subsample_sizes[-1],
-        all_hist_output.errors,
-        0.,
-        0.,
-        [all_hist_output.all_num_bins],
+        hebo,
+        ohdl[-1].histogram_errors_output,
         error.label(),
         title_prefix
     )
@@ -1352,26 +1420,28 @@ def test_brownian_motion_diff(
     error = SimpsonsMISE()
     title_prefix = 'BM_diffusion'
     alpha_np = alpha.numpy().squeeze()
-    all_hist_output = compute_histogram_errors(
+    sample_trajs_list = einops.rearrange(
         sample_trajs,
+        '(n c) b 1 -> n c b 1',
+        n=cfg.num_sample_batches
+    )
+    hebo, ohdl = compute_multiple_histogram_errors(
+        sample_trajs_list,
         alpha_np,
         std,
-        analytical_calculator=calculator,
-        error_measure=error,
-        other_histogram_data=other_histogram_data,
+        calculator,
+        error,
+        title_prefix
     )
     plot_histogram_errors(
         alpha_np,
-        cfg.example.d,
-        all_hist_output.subsample_sizes[-1],
-        all_hist_output.errors,
-        0.,
-        0.,
-        [all_hist_output.all_num_bins],
+        cfg.example.sde_steps-1,
+        heo,
+        histogram_data_list[-1].histogram_errors_output,
         error.label(),
         title_prefix
     )
-    plot_chi_hist(
+    plot_hist_w_analytical(
         title_prefix,
         sample_trajs.numpy(),
         alpha_np,
@@ -1801,10 +1871,8 @@ def sample(cfg):
         title_prefix = f'{dist_type}_analytical'
         alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
         alpha_np = alpha.cpu().numpy().squeeze()
-        num_runs = 10
-        errors_list = []
-        all_num_bins_list = []
-        other_histogram_data_list = []
+        num_runs = 1
+        sample_trajs_list = []
         for i in range(num_runs):
             if saps is None:
                 sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
@@ -1815,42 +1883,30 @@ def sample(cfg):
                 cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            all_hist_outputs = compute_histogram_errors(
-                sample_traj_out.samples[-1],
-                alpha_np,
-                std,
-                analytical_calculator=calculator,
-                error_measure=error,
-            )
-            errors = all_hist_outputs.errors
-            subsample_sizes = all_hist_outputs.subsample_sizes
-            errors_list.append(errors)
-            all_num_bins_list.append(all_hist_outputs.all_num_bins)
-
-            heo = HistogramErrorsOutput(errors, subsample_sizes, all_hist_outputs.all_num_bins)
-            histogram_data = HistogramData(heo, title_prefix)
-            other_histogram_data_list.append(histogram_data)
-
-        error_mu = np.array(errors_list).mean(0)
-        error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
-        error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
+            sample_trajs_list.append(sample_traj_out.samples[-1])
+        hebo, histogram_data_list = compute_multiple_histogram_errors(
+            torch.stack(sample_trajs_list),
+            alpha_np,
+            std,
+            analytical_calculator=calculator,
+            error_measure=error,
+            title_prefix=title_prefix,
+        )
         plot_histogram_errors(
             alpha_np,
             dim,
-            subsample_sizes,
-            error_mu,
-            error_pct_5,
-            error_pct_95,
-            all_num_bins_list,
+            hebo,
+            histogram_data_list[-1].histogram_errors_output,
             error.label(),
             title_prefix
         )
-        plot_chi_hist(
-            title_prefix,
-            sample_traj_out.samples[-1],
-            alpha_np,
-            std
-        )
+        if type(std.example) == MultivariateGaussianExampleConfig:
+            plot_chi_hist(
+                title_prefix,
+                sample_traj_out.samples[-1],
+                alpha_np,
+                std
+            )
 
         if cfg.debug:
             print('DEBUG is on!')
@@ -1872,7 +1928,7 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std, sample_trajs, other_histogram_data_list)
+        test(end_time, cfg, out_trajs, std, sample_trajs, histogram_data_list)
         import pdb; pdb.set_trace()
 
 
