@@ -687,10 +687,12 @@ def plot_histogram_errors(
         alpha: np.ndarray,
         dim: int,
         subsample_sizes_list: List,
-        errors_list: List,
+        error_mu: np.ndarray,
+        error_pct_5: np.ndarray,
+        error_pct_95: np.ndarray,
         all_num_bins_list: List,
-        title_prefix: str,
         error_measure_label: str,
+        title_prefix: str,
         other_histogram_data_list = [],
 ):
     plt.clf()
@@ -701,7 +703,7 @@ def plot_histogram_errors(
         ax1.plot(
             other_histogram_data.histogram_errors_output.subsample_sizes,
             other_histogram_data.histogram_errors_output.errors,
-            label=other_histogram_data.label if i == 0 else None
+            label=other_histogram_data.label
         )
 
     increment_size = int(np.diff(subsample_sizes_list[0])[0])
@@ -709,66 +711,64 @@ def plot_histogram_errors(
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure_label} vs. Sample Size')
 
-    for i, (subsample_sizes, errors) in enumerate(zip(
-            subsample_sizes_list,
-            errors_list
-    )):
-        ax1.plot(
-            subsample_sizes,
-            errors,
-            label=title_prefix if i == 0 else None,
-            color='b',
-            alpha=0.3,
-        )
+    lwr = error_mu - error_pct_5
+    upr = error_pct_95 - error_mu
+    yerr = np.narray([lwr, upr]),
+    ax1.errorbar(
+        subsample_sizes,
+        error_mu,
+        yerr=yerr,
+        label=title_prefix,
+        color='b',
+    )
 
-        # Compute theoretical rate
-        bin_width = subsample_sizes ** (-1/3)  # Optimal
-        # bin_width = 1 / np.log2(subsample_sizes)  # Sturges Rule
-        # jheoretical_rate = 1 / (subsample_sizes * bin_width)
-        one_half_rate = 1 / (subsample_sizes ** (1/2))
-        two_thirds_rate = 1 / (subsample_sizes ** (2/3))
-        four_fifths_rate = 1 / (subsample_sizes ** (4/5))
-        # Normalize to match MISE scale
-        one_half_rate *= errors[0] / one_half_rate[0]
-        two_thirds_rate *= errors[0] / two_thirds_rate[0]
-        four_fifths_rate *= errors[0] / four_fifths_rate[0]
-        m, b = np.polyfit(np.log(subsample_sizes), np.log(errors), 1)
-        best_line = np.exp(m*np.log(subsample_sizes) + b)
+    # Compute theoretical rate
+    bin_width = subsample_sizes ** (-1/3)  # Optimal
+    # bin_width = 1 / np.log2(subsample_sizes)  # Sturges Rule
+    # jheoretical_rate = 1 / (subsample_sizes * bin_width)
+    one_half_rate = 1 / (subsample_sizes ** (1/2))
+    two_thirds_rate = 1 / (subsample_sizes ** (2/3))
+    four_fifths_rate = 1 / (subsample_sizes ** (4/5))
+    # Normalize to match MISE scale
+    one_half_rate *= errors[0] / one_half_rate[0]
+    two_thirds_rate *= errors[0] / two_thirds_rate[0]
+    four_fifths_rate *= errors[0] / four_fifths_rate[0]
+    m, b = np.polyfit(np.log(subsample_sizes), np.log(error_mu), 1)
+    best_line = np.exp(m*np.log(subsample_sizes) + b)
 
-        if i == 0:
-            ax1.plot(
-                subsample_sizes,
-                best_line,
-                label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
-                color='g'
-            )
-            ax1.plot(
-                subsample_sizes,
-                one_half_rate,
-                label='x^(-0.5)' if i == 0 else None,
-                linestyle='--',
-                color='r'
-            )
-            ax1.plot(
-                subsample_sizes,
-                two_thirds_rate,
-                label='x^(-0.667) (theoretical rate)' if i == 0 else None,
-                linestyle='-',
-                color='r'
-            )
-            ax1.plot(
-                subsample_sizes,
-                four_fifths_rate,
-                label='x^(-0.8)' if i == 0 else None,
-                linestyle=':',
-                color='r'
-            )
+    ax1.plot(
+        subsample_sizes,
+        best_line,
+        label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
+        color='g'
+    )
+    ax1.plot(
+        subsample_sizes,
+        one_half_rate,
+        label='x^(-0.5)',
+        linestyle='--',
+        color='r'
+    )
+    ax1.plot(
+        subsample_sizes,
+        two_thirds_rate,
+        label='x^(-0.667) (theoretical rate)',
+        linestyle='-',
+        color='r'
+    )
+    ax1.plot(
+        subsample_sizes,
+        four_fifths_rate,
+        label='x^(-0.8)',
+        linestyle=':',
+        color='r'
+    )
 
     for i, other_histogram_data in enumerate(other_histogram_data_list):
         ax3.plot(
             other_histogram_data.histogram_errors_output.subsample_sizes,
             other_histogram_data.histogram_errors_output.errors,
-            label=other_histogram_data.label if i == 0 else None
+            label=other_histogram_data.label
         )
 
     for i, (subsample_sizes, errors, all_num_bins) in enumerate(zip(
@@ -778,51 +778,50 @@ def plot_histogram_errors(
     )):
         ax3.plot(
             subsample_sizes,
-            errors,
-            label=title_prefix if i == 0 else None,
+            error_mu,
+            yerr=yerr,
+            label=title_prefix,
             color='b',
-            alpha=0.3,
         )
         ax3.set_xlabel(f'Log Sample Size')
         ax3.set_ylabel('Log Error')
         ax3.set_title(f'Log Error vs. Log Sample Size')
 
         # Plot the best fit line
-        if i == 0:
-            # Compute theoretical rate
-            bin_width = subsample_sizes ** (-1/3)  # Optimal
-            two_thirds_rate = 1 / (subsample_sizes ** (2/3))
-            two_thirds_rate *= errors[0] / two_thirds_rate[0]
-            m, b = np.polyfit(np.log(subsample_sizes), np.log(errors), 1)
-            best_line = np.exp(m*np.log(subsample_sizes) + b)
+        # Compute theoretical rate
+        bin_width = subsample_sizes ** (-1/3)  # Optimal
+        two_thirds_rate = 1 / (subsample_sizes ** (2/3))
+        two_thirds_rate *= errors[0] / two_thirds_rate[0]
+        m, b = np.polyfit(np.log(subsample_sizes), np.log(errors), 1)
+        best_line = np.exp(m*np.log(subsample_sizes) + b)
 
-            ax3.plot(
-                subsample_sizes,
-                best_line,
-                label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}" if i == 0 else None,
-                color="g"
-            )
-            ax3.plot(
-                subsample_sizes,
-                one_half_rate,
-                label='x^(-0.5)' if i == 0 else None,
-                linestyle='--',
-                color='r'
-            )
-            ax3.plot(
-                subsample_sizes,
-                two_thirds_rate,
-                label='x^(-0.667) (theoretical rate)' if i == 0 else None,
-                linestyle='-',
-                color='r'
-            )
-            ax3.plot(
-                subsample_sizes,
-                four_fifths_rate,
-                label='x^(-0.8)' if i == 0 else None,
-                linestyle=':',
-                color='r'
-            )
+        ax3.plot(
+            subsample_sizes,
+            best_line,
+            label=f"Best Fit Line: y = {m:.2f}x + {b:.2f}",
+            color="g"
+        )
+        ax3.plot(
+            subsample_sizes,
+            one_half_rate,
+            label='x^(-0.5)',
+            linestyle='--',
+            color='r'
+        )
+        ax3.plot(
+            subsample_sizes,
+            two_thirds_rate,
+            label='x^(-0.667) (theoretical rate)',
+            linestyle='-',
+            color='r'
+        )
+        ax3.plot(
+            subsample_sizes,
+            four_fifths_rate,
+            label='x^(-0.8)',
+            linestyle=':',
+            color='r'
+        )
 
         ax3.set_yscale('log')
         ax3.set_xscale('log')
@@ -1362,13 +1361,12 @@ def test_brownian_motion_diff(
         other_histogram_data=other_histogram_data,
     )
     plot_histogram_errors(
-        sample_trajs,
         alpha_np,
         cfg.example.d,
         all_hist_output.subsample_sizes[-1],
         all_hist_output.errors,
         0.,
-        0.
+        0.,
         [all_hist_output.all_num_bins],
         error.label(),
         title_prefix
