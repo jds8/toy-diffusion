@@ -799,9 +799,9 @@ def plot_histogram_errors(
     two_thirds_rate = 1 / (subsample_sizes ** (2/3))
     four_fifths_rate = 1 / (subsample_sizes ** (4/5))
     # Normalize to match MISE scale
-    one_half_rate *= error_mu[0] / one_half_rate[0]
-    two_thirds_rate *= error_mu[0] / two_thirds_rate[0]
-    four_fifths_rate *= error_mu[0] / four_fifths_rate[0]
+    one_half_rate *= best_line[0] / one_half_rate[0]
+    two_thirds_rate *= best_line[0] / two_thirds_rate[0]
+    four_fifths_rate *= best_line[0] / four_fifths_rate[0]
 
     ax1.plot(
         subsample_sizes,
@@ -863,9 +863,9 @@ def plot_histogram_errors(
     one_half_rate = 1 / (subsample_sizes ** (1/2))
     two_thirds_rate = 1 / (subsample_sizes ** (2/3))
     four_fifths_rate = 1 / (subsample_sizes ** (4/5))
-    one_half_rate *= error_mu[0] / one_half_rate[0]
-    two_thirds_rate *= error_mu[0] / two_thirds_rate[0]
-    four_fifths_rate *= error_mu[0] / four_fifths_rate[0]
+    one_half_rate *= best_line[0] / one_half_rate[0]
+    two_thirds_rate *= best_line[0] / two_thirds_rate[0]
+    four_fifths_rate *= best_line[0] / four_fifths_rate[0]
     m, b = np.polyfit(np.log(subsample_sizes), np.log(error_mu), 1)
     best_line = np.exp(m*np.log(subsample_sizes) + b)
 
