@@ -103,7 +103,9 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     weights = phi_vals * p * (2 * np.pi / num_pts)  # arc length elements
 
     # total_weight = np.sum(weights)
-    if alpha == 1.:
+    if alpha == 0.:
+        total_weight = 1.  # for alpha=0.
+    elif alpha == 1.:
         total_weight = 0.37064413336206625  # for alpha=1.
     elif alpha == 1.5:
         total_weight = 0.14605801048951172  # for alpha=1.5
