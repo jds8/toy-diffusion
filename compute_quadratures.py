@@ -5,6 +5,8 @@ import scipy.integrate as integrate
 import numpy as np
 import torch
 
+from typing import Callable
+
 
 def normal_pdf(x, mean, var):
     """Probability density function of a normal distribution."""
@@ -65,7 +67,7 @@ def pdf_3d_quadrature(p: torch.Tensor, alpha: torch.Tensor):
    result, _ = integrate.quad(integrand_x1, -boundary, boundary)
    return result
 
-def pdf_2d_quadrature(p: np.ndarray, alpha: np.ndarray):
+def old_pdf_2d_quadrature_bm(p: np.ndarray, alpha: np.ndarray):
     """
     dX1**2 + dX2**2 = p for IID standard Gaussian dX1, dX2
     For a three step Brownian motion 0,X1,X2, the dXi
@@ -88,21 +90,59 @@ def pdf_2d_quadrature(p: np.ndarray, alpha: np.ndarray):
     result, _ = integrate.quad(integrand_dx1, 0., boundary)
     return result
 
+def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
+    dt = 0.5
+    thetas = np.linspace(0, 2 * np.pi, num_pts)
+    dx1 = p * np.cos(thetas)
+    dx2 = p * np.sin(thetas)
+
+    x1 = dx1 * np.sqrt(dt)
+    x2 = (dx1 + dx2) * np.sqrt(dt)
+
+    phi_vals = normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1)
+    weights = phi_vals * p * (2 * np.pi / num_pts)  # arc length elements
+
+    # total_weight = np.sum(weights)
+    if alpha == 1.:
+        total_weight = 0.37064413336206625  # for alpha=1.
+    elif alpha == 1.5:
+        total_weight = 0.14605801048951172  # for alpha=1.5
+    elif alpha == 2.0:
+        total_weight = 0.047295252164004084  # for alpha=2.0
+    else:
+        raise NotImplementedError
+    exit_weight = np.sum(weights[(np.abs(x1) > (alpha-1e-5)) | (np.abs(x2) > (alpha-1e-5))])
+
+    if exit_weight == total_weight == 0.:
+        result = 0.
+    else:
+        result = exit_weight / total_weight
+    return result
+
 def get_2d_pdf(
     max_sample: np.ndarray,
     alpha: np.ndarray,
-    num_divisions: int=251,
+    num_divisions: int,
+    quadrature_fn: Callable,
 ):
     ps = np.linspace(alpha, max_sample, num_divisions)
     pdf_map = {
-        p: pdf_2d_quadrature(p, alpha) for p in ps
+        p: quadrature_fn(p, alpha) for p in ps
     }
     return pdf_map
+
+def estimate_integral(
+    max_sample: np.ndarray,
+    alpha: np.ndarray,
+    quadrature_fn
+):
+    result, _ = integrate.quad(quadrature_fn, alpha, np.inf)
+    return result
 
 def plot_quadrature_vs_chi():
     q_values = np.linspace(0, 5, 100)
     alpha = 0.
-    numerical_pdf = [pdf_2d_quadrature(q, alpha) for q in q_values]
+    numerical_pdf = [pdf_2d_quadrature_bm(q, alpha) for q in q_values]
     analytical_pdf = [q * np.exp(-q**2 / 2) for q in q_values]
 
     import matplotlib.pyplot as plt

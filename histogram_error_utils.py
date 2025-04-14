@@ -3,12 +3,12 @@
 import numpy as np
 import torch
 import einops
-from compute_quadratures import get_2d_pdf
+from compute_quadratures import get_2d_pdf, estimate_integral
 from hydra.core.hydra_config import HydraConfig
 import scipy.integrate as integrate
 import matplotlib.pyplot as plt
 import einops
-from typing import Optional
+from typing import Optional, Callable
 
 import os
 
@@ -58,7 +58,11 @@ class DensityCalculator(AnalyticalCalculator):
         return self.dist.pdf(x_grid) / (1 - self.dist.cdf(alpha)), x_grid
 
 class SimpsonsRuleCalculator(AnalyticalCalculator):
-    def __init__(self, pdf_values_dir: Optional[str]=None):
+    def __init__(
+            self,
+            quadrature_fn: Callable,
+            pdf_values_dir: Optional[str]=None
+    ):
         self.pdf_values = None
         self.save_pdf_values = True
         self.load_pdf_values = pdf_values_dir != ''
@@ -67,6 +71,7 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
         if pdf_values_dir:
             self.pdf_values_dir = pdf_values_dir
             self.save_pdf_values = False
+        self.quadrature_fn = quadrature_fn
         os.makedirs(self.pdf_values_dir, exist_ok=True)
     def compute(self, bins: np.ndarray, alpha: np.ndarray):
         pdf_values_file = '{}/{}'.format(
@@ -77,14 +82,18 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
         num_divisions = 2 * (bins.shape[0] - 1) + 1
         # If not loading pdf_values, do quadrature even if pdf_values is set
         if not (self.load_pdf_values and self.pdf_values):
+            # area = estimate_integral(bins[-1], alpha.item(), lambda x: self.quadrature_fn(x, alpha))
+            # print(area)
+            # import pdb; pdb.set_trace()
             self.pdf_values = get_2d_pdf(
                 max_sample=bins[-1],
                 alpha=alpha,
-                num_divisions=num_divisions
+                num_divisions=num_divisions,
+                quadrature_fn=self.quadrature_fn,
             )
         else:
             self.pdf_values = torch.load(pdf_values_file)
-        self.pdf_values_map[len(bins)] = self.pdf_values
+            self.pdf_values_map[len(bins)] = self.pdf_values
         if self.save_pdf_values:
             torch.save(self.pdf_values, pdf_values_file)
         keys = np.array(list(self.pdf_values.keys())).squeeze()
@@ -1398,7 +1407,10 @@ class ErrorMeasure:
         plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
         plt.clf()
     def clean_up(self):
-        _create_gif(self.hist_approx_dir)
+        try:
+            _create_gif(self.hist_approx_dir)
+        except:
+            pass
 
 # class MaxError(ErrorMeasure):
 #     def error(self, analytical_props, empirical_props):
@@ -1459,9 +1471,25 @@ class MISE(ErrorMeasure):
         bins: np.ndarray,
         alpha: np.ndarray
     ):
-        pdf_values, x_grid = analytical_calculator(bins, alpha)
-        mse = ((pdf_values - empirical_props) ** 2).sum()
-        self.plot(x_grid, pdf_values, empirical_props, len(bins))
+        def compute_imse(dist, hist, bins, alpha):
+            imse = 0
+            for i in range(len(bins)-1):
+                def integrand(x):
+                    # mse = (dist.pdf(x) / (1 - dist.cdf(alpha)) - hist[i]) ** 2
+                    mse = (dist(x) - hist[i]) ** 2
+                    return mse
+                result, _ = integrate.quad(integrand, bins[i], bins[i+1])
+                imse += result
+            # imse += (1 - dist.cdf(bins[-1])) / (1 - dist.cdf(alpha))
+            return imse
+
+        # mse = compute_imse(analytical_calculator.dist, empirical_props, bins, alpha)
+        # mse += (1 - analytical_calculator.dist.cdf(bins[-1])) / (1 - analytical_calculator.dist.cdf(alpha))
+        mse = compute_imse(lambda x: analytical_calculator.quadrature_fn(x, alpha), empirical_props, bins, alpha)
+
+        # pdf_values, x_grid = analytical_calculator(bins, alpha)
+        # mse = ((pdf_values - empirical_props) ** 2).sum()
+        # self.plot(x_grid, pdf_values, empirical_props, len(bins))
         return mse
     def label(self):
         return 'Integrated MSE'

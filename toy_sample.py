@@ -40,6 +40,7 @@ from histogram_error_utils import get_bm_pdf_map, \
     AnalyticalCalculator, DensityCalculator, TrapezoidCalculator, \
     SimpsonsRuleCalculator, MISE, SimpsonsMISE, \
     ErrorMeasure#, SumError, MaxError, ForwardKLError, ReverseKLError
+from compute_quadratures import pdf_2d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -59,7 +60,7 @@ AllHistogramOutputs = namedtuple(
 HistogramData = namedtuple('HistogramData', 'histogram_errors_output label')
 HistogramErrorBarOutput = namedtuple(
     'HistogramErrorBarOutput',
-    'error_mu error_pct_5 error_pct_95 best_line best_line_label'
+    'error_mu error_pct_5 error_pct_95 best_line best_line_label subsample_sizes all_num_bins'
 )
 
 #########################
@@ -697,7 +698,6 @@ def compute_multiple_histogram_errors(
 ):
     subsample_sizes_list = []
     errors_list = []
-    other_histogram_data_list = []
     for sample_trajs in sample_trajs_list:
         all_hist_outputs = compute_histogram_errors(
             sample_trajs,
@@ -711,10 +711,6 @@ def compute_multiple_histogram_errors(
         subsample_sizes_list.append(subsample_sizes)
         errors_list.append(errors)
         all_num_bins = all_hist_outputs.all_num_bins
-
-        heo = HistogramErrorsOutput(errors, subsample_sizes, all_hist_outputs.all_num_bins)
-        histogram_data = HistogramData(heo, title_prefix)
-        other_histogram_data_list.append(histogram_data)
 
     all_subsample_sizes = np.array(subsample_sizes_list)
     subsaps = einops.rearrange(all_subsample_sizes, 'n l -> (l n)')
@@ -732,30 +728,46 @@ def compute_multiple_histogram_errors(
         error_pct_95,
         best_line,
         best_line_label,
-    ), other_histogram_data_list
+        subsample_sizes,
+        all_num_bins
+    )
 
 def plot_histogram_errors(
         alpha: np.ndarray,
         dim: int,
         histogram_error_bar_output: HistogramErrorBarOutput,
-        histogram_errors_output: HistogramErrorsOutput,
         error_measure_label: str,
         title_prefix: str,
-        other_histogram_data_list = [],
+        other_histogram_data: Optional[HistogramErrorBarOutput]=None,
 ):
     plt.clf()
 
     fig, ((ax1, ax3), (ax2, ax4)) = plt.subplots(2, 2)
 
-    for i, other_histogram_data in enumerate(other_histogram_data_list):
-        ax1.plot(
-            other_histogram_data.histogram_errors_output.subsample_sizes,
-            other_histogram_data.histogram_errors_output.errors,
-            label=other_histogram_data.label
-        )
+    subsample_sizes = histogram_error_bar_output.subsample_sizes
 
-    subsample_sizes = histogram_errors_output.subsample_sizes
-    all_num_bins = histogram_errors_output.all_num_bins
+    if other_histogram_data is not None:
+        error_mu = other_histogram_data.error_mu
+        error_pct_5 = other_histogram_data.error_pct_5
+        error_pct_95 = other_histogram_data.error_pct_95
+        best_line = other_histogram_data.best_line
+        best_line_label = other_histogram_data.best_line_label
+        lwr = error_mu - error_pct_5
+        upr = error_pct_95 - error_mu
+        yerr = np.array([lwr, upr])
+        ax1.errorbar(
+            subsample_sizes,
+            other_histogram_data.error_mu,
+            yerr=yerr,
+            label=title_prefix,
+            color='gray',
+        )
+        ax1.plot(
+            subsample_sizes,
+            best_line,
+            label=best_line_label,
+            color='gray'
+        )
 
     increment_size = int(np.diff(subsample_sizes)[0])
     ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
@@ -819,11 +831,19 @@ def plot_histogram_errors(
         color='r'
     )
 
-    for i, other_histogram_data in enumerate(other_histogram_data_list):
+    if other_histogram_data is not None:
+        ax3.errorbar(
+            subsample_sizes,
+            other_histogram_data.error_mu,
+            yerr=yerr,
+            label=title_prefix,
+            color='gray',
+        )
         ax3.plot(
-            other_histogram_data.histogram_errors_output.subsample_sizes,
-            other_histogram_data.histogram_errors_output.errors,
-            label=other_histogram_data.label
+            subsample_sizes,
+            best_line,
+            label=best_line_label,
+            color='gray'
         )
 
     ax3.errorbar(
@@ -880,6 +900,7 @@ def plot_histogram_errors(
     ax3.set_yscale('log')
     ax3.set_xscale('log')
 
+    all_num_bins = histogram_error_bar_output.all_num_bins
     ax2.plot(subsample_sizes, all_num_bins, alpha=0.2, color='r', label='Num Bins')
     ax2.set_xlabel('Sample Size')
     ax2.set_ylabel('Num Bins')
@@ -912,7 +933,7 @@ def plot_hist_w_analytical(
     sample_trajs: np.ndarray,
     alpha: np.ndarray,
     std: ToyEvaluator,
-    pdf_map,
+    pdf_map: dict,
 ):
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     # bin_width = sample_trajs.shape[0] ** (-1/3)  # Optimal
@@ -935,8 +956,8 @@ def plot_hist_w_analytical(
     )
 
     # Plot analytical Chi distribution using scipy
-    x = np.array(pdf_map.keys())
-    pdf = np.array(pdf_map.values())
+    x = np.array(list(pdf_map.keys()))
+    pdf = np.array(list(pdf_map.values()))
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
@@ -955,18 +976,22 @@ def plot_chi_hist(
     title_prefix: str,
     sample_trajs: np.ndarray,
     alpha: np.ndarray,
+    std: ToyEvaluator,
 ):
     dim = int(sample_trajs.shape[1])
 
+    xs = np.linspace(alpha, sample_trajs.max().item())
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
-        pdf = stats.chi(dim).pdf(x) / (1 - stats.chi(dim).cdf(alpha))
+        pdf = stats.chi(dim).pdf(xs) / (1 - stats.chi(dim).cdf(alpha))
         # Zero out values below alpha
-        pdf[x < alpha] = 0
+        pdf[xs < alpha] = 0
     else:
-        pdf = stats.chi(dim).pdf(x)
+        pdf = stats.chi(dim).pdf(xs)
 
-    return plot_hist_w_analytical(title_prefix, sample_trajs, alpha, std, pdf)
+    pdf_map = {x: p for x, p in zip(xs, pdf)}
+
+    return plot_hist_w_analytical(title_prefix, sample_trajs, alpha, std, pdf_map)
 
 def test_gaussian(end_time, cfg, sample_trajs, std):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/gaussian_sample_trajs.pt')
@@ -1246,7 +1271,8 @@ def test_multivariate_gaussian(
 
     title_prefix = 'MVN_diffusion'
     dd = stats.chi(cfg.example.d)
-    calculator = DensityCalculator(dd)
+    pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
+    calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
     error = MISE()
     alpha_np = alpha.numpy().squeeze()
     sample_trajs_list = einops.rearrange(
@@ -1254,21 +1280,21 @@ def test_multivariate_gaussian(
         '(n c) b 1 -> n c b 1',
         n=cfg.num_sample_batches
     )
-    hebo, ohdl = compute_multiple_histogram_errors(
+    hebo = compute_multiple_histogram_errors(
         sample_trajs_list,
         alpha_np,
         std,
         calculator,
-        error_measure,
+        error,
         title_prefix
     )
     plot_histogram_errors(
         alpha_np,
         cfg.example.d,
         hebo,
-        ohdl[-1].histogram_errors_output,
         error.label(),
-        title_prefix
+        title_prefix,
+        other_histogram_data
     )
     plot_chi_hist(title_prefix, sample_trajs, alpha_np, std)
 
@@ -1416,7 +1442,10 @@ def test_brownian_motion_diff(
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     alpha = alpha.cpu()
 
-    calculator = SimpsonsRuleCalculator(cfg.pdf_values_dir)
+    calculator = SimpsonsRuleCalculator(
+        pdf_2d_quadrature_bm,
+        cfg.pdf_values_dir
+    )
     error = SimpsonsMISE()
     title_prefix = 'BM_diffusion'
     alpha_np = alpha.numpy().squeeze()
@@ -1425,7 +1454,7 @@ def test_brownian_motion_diff(
         '(n c) b 1 -> n c b 1',
         n=cfg.num_sample_batches
     )
-    hebo, ohdl = compute_multiple_histogram_errors(
+    hebo = compute_multiple_histogram_errors(
         sample_trajs_list,
         alpha_np,
         std,
@@ -1436,16 +1465,19 @@ def test_brownian_motion_diff(
     plot_histogram_errors(
         alpha_np,
         cfg.example.sde_steps-1,
-        heo,
-        histogram_data_list[-1].histogram_errors_output,
+        hebo,
         error.label(),
-        title_prefix
+        title_prefix,
+        other_histogram_data
     )
+    print("NO PDF specified for plot_hist_w_analytical")
+    import pdb; pdb.set_trace()
     plot_hist_w_analytical(
         title_prefix,
         sample_trajs.numpy(),
         alpha_np,
-        std
+        std,
+        pdf
     )
 
     # make histogram
@@ -1855,36 +1887,49 @@ def sample(cfg):
             def __init__(self, samples):
                 self.samples = samples
         saps = None
+        alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+        alpha_np = alpha.cpu().numpy().squeeze()
         if type(std.example) == MultivariateGaussianExampleConfig:
             dim = cfg.example.d
             dist_type = 'MVN'
             dd = stats.chi(dim)
-            calculator = DensityCalculator(dd)
+            pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
+            calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
             error = MISE()
         elif type(std.example) == BrownianMotionDiffExampleConfig:
             dim = cfg.example.sde_steps - 1
             dist_type = 'BM'
-            calculator = SimpsonsRuleCalculator(cfg.pdf_values_dir)
-            error = SimpsonsMISE()
+            calculator = SimpsonsRuleCalculator(
+                pdf_2d_quadrature_bm,
+                cfg.pdf_values_dir
+            )
+            error = MISE()
             if cfg.sample_file:
                 saps = torch.load(cfg.sample_file)
         title_prefix = f'{dist_type}_analytical'
-        alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-        alpha_np = alpha.cpu().numpy().squeeze()
-        num_runs = 1
         sample_trajs_list = []
-        for i in range(num_runs):
+        for i in range(cfg.num_sample_batches):
             if saps is None:
                 sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+                cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
+                if type(std.example) == BrownianMotionDiffExampleConfig:
+                    dt = torch.tensor(1. / dim)
+                    scaled_x0 = sample_traj_out.samples * dt.sqrt()  # standardize data
+                    bm = torch.cat([
+                        torch.zeros(10*cfg.num_samples, 1, 1),
+                        scaled_x0.cumsum(dim=1)
+                    ], dim=1)
+                    cond_idx = (bm.abs() > alpha).any(dim=[1,2])
+
+                cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
             else:
                 sample_traj_out = A(saps)
             if std.cond == 1:
-                cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > std.likelihood.alpha)
-                cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
                 sample_traj_out.samples = cond_samples
+
             sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
             sample_trajs_list.append(sample_traj_out.samples[-1])
-        hebo, histogram_data_list = compute_multiple_histogram_errors(
+        hebo = compute_multiple_histogram_errors(
             torch.stack(sample_trajs_list),
             alpha_np,
             std,
@@ -1896,7 +1941,6 @@ def sample(cfg):
             alpha_np,
             dim,
             hebo,
-            histogram_data_list[-1].histogram_errors_output,
             error.label(),
             title_prefix
         )
@@ -1910,8 +1954,8 @@ def sample(cfg):
 
         if cfg.debug:
             print('DEBUG is on!')
-            if type(std.example) == BrownianMotionDiffExampleConfig:
-                cfg.pdf_values_dir = calculator.pdf_values_dir
+            # if type(std.example) == BrownianMotionDiffExampleConfig:
+            #     cfg.pdf_values_dir = calculator.pdf_values_dir
         else:
             sample_traj_out = std.sample_trajectories(
                 cond=std.cond,
@@ -1928,7 +1972,7 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std, sample_trajs, histogram_data_list)
+        test(end_time, cfg, out_trajs, std, sample_trajs, hebo)
         import pdb; pdb.set_trace()
 
 
