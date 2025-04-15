@@ -719,7 +719,9 @@ def compute_multiple_histogram_errors(
     errs = einops.rearrange(all_errors, 'n l -> (l n)')
     m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
     best_line = np.exp(m*np.log(subsample_sizes) + b)
-    best_line_label = f"BFL {title_prefix}: y = {m:.2f}x + {b:.2f}"
+    suffix = title_prefix.find('_')
+    name = title_prefix[suffix+1:]
+    best_line_label = f"{name}: y = {m:.2f}x + {b:.2f}"
     error_mu = np.array(errors_list).mean(0)
     error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
     error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
