@@ -60,7 +60,8 @@ AllHistogramOutputs = namedtuple(
 HistogramData = namedtuple('HistogramData', 'histogram_errors_output label')
 HistogramErrorBarOutput = namedtuple(
     'HistogramErrorBarOutput',
-    'error_mu error_pct_5 error_pct_95 best_line best_line_label subsample_sizes all_num_bins'
+    'error_mu error_pct_5 error_pct_95 '\
+    'best_line best_line_label subsample_sizes all_num_bins other_title_prefix'
 )
 
 #########################
@@ -718,7 +719,7 @@ def compute_multiple_histogram_errors(
     errs = einops.rearrange(all_errors, 'n l -> (l n)')
     m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
     best_line = np.exp(m*np.log(subsample_sizes) + b)
-    best_line_label = f"Best Fit Line: y = {m:.2f}x + {b:.2f}"
+    best_line_label = f"BFL {title_prefix}: y = {m:.2f}x + {b:.2f}"
     error_mu = np.array(errors_list).mean(0)
     error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
     error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
@@ -729,7 +730,8 @@ def compute_multiple_histogram_errors(
         best_line,
         best_line_label,
         subsample_sizes,
-        all_num_bins
+        all_num_bins,
+        title_prefix
     )
 
 def plot_histogram_errors(
@@ -750,8 +752,9 @@ def plot_histogram_errors(
         error_mu = other_histogram_data.error_mu
         error_pct_5 = other_histogram_data.error_pct_5
         error_pct_95 = other_histogram_data.error_pct_95
-        best_line = other_histogram_data.best_line
-        best_line_label = other_histogram_data.best_line_label
+        other_best_line = other_histogram_data.best_line
+        other_best_line_label = other_histogram_data.best_line_label
+        other_title_prefix = other_histogram_data.other_title_prefix
         lwr = error_mu - error_pct_5
         upr = error_pct_95 - error_mu
         yerr = np.array([lwr, upr])
@@ -759,13 +762,13 @@ def plot_histogram_errors(
             subsample_sizes,
             other_histogram_data.error_mu,
             yerr=yerr,
-            label=title_prefix,
-            color='gray',
+            label=other_title_prefix,
+            color='black',
         )
         ax1.plot(
             subsample_sizes,
-            best_line,
-            label=best_line_label,
+            other_best_line,
+            label=other_best_line_label,
             color='gray'
         )
 
@@ -836,13 +839,13 @@ def plot_histogram_errors(
             subsample_sizes,
             other_histogram_data.error_mu,
             yerr=yerr,
-            label=title_prefix,
-            color='gray',
+            label=other_title_prefix,
+            color='black',
         )
         ax3.plot(
             subsample_sizes,
-            best_line,
-            label=best_line_label,
+            other_best_line,
+            label=other_best_line_label,
             color='gray'
         )
 
