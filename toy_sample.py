@@ -755,7 +755,7 @@ def plot_histogram_errors(
         error_pct_95 = other_histogram_data.error_pct_95
         other_best_line = other_histogram_data.best_line
         other_best_line_label = other_histogram_data.best_line_label
-        other_title_prefix = other_histogram_data.other_title_prefix
+        other_title_prefix = other_histogram_data.other_title_prefix + f'{cfg.num_sample_batches} repeats'
         other_subsample_sizes = other_histogram_data.subsample_sizes
         lwr = error_mu - error_pct_5
         upr = error_pct_95 - error_mu
@@ -788,14 +788,14 @@ def plot_histogram_errors(
     lwr = error_mu - error_pct_5
     upr = error_pct_95 - error_mu
     yerr = np.array([lwr, upr])
-    suffix = title_prefix.find('_')
-    name = title_prefix[suffix+1:]
+    suffix_idx = title_prefix.find('_')
+    label_name = title_prefix[suffix_idx+1:] + f'{cfg.num_sample_batches} repeats'
 
     ax1.errorbar(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=suffix,
+        label=label_name,
         color='b',
     )
 
@@ -858,7 +858,7 @@ def plot_histogram_errors(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=suffix,
+        label=label_name,
         color='b',
     )
     ax3.set_xlabel(f'Log Sample Size')
@@ -1471,6 +1471,7 @@ def test_brownian_motion_diff(
             '(n c) b 1 -> n c b 1',
             n=cfg.num_sample_batches
         )
+        import pdb; pdb.set_trace()
         hebo = compute_multiple_histogram_errors(
             sample_trajs_list,
             alpha_np,
