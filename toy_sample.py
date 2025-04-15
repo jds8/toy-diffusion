@@ -750,13 +750,14 @@ def plot_histogram_errors(
 
     subsample_sizes = histogram_error_bar_output.subsample_sizes
 
+    repeat_suffix = f' ({cfg.num_sample_batches} repeats)'
     if other_histogram_data is not None:
         error_mu = other_histogram_data.error_mu
         error_pct_5 = other_histogram_data.error_pct_5
         error_pct_95 = other_histogram_data.error_pct_95
         other_best_line = other_histogram_data.best_line
         other_best_line_label = other_histogram_data.best_line_label
-        other_title_prefix = other_histogram_data.other_title_prefix + f'{cfg.num_sample_batches} repeats'
+        other_title_prefix = other_histogram_data.other_title_prefix + repeat_suffix
         other_subsample_sizes = other_histogram_data.subsample_sizes
         lwr = error_mu - error_pct_5
         upr = error_pct_95 - error_mu
@@ -790,7 +791,7 @@ def plot_histogram_errors(
     upr = error_pct_95 - error_mu
     yerr = np.array([lwr, upr])
     suffix_idx = title_prefix.find('_')
-    label_name = title_prefix[suffix_idx+1:] + f'{cfg.num_sample_batches} repeats'
+    label_name = title_prefix[suffix_idx+1:] + repeat_suffix
 
     ax1.errorbar(
         subsample_sizes,
@@ -1923,8 +1924,9 @@ def sample(cfg):
             for i in range(cfg.num_sample_batches):
                 if saps is None:
                     sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
-                    cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
-                    if type(std.example) == BrownianMotionDiffExampleConfig:
+                    if type(std.example) == MultivariateGaussianExampleConfig:
+                        cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
+                    elif type(std.example) == BrownianMotionDiffExampleConfig:
                         dt = torch.tensor(1. / dim)
                         scaled_x0 = sample_traj_out.samples * dt.sqrt()  # standardize data
                         bm = torch.cat([
@@ -1932,13 +1934,15 @@ def sample(cfg):
                             scaled_x0.cumsum(dim=1)
                         ], dim=1)
                         cond_idx = (bm.abs() > alpha).any(dim=[1,2])
-
-                    cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
+                    else:
+                        raise NotImplementedError
+                    cond_samples = sample_traj_out.samples[cond_idx]
                 else:
                     sample_traj_out = A(saps)
                 if std.cond == 1:
                     sample_traj_out.samples = cond_samples
 
+                sample_traj_out.samples = sample_traj_out.samples[:cfg.num_samples]
                 sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
                 sample_trajs_list.append(sample_traj_out.samples[-1])
             hebo = compute_multiple_histogram_errors(
