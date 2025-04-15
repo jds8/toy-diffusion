@@ -144,6 +144,7 @@ class ToyEvaluator:
             plt.clf()
 
     def get_x_min(self):
+        total_samples = self.cfg.num_samples*self.cfg.num_sample_batches
         if type(self.example) == GaussianExampleConfig:
             pseudo_example = self.cfg.example.copy()
             pseudo_example['mu'] = 0.
@@ -157,7 +158,7 @@ class ToyEvaluator:
                 std.item(),
                 device
             ).sample([
-                self.cfg.num_samples*self.cfg.num_sample_batches,
+                total_samples,
                 1,
                 1
             ])
@@ -166,20 +167,20 @@ class ToyEvaluator:
             x_min = dist.MultivariateNormal(
                 torch.zeros(d),
                 torch.eye(d),
-            ).sample([self.cfg.num_samples]).to(device).unsqueeze(-1)
+            ).sample([total_samples]).to(device).unsqueeze(-1)
         elif type(self.example) == BrownianMotionDiffExampleConfig:
             x_min = self.sampler.prior_sampling(device).sample([
-                self.cfg.num_samples,
+                total_samples,
                 self.cfg.example.sde_steps-1,
                 1,
             ])
         elif type(self.example) == UniformExampleConfig:
             x_min = dist.Normal(0, 1, device).sample([
-                self.cfg.num_samples, 1, 1
+                total_samples, 1, 1
             ])
         else:
             x_min = dist.Normal(0, 1, device).sample([
-                self.cfg.num_samples, 1, 1
+                total_samples, 1, 1
             ])
         return x_min.to(device)
 
