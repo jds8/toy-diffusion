@@ -741,6 +741,7 @@ def plot_histogram_errors(
         histogram_error_bar_output: HistogramErrorBarOutput,
         error_measure_label: str,
         title_prefix: str,
+        cfg: SampleConfig,
         other_histogram_data: Optional[HistogramErrorBarOutput]=None,
 ):
     plt.clf()
@@ -840,19 +841,22 @@ def plot_histogram_errors(
     )
 
     if other_histogram_data is not None:
-        ax3.errorbar(
-            other_subsample_sizes,
-            other_histogram_data.error_mu,
-            yerr=yerr,
-            label=other_title_prefix,
-            color='black',
-        )
-        ax3.plot(
-            other_subsample_sizes,
-            other_best_line,
-            label=other_best_line_label,
-            color='gray'
-        )
+        try:
+            ax3.errorbar(
+                other_subsample_sizes,
+                other_histogram_data.error_mu,
+                yerr=yerr,
+                label=other_title_prefix,
+                color='black',
+            )
+            ax3.plot(
+                other_subsample_sizes,
+                other_best_line,
+                label=other_best_line_label,
+                color='gray'
+            )
+        except:
+            import pdb; pdb.set_trace()
 
     ax3.errorbar(
         subsample_sizes,
@@ -1309,6 +1313,7 @@ def test_multivariate_gaussian(
             hebo,
             error.label(),
             title_prefix,
+            cfg,
             other_histogram_data
         )
     plot_chi_hist(title_prefix, sample_trajs, alpha_np, std)
@@ -1471,7 +1476,6 @@ def test_brownian_motion_diff(
             '(n c) b 1 -> n c b 1',
             n=cfg.num_sample_batches
         )
-        import pdb; pdb.set_trace()
         hebo = compute_multiple_histogram_errors(
             sample_trajs_list,
             alpha_np,
@@ -1486,6 +1490,7 @@ def test_brownian_motion_diff(
             hebo,
             error.label(),
             title_prefix,
+            cfg,
             other_histogram_data
         )
     x, pdf = plot_hist_w_analytical(
@@ -1952,7 +1957,8 @@ def sample(cfg):
                 dim,
                 hebo,
                 error.label(),
-                title_prefix
+                title_prefix,
+                cfg,
             )
             if type(std.example) == MultivariateGaussianExampleConfig:
                 plot_chi_hist(
