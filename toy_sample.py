@@ -760,11 +760,11 @@ def plot_histogram_errors(
         other_subsample_sizes = other_histogram_data.subsample_sizes
         lwr = error_mu - error_pct_5
         upr = error_pct_95 - error_mu
-        yerr = np.array([lwr, upr])
+        other_yerr = np.array([lwr, upr])
         ax1.errorbar(
             other_subsample_sizes,
             other_histogram_data.error_mu,
-            yerr=yerr,
+            yerr=other_yerr,
             label=other_title_prefix,
             color='black',
         )
@@ -841,22 +841,19 @@ def plot_histogram_errors(
     )
 
     if other_histogram_data is not None:
-        try:
-            ax3.errorbar(
-                other_subsample_sizes,
-                other_histogram_data.error_mu,
-                yerr=yerr,
-                label=other_title_prefix,
-                color='black',
-            )
-            ax3.plot(
-                other_subsample_sizes,
-                other_best_line,
-                label=other_best_line_label,
-                color='gray'
-            )
-        except:
-            import pdb; pdb.set_trace()
+        ax3.errorbar(
+            other_subsample_sizes,
+            other_histogram_data.error_mu,
+            yerr=other_yerr,
+            label=other_title_prefix,
+            color='black',
+        )
+        ax3.plot(
+            other_subsample_sizes,
+            other_best_line,
+            label=other_best_line_label,
+            color='gray'
+        )
 
     ax3.errorbar(
         subsample_sizes,
