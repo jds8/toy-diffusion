@@ -720,7 +720,7 @@ def compute_multiple_histogram_errors(
     best_line = np.exp(m*np.log(subsample_sizes) + b)
     suffix = title_prefix.find('_')
     label_name = title_prefix[suffix+1:]
-    best_line_label = f"{name}: y = {m:.2f}x + {b:.2f}"
+    best_line_label = f"{label_name}: y = {m:.2f}x + {b:.2f}"
     error_mu = np.array(errors_list).mean(0)
     error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
     error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
