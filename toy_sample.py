@@ -69,7 +69,6 @@ HistogramErrorBarOutput = namedtuple(
 def suppresswarning():
     warnings.warn("user", UserWarning)
 
-
 class ToyEvaluator:
     def __init__(self, cfg: SampleConfig):
         self.cfg = cfg
@@ -733,7 +732,7 @@ def compute_multiple_histogram_errors(
         best_line_label,
         subsample_sizes,
         all_num_bins,
-        title_prefix
+        suffix,
     )
 
 def plot_histogram_errors(
@@ -757,18 +756,19 @@ def plot_histogram_errors(
         other_best_line = other_histogram_data.best_line
         other_best_line_label = other_histogram_data.best_line_label
         other_title_prefix = other_histogram_data.other_title_prefix
+        other_subsample_sizes = other_histogram_data.subsample_sizes
         lwr = error_mu - error_pct_5
         upr = error_pct_95 - error_mu
         yerr = np.array([lwr, upr])
         ax1.errorbar(
-            subsample_sizes,
+            other_subsample_sizes,
             other_histogram_data.error_mu,
             yerr=yerr,
             label=other_title_prefix,
             color='black',
         )
         ax1.plot(
-            subsample_sizes,
+            other_subsample_sizes,
             other_best_line,
             label=other_best_line_label,
             color='gray'
@@ -788,11 +788,14 @@ def plot_histogram_errors(
     lwr = error_mu - error_pct_5
     upr = error_pct_95 - error_mu
     yerr = np.array([lwr, upr])
+    suffix = title_prefix.find('_')
+    name = title_prefix[suffix+1:]
+
     ax1.errorbar(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=title_prefix,
+        label=suffix,
         color='b',
     )
 
@@ -838,14 +841,14 @@ def plot_histogram_errors(
 
     if other_histogram_data is not None:
         ax3.errorbar(
-            subsample_sizes,
+            other_subsample_sizes,
             other_histogram_data.error_mu,
             yerr=yerr,
             label=other_title_prefix,
             color='black',
         )
         ax3.plot(
-            subsample_sizes,
+            other_subsample_sizes,
             other_best_line,
             label=other_best_line_label,
             color='gray'
@@ -855,7 +858,7 @@ def plot_histogram_errors(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=title_prefix,
+        label=suffix,
         color='b',
     )
     ax3.set_xlabel(f'Log Sample Size')
