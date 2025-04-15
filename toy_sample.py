@@ -3,7 +3,7 @@ import os
 import warnings
 import logging
 import time as timer
-from typing_extensions import Callable, Optional, List
+from typing_extensions import Callable, Optional, List, Union
 
 from pathlib import Path
 
@@ -935,10 +935,10 @@ def plot_histogram_errors(
 
 def plot_hist_w_analytical(
     title_prefix: str,
-    sample_trajs: np.ndarray,
+    sample_trajs: torch.Tensor,
     alpha: np.ndarray,
     std: ToyEvaluator,
-    pdf_map: dict,
+    pdf_map: Union[dict, Callable],
 ):
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     # bin_width = sample_trajs.shape[0] ** (-1/3)  # Optimal
@@ -961,8 +961,14 @@ def plot_hist_w_analytical(
     )
 
     # Plot analytical Chi distribution using scipy
-    x = np.array(list(pdf_map.keys()))
-    pdf = np.array(list(pdf_map.values()))
+    if isinstance(pdf_map, dict):
+        x = np.array(list(pdf_map.keys()))
+        pdf = np.array(list(pdf_map.values()))
+    elif isinstance(pdf_map, Callable):
+        x = np.linspace(alpha.item(), sample_max)
+        pdf = np.zeros_like(x)
+        for i, p in enumerate(x):
+            pdf[i] = pdf_map(p, alpha.item())
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
@@ -1275,32 +1281,33 @@ def test_multivariate_gaussian(
     ))
 
     title_prefix = 'MVN_diffusion'
-    dd = stats.chi(cfg.example.d)
-    pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
-    calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
-    error = MISE()
     alpha_np = alpha.numpy().squeeze()
-    sample_trajs_list = einops.rearrange(
-        sample_trajs,
-        '(n c) b 1 -> n c b 1',
-        n=cfg.num_sample_batches
-    )
-    hebo = compute_multiple_histogram_errors(
-        sample_trajs_list,
-        alpha_np,
-        std,
-        calculator,
-        error,
-        title_prefix
-    )
-    plot_histogram_errors(
-        alpha_np,
-        cfg.example.d,
-        hebo,
-        error.label(),
-        title_prefix,
-        other_histogram_data
-    )
+    if cfg.run_histogram_convergence:
+        dd = stats.chi(cfg.example.d)
+        pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
+        calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
+        error = MISE()
+        sample_trajs_list = einops.rearrange(
+            sample_trajs,
+            '(n c) b 1 -> n c b 1',
+            n=cfg.num_sample_batches
+        )
+        hebo = compute_multiple_histogram_errors(
+            sample_trajs_list,
+            alpha_np,
+            std,
+            calculator,
+            error,
+            title_prefix
+        )
+        plot_histogram_errors(
+            alpha_np,
+            cfg.example.d,
+            hebo,
+            error.label(),
+            title_prefix,
+            other_histogram_data
+        )
     plot_chi_hist(title_prefix, sample_trajs, alpha_np, std)
 
     cond = std.cond if std.cond else torch.tensor([-1.])
@@ -1410,8 +1417,9 @@ def plot_bm_pdf_histogram_estimate(
     plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
     return sample_levels, x, pdf
 
-def plot_bm_pdf_pfode_estimate(sample_levels, ode_llk, x, pdf, cfg):
+def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
     # plot points (ode_llk, sample_levels) against analytical chi
+    sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     chi_ode_llk = ode_llk.cpu() + ((cfg.example.sde_steps - 1) / 2) * \
                  torch.tensor(2 * np.pi).log() + \
@@ -1447,42 +1455,41 @@ def test_brownian_motion_diff(
     alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
     alpha = alpha.cpu()
 
+    title_prefix = 'BM_diffusion'
+    alpha_np = alpha.numpy().squeeze()
     calculator = SimpsonsRuleCalculator(
         pdf_2d_quadrature_bm,
         cfg.pdf_values_dir
     )
-    error = SimpsonsMISE()
-    title_prefix = 'BM_diffusion'
-    alpha_np = alpha.numpy().squeeze()
-    sample_trajs_list = einops.rearrange(
+    if cfg.run_histogram_convergence:
+        error = SimpsonsMISE()
+        sample_trajs_list = einops.rearrange(
+            sample_trajs,
+            '(n c) b 1 -> n c b 1',
+            n=cfg.num_sample_batches
+        )
+        hebo = compute_multiple_histogram_errors(
+            sample_trajs_list,
+            alpha_np,
+            std,
+            calculator,
+            error,
+            title_prefix
+        )
+        plot_histogram_errors(
+            alpha_np,
+            cfg.example.sde_steps-1,
+            hebo,
+            error.label(),
+            title_prefix,
+            other_histogram_data
+        )
+    x, pdf = plot_hist_w_analytical(
+        title_prefix,
         sample_trajs,
-        '(n c) b 1 -> n c b 1',
-        n=cfg.num_sample_batches
-    )
-    hebo = compute_multiple_histogram_errors(
-        sample_trajs_list,
         alpha_np,
         std,
-        calculator,
-        error,
-        title_prefix
-    )
-    plot_histogram_errors(
-        alpha_np,
-        cfg.example.sde_steps-1,
-        hebo,
-        error.label(),
-        title_prefix,
-        other_histogram_data
-    )
-    print("NO PDF specified for plot_hist_w_analytical")
-    import pdb; pdb.set_trace()
-    plot_hist_w_analytical(
-        title_prefix,
-        sample_trajs.numpy(),
-        alpha_np,
-        std,
-        pdf
+        pdf_2d_quadrature_bm
     )
 
     # make histogram
@@ -1541,13 +1548,6 @@ def test_brownian_motion_diff(
     print(f'true tail prob: {tail}')
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
-    if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        sample_levels, x, pdf = plot_bm_pdf_histogram_estimate(
-            sample_trajs,
-            calculator,
-            alpha.numpy().squeeze(),
-        )
-
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
     if cfg.debug:
         sample_trajs = dist.Normal(0, 1).sample(sample_trajs.shape)
@@ -1570,7 +1570,7 @@ def test_brownian_motion_diff(
         )
 
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        plot_bm_pdf_pfode_estimate(sample_levels, ode_llk[0][-1], x, pdf, cfg)
+        plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], x, pdf, cfg)
 
     import pdb; pdb.set_trace()
 
@@ -1891,71 +1891,74 @@ def sample(cfg):
         class A:
             def __init__(self, samples):
                 self.samples = samples
-        saps = None
-        alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
-        alpha_np = alpha.cpu().numpy().squeeze()
-        if type(std.example) == MultivariateGaussianExampleConfig:
-            dim = cfg.example.d
-            dist_type = 'MVN'
-            dd = stats.chi(dim)
-            pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
-            calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
-            error = MISE()
-        elif type(std.example) == BrownianMotionDiffExampleConfig:
-            dim = cfg.example.sde_steps - 1
-            dist_type = 'BM'
-            calculator = SimpsonsRuleCalculator(
-                pdf_2d_quadrature_bm,
-                cfg.pdf_values_dir
-            )
-            error = MISE()
-            if cfg.sample_file:
-                saps = torch.load(cfg.sample_file)
-        title_prefix = f'{dist_type}_analytical'
-        sample_trajs_list = []
-        for i in range(cfg.num_sample_batches):
-            if saps is None:
-                sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
-                cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
-                if type(std.example) == BrownianMotionDiffExampleConfig:
-                    dt = torch.tensor(1. / dim)
-                    scaled_x0 = sample_traj_out.samples * dt.sqrt()  # standardize data
-                    bm = torch.cat([
-                        torch.zeros(10*cfg.num_samples, 1, 1),
-                        scaled_x0.cumsum(dim=1)
-                    ], dim=1)
-                    cond_idx = (bm.abs() > alpha).any(dim=[1,2])
+        if cfg.run_histogram_convergence:
+            saps = None
+            alpha = torch.tensor([std.likelihood.alpha]) if std.cond == 1. else torch.tensor([0.])
+            alpha_np = alpha.cpu().numpy().squeeze()
+            if type(std.example) == MultivariateGaussianExampleConfig:
+                dim = cfg.example.d
+                dist_type = 'MVN'
+                dd = stats.chi(dim)
+                pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
+                calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
+                error = MISE()
+            elif type(std.example) == BrownianMotionDiffExampleConfig:
+                dim = cfg.example.sde_steps - 1
+                dist_type = 'BM'
+                calculator = SimpsonsRuleCalculator(
+                    pdf_2d_quadrature_bm,
+                    cfg.pdf_values_dir
+                )
+                error = MISE()
+                if cfg.sample_file:
+                    saps = torch.load(cfg.sample_file)
+            title_prefix = f'{dist_type}_analytical'
+            sample_trajs_list = []
+            for i in range(cfg.num_sample_batches):
+                if saps is None:
+                    sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+                    cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
+                    if type(std.example) == BrownianMotionDiffExampleConfig:
+                        dt = torch.tensor(1. / dim)
+                        scaled_x0 = sample_traj_out.samples * dt.sqrt()  # standardize data
+                        bm = torch.cat([
+                            torch.zeros(10*cfg.num_samples, 1, 1),
+                            scaled_x0.cumsum(dim=1)
+                        ], dim=1)
+                        cond_idx = (bm.abs() > alpha).any(dim=[1,2])
 
-                cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
-            else:
-                sample_traj_out = A(saps)
-            if std.cond == 1:
-                sample_traj_out.samples = cond_samples
+                    cond_samples = sample_traj_out.samples[cond_idx][:cfg.num_samples]
+                else:
+                    sample_traj_out = A(saps)
+                if std.cond == 1:
+                    sample_traj_out.samples = cond_samples
 
-            sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
-            sample_trajs_list.append(sample_traj_out.samples[-1])
-        hebo = compute_multiple_histogram_errors(
-            torch.stack(sample_trajs_list),
-            alpha_np,
-            std,
-            analytical_calculator=calculator,
-            error_measure=error,
-            title_prefix=title_prefix,
-        )
-        plot_histogram_errors(
-            alpha_np,
-            dim,
-            hebo,
-            error.label(),
-            title_prefix
-        )
-        if type(std.example) == MultivariateGaussianExampleConfig:
-            plot_chi_hist(
-                title_prefix,
-                sample_traj_out.samples[-1],
+                sample_traj_out.samples = sample_traj_out.samples.unsqueeze(0)
+                sample_trajs_list.append(sample_traj_out.samples[-1])
+            hebo = compute_multiple_histogram_errors(
+                torch.stack(sample_trajs_list),
                 alpha_np,
-                std
+                std,
+                analytical_calculator=calculator,
+                error_measure=error,
+                title_prefix=title_prefix,
             )
+            plot_histogram_errors(
+                alpha_np,
+                dim,
+                hebo,
+                error.label(),
+                title_prefix
+            )
+            if type(std.example) == MultivariateGaussianExampleConfig:
+                plot_chi_hist(
+                    title_prefix,
+                    sample_traj_out.samples[-1],
+                    alpha_np,
+                    std
+                )
+        else:
+            hebo = None
 
         if cfg.debug:
             print('DEBUG is on!')

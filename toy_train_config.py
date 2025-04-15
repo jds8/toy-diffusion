@@ -180,6 +180,7 @@ class SampleConfig(BaseConfig):
     num_hutchinson_samples: int = 1
     figs_dir: str = 'figs'
     num_sample_batches: int = 1
+    run_histogram_convergence: bool = True
 
 
     def get_config_file(self, save_dir, alpha, start_round):
