@@ -719,7 +719,7 @@ def compute_multiple_histogram_errors(
     m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
     best_line = np.exp(m*np.log(subsample_sizes) + b)
     suffix = title_prefix.find('_')
-    name = title_prefix[suffix+1:]
+    label_name = title_prefix[suffix+1:]
     best_line_label = f"{name}: y = {m:.2f}x + {b:.2f}"
     error_mu = np.array(errors_list).mean(0)
     error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
@@ -732,7 +732,7 @@ def compute_multiple_histogram_errors(
         best_line_label,
         subsample_sizes,
         all_num_bins,
-        suffix,
+        label_name,
     )
 
 def plot_histogram_errors(
