@@ -751,7 +751,7 @@ def plot_histogram_errors(
 
     subsample_sizes = histogram_error_bar_output.subsample_sizes
 
-    repeat_suffix = f' ({cfg.num_sample_batches} repeats)'
+    repeat_suffix = f' ({cfg.num_sample_batches} runs)'
     if other_histogram_data is not None:
         error_mu = other_histogram_data.error_mu
         error_pct_5 = other_histogram_data.error_pct_5
@@ -1292,7 +1292,7 @@ def test_multivariate_gaussian(
         dd = stats.chi(cfg.example.d)
         pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
         calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
-        error = MISE()
+        error = MISE(title_prefix)
         sample_trajs_list = einops.rearrange(
             sample_trajs,
             '(n c) b 1 -> n c b 1',
@@ -1469,7 +1469,8 @@ def test_brownian_motion_diff(
         cfg.pdf_values_dir
     )
     if cfg.run_histogram_convergence:
-        error = SimpsonsMISE()
+        # error = SimpsonsMISE()
+        error = MISE(title_prefix)
         sample_trajs_list = einops.rearrange(
             sample_trajs,
             '(n c) b 1 -> n c b 1',
@@ -1909,7 +1910,6 @@ def sample(cfg):
                 dd = stats.chi(dim)
                 pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
                 calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
-                error = MISE()
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
                 dist_type = 'BM'
@@ -1917,10 +1917,10 @@ def sample(cfg):
                     pdf_2d_quadrature_bm,
                     cfg.pdf_values_dir
                 )
-                error = MISE()
                 if cfg.sample_file:
                     saps = torch.load(cfg.sample_file)
             title_prefix = f'{dist_type}_analytical'
+            error = MISE(title_prefix)
             sample_trajs_list = []
             for i in range(cfg.num_sample_batches):
                 if saps is None:

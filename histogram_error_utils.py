@@ -1364,8 +1364,8 @@ def get_bm_pdf_map(alpha: np.ndarray):
 ##### Error Measures ####
 #########################
 class ErrorMeasure:
-    def __init__(self):
-        self.hist_approx_dir = f'{HydraConfig.get().run.dir}/histogram_approximations'
+    def __init__(self, title_prefix):
+        self.hist_approx_dir = f'{HydraConfig.get().run.dir}/{title_prefix}_histogram_approximations'
         os.makedirs(self.hist_approx_dir, exist_ok=True)
     def __call__(
         self,
@@ -1383,29 +1383,6 @@ class ErrorMeasure:
         alpha
     ):
         raise NotImplementedError
-    def plot(
-        self,
-        x_grid: np.ndarray,
-        pdf_values: np.ndarray,
-        empirical_props: np.ndarray,
-        num_bins: int
-    ):
-        """
-        x_grid has shape d x b
-        pdf_values has shape d x b
-        empirical_props has shape b
-        """
-        x_flattened = einops.rearrange(x_grid, 'b w -> (w b)')
-        x_unique, idx = np.unique(x_flattened, return_index=True)
-        props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
-        values = einops.rearrange(pdf_values, 'd b -> (b d)')
-        plt.clf()
-        plt.plot(x_flattened, props, c='orange')
-        plt.scatter(x_flattened, props, c='orange')
-        plt.plot(x_unique, values[idx], c='b')
-        plt.scatter(x_unique, values[idx], c='b')
-        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
-        plt.clf()
     def clean_up(self):
         try:
             _create_gif(self.hist_approx_dir)
@@ -1462,6 +1439,29 @@ class SimpsonsMISE(ErrorMeasure):
         return mse
     def label(self):
         return 'Simpson\'s MISE'
+    def plot(
+        self,
+        x_grid: np.ndarray,
+        pdf_values: np.ndarray,
+        empirical_props: np.ndarray,
+        num_bins: int
+    ):
+        """
+        x_grid has shape d x b
+        pdf_values has shape d x b
+        empirical_props has shape b
+        """
+        x_flattened = einops.rearrange(x_grid, 'b w -> (w b)')
+        x_unique, idx = np.unique(x_flattened, return_index=True)
+        props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
+        values = einops.rearrange(pdf_values, 'd b -> (b d)')
+        plt.clf()
+        plt.plot(x_flattened, props, c='orange')
+        plt.scatter(x_flattened, props, c='orange')
+        plt.plot(x_unique, values[idx], c='b')
+        plt.scatter(x_unique, values[idx], c='b')
+        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
+        plt.clf()
 
 class MISE(ErrorMeasure):
     def error(
@@ -1475,24 +1475,42 @@ class MISE(ErrorMeasure):
             imse = 0
             for i in range(len(bins)-1):
                 def integrand(x):
-                    # mse = (dist.pdf(x) / (1 - dist.cdf(alpha)) - hist[i]) ** 2
                     mse = (dist(x) - hist[i]) ** 2
                     return mse
                 result, _ = integrate.quad(integrand, bins[i], bins[i+1])
                 imse += result
-            # imse += (1 - dist.cdf(bins[-1])) / (1 - dist.cdf(alpha))
             return imse
 
-        # mse = compute_imse(analytical_calculator.dist, empirical_props, bins, alpha)
-        # mse += (1 - analytical_calculator.dist.cdf(bins[-1])) / (1 - analytical_calculator.dist.cdf(alpha))
         mse = compute_imse(lambda x: analytical_calculator.quadrature_fn(x, alpha), empirical_props, bins, alpha)
 
-        # pdf_values, x_grid = analytical_calculator(bins, alpha)
-        # mse = ((pdf_values - empirical_props) ** 2).sum()
-        # self.plot(x_grid, pdf_values, empirical_props, len(bins))
+        pdf_values, x_grid = analytical_calculator(bins, alpha)
+        self.plot(x_grid, pdf_values, empirical_props, len(bins))
         return mse
     def label(self):
         return 'Integrated MSE'
+    def plot(
+        self,
+        x_grid: np.ndarray,
+        pdf_values: np.ndarray,
+        empirical_props: np.ndarray,
+        num_bins: int
+    ):
+        """
+        x_grid has shape d x b
+        pdf_values has shape d x b
+        empirical_props has shape b
+        """
+        x_flattened = einops.rearrange(x_grid, 'b w -> (w b)')
+        x_unique, idx = np.unique(x_flattened, return_index=True)
+        props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
+        values = einops.rearrange(pdf_values, 'd b -> (b d)')
+        plt.clf()
+        plt.plot(x_flattened, props, c='orange')
+        plt.scatter(x_flattened, props, c='orange')
+        plt.plot(x_unique, values[idx], c='b')
+        plt.scatter(x_unique, values[idx], c='b')
+        plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
+        plt.clf()
 
 #########################
 #### /Error Measures ####
