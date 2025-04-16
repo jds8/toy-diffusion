@@ -1471,11 +1471,21 @@ class MISE(ErrorMeasure):
         bins: np.ndarray,
         alpha: np.ndarray
     ):
+        x_values = []
+        pdf = []
+        hist_values = []
         def compute_imse(dist, hist, bins, alpha):
             imse = 0
             for i in range(len(bins)-1):
                 def integrand(x):
-                    mse = (dist(x) - hist[i]) ** 2
+                    nonlocal x_values
+                    nonlocal pdf
+                    nonlocal hist_values
+                    x_values.append(x)
+                    pdf_value = dist(x)
+                    pdf.append(pdf_value)
+                    hist_values.append(hist[i])
+                    mse = (pdf_value - hist[i]) ** 2
                     return mse
                 result, _ = integrate.quad(integrand, bins[i], bins[i+1])
                 imse += result
@@ -1483,32 +1493,33 @@ class MISE(ErrorMeasure):
 
         mse = compute_imse(lambda x: analytical_calculator.quadrature_fn(x, alpha), empirical_props, bins, alpha)
 
-        pdf_values, x_grid = analytical_calculator(bins, alpha)
-        self.plot(x_grid, pdf_values, empirical_props, len(bins))
+        x_arr = torch.tensor(x_values)
+        x_sorted = x_arr.sort()
+        x_array = x_sorted.values.numpy()
+        pdf_array = torch.tensor(pdf)[x_sorted.indices].numpy()
+        hist_array = torch.tensor(hist_values)[x_sorted.indices].numpy()
+
+        self.plot(x_array, pdf_array, hist_array, len(bins))
         return mse
     def label(self):
         return 'Integrated MSE'
     def plot(
         self,
-        x_grid: np.ndarray,
-        pdf_values: np.ndarray,
-        empirical_props: np.ndarray,
+        x_array: np.ndarray,
+        pdf_array: np.ndarray,
+        hist_array: np.ndarray,
         num_bins: int
     ):
         """
-        x_grid has shape d x b
-        pdf_values has shape d x b
-        empirical_props has shape b
+        x_grid has shape d
+        pdf_values has shape d
+        empirical_props has shape d
         """
-        x_flattened = einops.rearrange(x_grid, 'b w -> (w b)')
-        x_unique, idx = np.unique(x_flattened, return_index=True)
-        props = einops.repeat(empirical_props, 'b -> (b w)', w=x_grid.shape[0])
-        values = einops.rearrange(pdf_values, 'd b -> (b d)')
         plt.clf()
-        plt.plot(x_flattened, props, c='orange')
-        plt.scatter(x_flattened, props, c='orange')
-        plt.plot(x_unique, values[idx], c='b')
-        plt.scatter(x_unique, values[idx], c='b')
+        plt.plot(x_array, pdf_array, c='orange')
+        # plt.scatter(x_array, pdf_array, c='orange')
+        plt.plot(x_array, hist_array, c='b')
+        # plt.scatter(x_array, hist_array, c='b')
         plt.savefig(f'{self.hist_approx_dir}/histogram_approximation_{num_bins}.jpg')
         plt.clf()
 
