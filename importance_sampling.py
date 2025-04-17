@@ -255,7 +255,16 @@ class BrownianMotionDiffTarget(Target):
                 return torch.tensor(0.0108)
             if alpha == 3.0:
                 return torch.tensor(0.00225)
-        elif self.cfg.example.sde_steps in [3, 5]:
+        elif self.cfg.example.sde_steps == 3:
+            if alpha == 0.5:
+                return torch.tensor(0.7458913437205545)
+            if alpha == 1.0:
+                return torch.tensor(0.37064413336206625)
+            if alpha == 1.5:
+                return torch.tensor(0.14605801048951172)
+            if alpha == 2.:
+                return torch.tensor(0.047295252164004084)
+        elif self.cfg.example.sde_steps == 5:
             value_dct = self.quadrature_values[self.cfg.example.sde_steps]
             alpha_float = alpha.item()
             if alpha_float in value_dct:

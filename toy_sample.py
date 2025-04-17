@@ -997,7 +997,8 @@ def plot_chi_hist(
 ):
     dim = int(sample_trajs.shape[1])
 
-    xs = np.linspace(alpha, sample_trajs.max().item())
+    sample_max = sample_trajs.norm(dim=[1,2]).max()
+    xs = np.linspace(alpha.item(), sample_max.item())
     if alpha > 0:
         # For conditional distribution, need to normalize by P(X > alpha)
         pdf = stats.chi(dim).pdf(xs) / (1 - stats.chi(dim).cdf(alpha))
@@ -1107,7 +1108,7 @@ def plot_theta_from_sample_trajs(end_time, cfg, sample_trajs, std):
 
 def plot_chi_from_sample_trajs(
         title_prefix: str,
-        cfg,
+        cfg: SampleConfig,
         sample_trajs: np.ndarray,
         std: ToyEvaluator,
         ode_llk: torch.Tensor,
@@ -1330,10 +1331,10 @@ def test_multivariate_gaussian(
             mu.squeeze(-1),
             torch.matmul(L, L.T)
         )
-    # alpha == r^2 as indicated by how the `exited` variable is defined
-    # at the top of this function
-    tail = torch.exp(-alpha / 2)
-    non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - tail.log()
+    dim = traj.shape[1]
+    tail = 1 - scipy.stats.chi(dim).cdf(alpha_np)
+    print(f'tail proability: {tail}')
+    non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - np.log(tail)
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.to(ode.device).logdet()
@@ -1353,7 +1354,7 @@ def test_multivariate_gaussian(
         cpu_sample_trajs,
         std,
         ode_llk[0][-1].cpu(),
-        alpha.numpy(),
+        alpha_np,
     )
     if cfg.example.d == 2:
         plot_ellipsoid(end_time, cfg, cpu_sample_trajs, std)

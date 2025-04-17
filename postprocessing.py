@@ -777,8 +777,8 @@ def make_performance_v_samples(cfg):
 
 @hydra.main(version_base=None, config_path="conf", config_name="pp_config")
 def main(cfg):
-    make_effort_v_performance(cfg)
-    # make_performance_v_samples(cfg)
+    # make_effort_v_performance(cfg)
+    make_performance_v_samples(cfg)
 
 
 if __name__ == '__main__':

@@ -82,9 +82,9 @@ class SimpsonsRuleCalculator(AnalyticalCalculator):
         num_divisions = 2 * (bins.shape[0] - 1) + 1
         # If not loading pdf_values, do quadrature even if pdf_values is set
         if not (self.load_pdf_values and self.pdf_values):
-            # area = estimate_integral(bins[-1], alpha.item(), lambda x: self.quadrature_fn(x, alpha))
-            # print(area)
-            # import pdb; pdb.set_trace()
+            area = estimate_integral(bins[-1], alpha.item(), lambda x: self.quadrature_fn(x, alpha))
+            print(area)
+            import pdb; pdb.set_trace()
             self.pdf_values = get_2d_pdf(
                 max_sample=bins[-1],
                 alpha=alpha,

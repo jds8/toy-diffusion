@@ -105,6 +105,8 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     # total_weight = np.sum(weights)
     if alpha == 0.:
         total_weight = 1.  # for alpha=0.
+    elif alpha == 0.5:
+        total_weight = 0.7458913437205545  # for alpha=0.5
     elif alpha == 1.:
         total_weight = 0.37064413336206625  # for alpha=1.
     elif alpha == 1.5:
