@@ -658,7 +658,7 @@ def compute_ode_log_likelihood(
         f'{cfg.num_hutchinson_samples}.csv',
         index=False
     )
-    return ode_llk
+    return ode_llk, scaled_ode_llk
 
 def compute_histogram_errors(
         sample_trajs: torch.Tensor,
@@ -719,9 +719,7 @@ def compute_multiple_histogram_errors(
     errs = einops.rearrange(all_errors, 'n l -> (l n)')
     m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
     best_line = np.exp(m*np.log(subsample_sizes) + b)
-    suffix = title_prefix.find('_')
-    label_name = title_prefix[suffix+1:]
-    best_line_label = f"{label_name}: y = {m:.2f}x + {b:.2f}"
+    best_line_label = f"{title_prefix}: y = {m:.2f}x + {b:.2f}"
     error_mu = np.array(errors_list).mean(0)
     error_pct_5 = np.percentile(np.array(errors_list), 5, 0)
     error_pct_95 = np.percentile(np.array(errors_list), 95, 0)
@@ -733,7 +731,7 @@ def compute_multiple_histogram_errors(
         best_line_label,
         subsample_sizes,
         all_num_bins,
-        label_name,
+        title_prefix,
     )
 
 def plot_histogram_errors(
@@ -743,7 +741,7 @@ def plot_histogram_errors(
         error_measure_label: str,
         title_prefix: str,
         cfg: SampleConfig,
-        other_histogram_data: Optional[HistogramErrorBarOutput]=None,
+        other_histogram_data: Optional[List[HistogramErrorBarOutput]]=None,
 ):
     plt.clf()
 
@@ -753,29 +751,30 @@ def plot_histogram_errors(
 
     repeat_suffix = f' ({cfg.num_sample_batches} runs)'
     if other_histogram_data is not None:
-        error_mu = other_histogram_data.error_mu
-        error_pct_5 = other_histogram_data.error_pct_5
-        error_pct_95 = other_histogram_data.error_pct_95
-        other_best_line = other_histogram_data.best_line
-        other_best_line_label = other_histogram_data.best_line_label
-        other_title_prefix = other_histogram_data.other_title_prefix + repeat_suffix
-        other_subsample_sizes = other_histogram_data.subsample_sizes
-        lwr = error_mu - error_pct_5
-        upr = error_pct_95 - error_mu
-        other_yerr = np.array([lwr, upr])
-        ax1.errorbar(
-            other_subsample_sizes,
-            other_histogram_data.error_mu,
-            yerr=other_yerr,
-            label=other_title_prefix,
-            color='black',
-        )
-        ax1.plot(
-            other_subsample_sizes,
-            other_best_line,
-            label=other_best_line_label,
-            color='gray'
-        )
+        for other_histogram_datum in other_histogram_data:
+            error_mu = other_histogram_datum.error_mu
+            error_pct_5 = other_histogram_datum.error_pct_5
+            error_pct_95 = other_histogram_datum.error_pct_95
+            other_best_line = other_histogram_datum.best_line
+            other_best_line_label = other_histogram_datum.best_line_label
+            other_title_prefix = other_histogram_datum.other_title_prefix + repeat_suffix
+            other_subsample_sizes = other_histogram_datum.subsample_sizes
+            lwr = error_mu - error_pct_5
+            upr = error_pct_95 - error_mu
+            other_yerr = np.array([lwr, upr])
+            ax1.errorbar(
+                other_subsample_sizes,
+                other_histogram_datum.error_mu,
+                yerr=other_yerr,
+                label=other_title_prefix,
+                color='black',
+            )
+            ax1.plot(
+                other_subsample_sizes,
+                other_best_line,
+                label=other_best_line_label,
+                color='gray'
+            )
 
     increment_size = int(np.diff(subsample_sizes)[0])
     ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
@@ -791,16 +790,17 @@ def plot_histogram_errors(
     lwr = error_mu - error_pct_5
     upr = error_pct_95 - error_mu
     yerr = np.array([lwr, upr])
-    suffix_idx = title_prefix.find('_')
-    label_name = title_prefix[suffix_idx+1:] + repeat_suffix
 
-    ax1.errorbar(
-        subsample_sizes,
-        error_mu,
-        yerr=yerr,
-        label=label_name,
-        color='b',
-    )
+    try:
+        ax1.errorbar(
+            subsample_sizes,
+            error_mu,
+            yerr=yerr,
+            label=title_prefix,
+            color='b',
+        )
+    except:
+        import pdb; pdb.set_trace()
 
     # Compute theoretical rate
     bin_width = subsample_sizes ** (-1/3)  # Optimal
@@ -843,25 +843,26 @@ def plot_histogram_errors(
     )
 
     if other_histogram_data is not None:
-        ax3.errorbar(
-            other_subsample_sizes,
-            other_histogram_data.error_mu,
-            yerr=other_yerr,
-            label=other_title_prefix,
-            color='black',
-        )
-        ax3.plot(
-            other_subsample_sizes,
-            other_best_line,
-            label=other_best_line_label,
-            color='gray'
-        )
+        for other_histogram_datum in other_histogram_data:
+            ax3.errorbar(
+                other_subsample_sizes,
+                other_histogram_datum.error_mu,
+                yerr=other_yerr,
+                label=other_title_prefix,
+                color='black',
+            )
+            ax3.plot(
+                other_subsample_sizes,
+                other_best_line,
+                label=other_best_line_label,
+                color='gray'
+            )
 
     ax3.errorbar(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=label_name,
+        label=title_prefix,
         color='b',
     )
     ax3.set_xlabel(f'Log Sample Size')
@@ -1076,7 +1077,7 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     scale_fn = lambda ode: (
         ode - torch.tensor(cfg.example.example.sigma).log()
     )[non_nan_idx.squeeze()]
-    ode_llk = compute_ode_log_likelihood(
+    ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
         std,
@@ -1113,7 +1114,7 @@ def plot_chi_from_sample_trajs(
         std: ToyEvaluator,
         ode_llk: torch.Tensor,
         alpha: np.ndarray,
-):
+) -> torch.Tensor:
     x, pdf = plot_chi_hist(
         title_prefix,
         sample_trajs,
@@ -1131,8 +1132,9 @@ def plot_chi_from_sample_trajs(
     chi_ode_llk = ode_llk + (cfg.example.d / 2) * torch.tensor(2 * np.pi).log() + \
                  (cfg.example.d - 1) * sample_levels.log() - (cfg.example.d / 2 - 1) * \
                  torch.tensor(2.).log() - scipy.special.loggamma(cfg.example.d / 2)
+    chi_ode = chi_ode_llk.exp()
 
-    plt.scatter(sample_levels, chi_ode_llk.exp(), label='Density Estimates')
+    plt.scatter(sample_levels, chi_ode, label='Density Estimates')
     plt.plot(x, pdf, 'r-', label='Analytical PDF')
     plt.legend()
     plt.xlabel('Radius')
@@ -1145,6 +1147,8 @@ def plot_chi_from_sample_trajs(
         title_prefix,
         num_hutchinson_samples
     ))
+
+    return chi_ode
 
 def generate_diffusion_video(ode_llk, all_trajs, cfg):
     samples = all_trajs.squeeze().cpu()
@@ -1268,12 +1272,12 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
 def test_multivariate_gaussian(
-        end_time,
-        cfg,
-        sample_trajs,
-        std,
-        all_trajs,
-        other_histogram_data,
+        end_time: torch.Tensor,
+        cfg: SampleConfig,
+        sample_trajs: torch.Tensor,
+        std: ToyEvaluator,
+        all_trajs: torch.Tensor,
+        other_histogram_data: List[HistogramErrorBarOutput],
 ):
     torch.save(sample_trajs, f'{HydraConfig.get().run.dir}/{cfg.example.d}_dim_sample_trajs.pt')
     plt.clf()
@@ -1286,14 +1290,13 @@ def test_multivariate_gaussian(
         sample_trajs.shape[0],
         std.likelihood.alpha,
     ))
-
     title_prefix = 'MVN_diffusion'
     alpha_np = alpha.numpy().squeeze()
+    dd = stats.chi(cfg.example.d)
+    pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
+    calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
+    error = MISE(title_prefix)
     if cfg.run_histogram_convergence:
-        dd = stats.chi(cfg.example.d)
-        pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
-        calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
-        error = MISE(title_prefix)
         sample_trajs_list = einops.rearrange(
             sample_trajs,
             '(n c) b 1 -> n c b 1',
@@ -1338,7 +1341,7 @@ def test_multivariate_gaussian(
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.to(ode.device).logdet()
-    ode_llk = compute_ode_log_likelihood(
+    ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         sample_trajs,
         std,
@@ -1346,9 +1349,8 @@ def test_multivariate_gaussian(
         alpha,
         scale_fn,
     )
-
     cpu_sample_trajs = sample_trajs.cpu()
-    plot_chi_from_sample_trajs(
+    chi_ode = plot_chi_from_sample_trajs(
         title_prefix,
         cfg,
         cpu_sample_trajs,
@@ -1356,12 +1358,90 @@ def test_multivariate_gaussian(
         ode_llk[0][-1].cpu(),
         alpha_np,
     )
+    sample_levels_list = einops.rearrange(
+        sample_levels,
+        '(n c) -> n c',
+        n=cfg.num_sample_batches
+    )
+    if cfg.run_histogram_convergence:
+        pfode_prefix = 'PFODE'
+        pfode_error = MISE(pfode_prefix)
+        pfode_hebo = generate_pfode_hebo(
+            cfg,
+            sample_levels_list,
+            chi_ode,
+            alpha_np,
+            pfode_error,
+            calculator,
+            pfode_prefix,
+            hebo
+        )
+        more_histogram_data = other_histogram_data + [hebo]
+        plot_histogram_errors(
+            alpha_np,
+            cfg.example.d,
+            pfode_hebo,
+            pfode_error.label(),
+            pfode_prefix,
+            cfg,
+            more_histogram_data
+        )
     if cfg.example.d == 2:
         plot_ellipsoid(end_time, cfg, cpu_sample_trajs, std)
         plot_theta_from_sample_trajs(end_time, cfg, cpu_sample_trajs, std)
         generate_diffusion_video(ode_llk[0].cpu(), all_trajs, cfg)
 
     import pdb; pdb.set_trace()
+
+def generate_pfode_hebo(
+        cfg: SampleConfig,
+        sample_levels_list: torch.Tensor,
+        chi_ode: torch.Tensor,
+        alpha_np: np.array,
+        error: ErrorMeasure,
+        calculator: AnalyticalCalculator,
+        title_prefix: str,
+        hebo: HistogramErrorBarOutput,
+) -> HistogramErrorBarOutput:
+    batched_ode = einops.rearrange(
+        chi_ode,
+        '(n c) -> n c',
+        n=cfg.num_sample_batches
+    )
+    batch_errors = []
+    for sap, ode in zip(sample_levels_list, batched_ode):
+        sap_values, sap_idx = sap.sort()
+        pfode_props = ode[sap_idx]
+        errors = []
+        subsample_sizes_list = []
+        for subsample_size in hebo.subsample_sizes:
+            subsample_size_idx = int(subsample_size)
+            sub_pfode_props = pfode_props[:subsample_size_idx]
+            subsap_values = sap_values[:subsample_size_idx].numpy()
+            pfode_bins = np.append(alpha_np, subsap_values)
+            imse = error.error(calculator, sub_pfode_props, pfode_bins, alpha_np)
+            errors.append(imse)
+        error.clean_up()
+        batch_errors.append(np.array(errors))
+    subsaps = einops.repeat(hebo.subsample_sizes, 'l -> (l n)', n=sample_levels_list.shape[0])
+    batch_errors_np = np.array(batch_errors)
+    errs = einops.rearrange(batch_errors_np, 'n l -> (l n)')
+    m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
+    best_line = np.exp(m*np.log(hebo.subsample_sizes) + b)
+    best_line_label = f"{title_prefix}: y = {m:.2f}x + {b:.2f}"
+    error_mu = batch_errors_np.mean(0)
+    error_pct_5 = np.percentile(batch_errors_np, 5, 0)
+    error_pct_95 = np.percentile(batch_errors_np, 95, 0)
+    return HistogramErrorBarOutput(
+        error_mu,
+        error_pct_5,
+        error_pct_95,
+        best_line,
+        best_line_label,
+        subsaps,
+        hebo.all_num_bins,
+        title_prefix,
+    )
 
 def test_brownian_motion(end_time, cfg, sample_trajs, std):
     dt = end_time / (cfg.example.sde_steps-1)
@@ -1435,7 +1515,9 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
                  ((cfg.example.sde_steps - 1) / 2 - 1) * torch.tensor(2.).log() - \
                  scipy.special.loggamma((cfg.example.sde_steps - 1) / 2)
 
-    plt.scatter(sample_levels, chi_ode_llk.exp(), label='Density Estimates')
+    chi_ode = chi_ode_llk.exp()
+
+    plt.scatter(sample_levels, chi_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
@@ -1447,6 +1529,8 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
         HydraConfig.get().run.dir,
         num_hutchinson_samples
     ))
+
+    return chi_ode
 
 def test_brownian_motion_diff(
         end_time,
@@ -1471,7 +1555,7 @@ def test_brownian_motion_diff(
     )
     if cfg.run_histogram_convergence:
         # error = SimpsonsMISE()
-        error = MISE(title_prefix)
+        pfode_error = MISE(title_prefix)
         sample_trajs_list = einops.rearrange(
             sample_trajs,
             '(n c) b 1 -> n c b 1',
@@ -1482,14 +1566,14 @@ def test_brownian_motion_diff(
             alpha_np,
             std,
             calculator,
-            error,
+            pfode_error,
             title_prefix
         )
         plot_histogram_errors(
             alpha_np,
             cfg.example.sde_steps-1,
             hebo,
-            error.label(),
+            pfode_error.label(),
             title_prefix,
             cfg,
             other_histogram_data
@@ -1559,28 +1643,39 @@ def test_brownian_motion_diff(
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    if cfg.debug:
-        sample_trajs = dist.Normal(0, 1).sample(sample_trajs.shape)
-        uncond_analytical_llk = (
-            dist.Normal(0, 1).log_prob(sample_trajs) - dt.sqrt().log()
-        ).sum(1).squeeze()
-        tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
-        print(f'true tail prob: {tail}')
-        analytical_llk = uncond_analytical_llk - np.log(tail.item())
-        ode_llk = (analytical_llk, 0)
-        print("DEBUG mode is on!")
-    else:
-        ode_llk = compute_ode_log_likelihood(
-            analytical_llk,
-            sample_trajs,
-            std,
-            cfg,
-            alpha,
-            scale_fn,
-        )
-
+    ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
+        analytical_llk,
+        sample_trajs,
+        std,
+        cfg,
+        alpha,
+        scale_fn,
+    )
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], x, pdf, cfg)
+        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], x, pdf, cfg)
+        if cfg.run_histogram_convergence:
+            pfode_prefix = 'PFODE'
+            pfode_error = MISE(pfode_prefix)
+            pfode_hebo = generate_pfode_hebo(
+                cfg,
+                sample_levels_list,
+                chi_ode,
+                alpha_np,
+                pfode_error,
+                calculator,
+                pfode_prefix,
+                hebo
+            )
+            more_histogram_data = other_histogram_data + [hebo]
+            plot_histogram_errors(
+                alpha_np,
+                cfg.example.d,
+                pfode_hebo,
+                pfode_error.label(),
+                pfode_prefix,
+                cfg,
+                more_histogram_data
+            )
 
     import pdb; pdb.set_trace()
 
@@ -1993,7 +2088,7 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
-        test(end_time, cfg, out_trajs, std, sample_trajs, hebo)
+        test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()
 
 
