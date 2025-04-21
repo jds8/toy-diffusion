@@ -635,12 +635,10 @@ def compute_ode_log_likelihood(
     rkl_pfode = (scaled_ode_llk - analytical_llk).mean()
     print('\nreverse KL divergence: {}'.format(rkl_pfode))
 
-    rkl_hists = []
-    for hist_llk in hist_llks:
-        rkl_hist = (hist_llk - analytical_llk).mean()
-        rkl_hists.append(rkl_hist)
-    rkl_hists_tensor = torch.tensor(rkl_hists)
-    quantiles = rkl_hists_tensor.quantile(torch.tensor([0.05, 0.5, 0.95]))
+    rkl_hists = torch.tensor([
+        (hist_llk-analytical_llk).mean() for hist_llk in hist_llks
+    ])
+    quantiles = rkl_hists.quantile(torch.tensor([0.05, 0.5, 0.95]))
     print('\n median reverse KL divergence: {}'.format(quantiles[1]))
 
     torch.save(
