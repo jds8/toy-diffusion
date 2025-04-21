@@ -662,7 +662,7 @@ def make_performance_v_samples(cfg):
         target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
         num_saps_not_in_region_list = [torch.tensor(0., device=device)] * cfg.total_rounds
         cfg_obj.likelihood.alpha = alpha
-        test_fn = cfg_obj.likelihood.get_condition
+        test_fn = hydra.utils.instantiate(cfg_obj.likelihood).get_condition
         quantile_map = {}
 
         omega_cfg = OmegaConf.to_object(cfg)
