@@ -1491,7 +1491,12 @@ class MISE(ErrorMeasure):
                 imse += result
             return imse
 
-        mse = compute_imse(lambda x: analytical_calculator.quadrature_fn(x, alpha), empirical_props, bins, alpha)
+        mse = compute_imse(
+            lambda x: analytical_calculator.quadrature_fn(x, alpha),
+            empirical_props,
+            bins,
+            alpha
+        )
 
         x_arr = torch.tensor(x_values)
         x_sorted = x_arr.sort()
