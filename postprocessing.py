@@ -598,11 +598,11 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     if isinstance(omega_cfg.example, GaussianExampleConfig):
         return saps * cfg.example.sigma + cfg.example.mu
     elif isinstance(omega_cfg.example, MultivariateGaussianExampleConfig):
-        torch_sigma = torch.tensor(omega_cfg.example.sigma)
+        torch_sigma = torch.tensor(omega_cfg.example.sigma, device=saps.device)
         L = torch_sigma.cholesky()
-        return torch.matmul(L, saps) + torch.tensor(omega_cfg.example.mu)
+        return torch.matmul(L, saps) + torch.tensor(omega_cfg.example.mu, device=saps.device)
     elif isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
-        dt = torch.tensor(1. / saps.shape[1])
+        dt = torch.tensor(1. / saps.shape[1], device=saps.device)
         scaled_saps = saps * dt.sqrt()
         saps_raw = torch.cat([
             torch.zeros(saps.shape[0], 1, 1, device=device),
