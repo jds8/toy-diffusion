@@ -656,12 +656,13 @@ def make_performance_v_samples(cfg):
                     except Exception as e:
                         import pdb; pdb.set_trace()
 
-        std = ContinuousEvaluator(cfg=cfg)
-        target = get_target(std)
+        cfg_obj = OmegaConf.to_object(cfg)
+        target = get_target(cfg_obj)
         target_rel_errors = [torch.tensor(0., device=device)] * cfg.total_rounds
         target_Ns = [torch.tensor(0, device=device)] * cfg.total_rounds
         num_saps_not_in_region_list = [torch.tensor(0., device=device)] * cfg.total_rounds
-        test_fn = std.likelihood.get_condition
+        cfg_obj.likelihood.alpha = alpha
+        test_fn = cfg_obj.likelihood.get_condition
         quantile_map = {}
 
         omega_cfg = OmegaConf.to_object(cfg)
