@@ -687,7 +687,7 @@ def make_performance_v_samples(cfg):
         for sample_idx, num_samples in enumerate([0]+cfg.samples[:-1]):
             # for each sample size, construct error bars
             for i, (data, all_log_qrobs) in enumerate(zip(sample_data, sample_log_qrobs)):
-                if data is None:
+                if data is None or data.shape[0] < num_samples:
                     continue
                 # for each subsample of data, compute IS estimate
                 saps = data[num_samples:cfg.samples[sample_idx]]
