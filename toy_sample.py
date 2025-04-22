@@ -653,7 +653,7 @@ def compute_ode_log_likelihood(
             dtype=rkl_hists.dtype
         )
     )
-    print('\n median reverse KL divergence: {}'.format(quantiles[1]))
+    print(f'\n median reverse KL divergence (0.05, 0.5, 0.95): {quantiles}')
 
     torch.save(
         ode_llk_val,
@@ -662,7 +662,7 @@ def compute_ode_log_likelihood(
     headers = [
         'Avg. Rel. Error',
         'Reverse KL (PFODE)',
-        'Reverse KL (Histogram) quantiles',
+        'Reverse KL (Histogram) quantiles (0.05, 0.5, 0.95)',
         'Time',
         'Model',
         'Diffusion Timesteps',
@@ -1383,7 +1383,7 @@ def test_multivariate_gaussian(
             torch.matmul(L, L.T)
         )
     dim = traj.shape[1]
-    tail = 1 - scipy.stats.chi2.cdf(alpha_np, d=dim)  # tail for dim-dimensional standard normal
+    tail = 1 - scipy.stats.chi2.cdf(alpha_np, df=dim)  # tail for dim-dimensional standard normal
     print(f'tail proability: {tail}')
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - np.log(tail)
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
@@ -1596,9 +1596,10 @@ def get_hist_llks(
     )):
         sample_levels = sample_trajs[idx].norm(dim=[1, 2]).cpu().sort().values  # b
         all_bins_tensor = torch.tensor(all_bins[-1])  # n
+        all_bins_tensor[-1] += 1e-4
         repeated_all_bins = einops.repeat(all_bins_tensor, 'n -> n b', b=sample_levels.shape[0])
         repeated_sample_levels = einops.repeat(sample_levels, 'b -> n b', n=all_bins[-1].shape[0])
-        bin_idx = (repeated_sample_levels < repeated_all_bins).sum(dim=0) - 1
+        bin_idx = (repeated_all_bins <= repeated_sample_levels).sum(dim=0) - 1
         hist_llk = torch.tensor(all_props[-1][bin_idx]).log()
         hist_llks.append(hist_llk)
     return hist_llks
@@ -2132,18 +2133,26 @@ def sample(cfg):
                 title_prefix,
                 cfg,
             )
-            hist_llks = get_hist_llks(sample_traj_out.samples, hebo)
+            hist_llks = get_hist_llks(sample_trajs_list, hebo)
             rkls = []
             for hist_llk, sample_trajs in zip(hist_llks, sample_trajs_list):
                 sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
                 sample_levels = sorted_sample_levels.values
                 analytical_llk = np.log(dd.pdf(sample_levels))
                 rkls.append((hist_llk-analytical_llk).mean())
+                # plt.clf()
+                # plt.plot(sample_levels, np.exp(analytical_llk))
+                # plt.plot(sample_levels, hist_llk.exp())
             rkl_tensor = torch.tensor(rkls)
-            quantiles = rkl_tensor.quantile(
-                torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
+            quantiles = torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
+            quantile_values = rkl_tensor.quantile(quantiles)
+            print(f'\nanalytical KL quantiles (0.05, 0.5, 0.95): {quantiles}\n')
+            torch.save({
+                    'quantiles': quantiles.cpu().numpy(),
+                    'values': quantile_values.cpu().numpy(),
+                },
+                f'{HydraConfig.get().run.dir}/analytical_rkl_quantiles.pt'
             )
-            print(f'\n analytical histogram quantiles: {quantiles}\n')
             if type(std.example) == MultivariateGaussianExampleConfig:
                 plot_chi_hist(
                     title_prefix,
