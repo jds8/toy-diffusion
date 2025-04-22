@@ -612,6 +612,16 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     else:
         raise NotImplementedError
 
+def get_run_type(cfg_obj: PostProcessingConfig):
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        return 'MultivariateGaussian'
+    elif isinstance(cfg_obj.example, GaussianExampleConfig):
+        return 'Gaussian'
+    elif isinstance(cfg_obj.example, BrownianMotionDiffExampleConfig):
+        return 'BrownianMotionDiff'
+    else:
+        raise NotImplementedError
+
 def make_performance_v_samples(cfg):
     """
     1) Load saps and log_qrobs data
@@ -724,7 +734,7 @@ def make_performance_v_samples(cfg):
             ax.scatter(saps, error[1], marker='o', label=f'Diffusion (N={saps})', color='blue')
 
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
-        run_type = 'Gaussian' if 'Gaussian' in cfg.model_name else 'BrownianMotionDiff'
+        run_type = get_run_type(cfg_obj)
         sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
         for saps, error in sap_error_pairs:
             ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red', linewidth=2.5)
