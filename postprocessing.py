@@ -774,6 +774,7 @@ def make_performance_v_samples(cfg):
             performance_v_samples(alpha, title)
         )
         plt.savefig(error_bar_file)
+        print(f'saved {error_bar_file}')
         plt.clf()
 
 
