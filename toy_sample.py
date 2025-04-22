@@ -635,10 +635,24 @@ def compute_ode_log_likelihood(
     rkl_pfode = (scaled_ode_llk - analytical_llk).mean()
     print('\nreverse KL divergence: {}'.format(rkl_pfode))
 
+    sample_trajs_list = einops.rearrange(
+        sample_trajs,
+        '(n c) b 1 -> n c b 1',
+        n=cfg.num_sample_batches
+    )
+    sample_levels = sample_trajs_list.norm(dim=[2, 3]).sort(dim=1).values
+    dim = sample_trajs.shape[1]
+    dd = scipy.stats.chi(dim)
+    pdfs = np.log(dd.pdf(sample_levels))
     rkl_hists = torch.tensor([
-        (hist_llk-analytical_llk).mean() for hist_llk in hist_llks
+        (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, pdfs)
     ])
-    quantiles = rkl_hists.quantile(torch.tensor([0.05, 0.5, 0.95]))
+    quantiles = rkl_hists.quantile(
+        torch.tensor(
+            [0.05, 0.5, 0.95],
+            dtype=rkl_hists.dtype
+        )
+    )
     print('\n median reverse KL divergence: {}'.format(quantiles[1]))
 
     torch.save(
@@ -1330,12 +1344,12 @@ def test_multivariate_gaussian(
     pdf = lambda x, alpha: dd.pdf(x) / (1 - dd.cdf(alpha))
     calculator = SimpsonsRuleCalculator(pdf, cfg.pdf_values_dir)
     error = MISE(title_prefix)
+    sample_trajs_list = einops.rearrange(
+        sample_trajs,
+        '(n c) b 1 -> n c b 1',
+        n=cfg.num_sample_batches
+    )
     if cfg.run_histogram_convergence:
-        sample_trajs_list = einops.rearrange(
-            sample_trajs,
-            '(n c) b 1 -> n c b 1',
-            n=cfg.num_sample_batches
-        )
         hebo = compute_multiple_histogram_errors(
             sample_trajs_list,
             alpha_np,
@@ -1369,13 +1383,13 @@ def test_multivariate_gaussian(
             torch.matmul(L, L.T)
         )
     dim = traj.shape[1]
-    tail = 1 - scipy.stats.chi(dim).cdf(alpha_np)
+    tail = 1 - scipy.stats.chi2.cdf(alpha_np, d=dim)  # tail for dim-dimensional standard normal
     print(f'tail proability: {tail}')
     non_nan_analytical_llk = datapoint_dist.log_prob(traj.squeeze(-1)).cpu() - np.log(tail)
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.to(ode.device).logdet()
-    hist_llks = get_hist_llks(sample_trajs, hebo)
+    hist_llks = get_hist_llks(sample_trajs_list, hebo)
     ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         hist_llks,
@@ -1566,15 +1580,26 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
 
     return chi_ode
 
-def get_hist_llks(sample_trajs: torch.Tensor, hebo: HistogramErrorBarOutput):
+def get_hist_llks(
+        sample_trajs: torch.Tensor,
+        hebo: HistogramErrorBarOutput
+) -> List[torch.Tensor]:
+    """
+    sample_levels has shape b
+    all_bins has shape n
+    all_props has shape n-1
+    """
     hist_llks = []
-    for all_bins, all_props in zip(hebo.all_bins, hebo.all_props):
-        sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()
-        import pdb; pdb.set_trace()
-        repeated_all_bins = einops.repeat(all_bins[-1], 'n -> n b', b=sample_levels.shape[0])
+    for idx, (all_bins, all_props) in enumerate(zip(
+            hebo.all_bins_list,
+            hebo.all_props_list
+    )):
+        sample_levels = sample_trajs[idx].norm(dim=[1, 2]).cpu().sort().values  # b
+        all_bins_tensor = torch.tensor(all_bins[-1])  # n
+        repeated_all_bins = einops.repeat(all_bins_tensor, 'n -> n b', b=sample_levels.shape[0])
         repeated_sample_levels = einops.repeat(sample_levels, 'b -> n b', n=all_bins[-1].shape[0])
-        bin_idx = (repeated_sample_levels <= repeated_all_bins).sum(dim=0)
-        hist_llk = torch.tensor(hebo.all_props[-1][bin_idx])
+        bin_idx = (repeated_sample_levels < repeated_all_bins).sum(dim=0) - 1
+        hist_llk = torch.tensor(all_props[-1][bin_idx]).log()
         hist_llks.append(hist_llk)
     return hist_llks
 
@@ -1599,14 +1624,14 @@ def test_brownian_motion_diff(
         pdf_2d_quadrature_bm,
         cfg.pdf_values_dir
     )
+    sample_trajs_list = einops.rearrange(
+        sample_trajs,
+        '(n c) b 1 -> n c b 1',
+        n=cfg.num_sample_batches
+    )
     if cfg.run_histogram_convergence:
         # error = SimpsonsMISE()
         pfode_error = MISE(title_prefix)
-        sample_trajs_list = einops.rearrange(
-            sample_trajs,
-            '(n c) b 1 -> n c b 1',
-            n=cfg.num_sample_batches
-        )
         hebo = compute_multiple_histogram_errors(
             sample_trajs_list,
             alpha_np,
@@ -1689,7 +1714,7 @@ def test_brownian_motion_diff(
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    hist_llks = get_hist_llks(sample_trajs, hebo)
+    hist_llks = get_hist_llks(sample_trajs_list, hebo)
     ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         analytical_llk,
         hist_llks,
@@ -2108,6 +2133,17 @@ def sample(cfg):
                 cfg,
             )
             hist_llks = get_hist_llks(sample_traj_out.samples, hebo)
+            rkls = []
+            for hist_llk, sample_trajs in zip(hist_llks, sample_trajs_list):
+                sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
+                sample_levels = sorted_sample_levels.values
+                analytical_llk = np.log(dd.pdf(sample_levels))
+                rkls.append((hist_llk-analytical_llk).mean())
+            rkl_tensor = torch.tensor(rkls)
+            quantiles = rkl_tensor.quantile(
+                torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
+            )
+            print(f'\n analytical histogram quantiles: {quantiles}\n')
             if type(std.example) == MultivariateGaussianExampleConfig:
                 plot_chi_hist(
                     title_prefix,
