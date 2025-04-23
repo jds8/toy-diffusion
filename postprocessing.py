@@ -4,7 +4,7 @@ import os
 import re
 import matplotlib.pyplot as plt
 import numpy as np
-from typing_extensions import List
+from typing_extensions import List, Tuple
 
 import argparse
 import torch
@@ -612,7 +612,7 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     else:
         raise NotImplementedError
 
-def get_run_type(cfg_obj: PostProcessingConfig) -> List[str, str]:
+def get_run_type(cfg_obj: PostProcessingConfig) -> Tuple[str, str]:
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
         return 'MultivariateGaussian', f'Multivariate Gaussian {cfg_obj.example.d}D'
     elif isinstance(cfg_obj.example, GaussianExampleConfig):
