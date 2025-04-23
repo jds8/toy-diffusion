@@ -644,7 +644,7 @@ def compute_ode_log_likelihood(
     sample_levels = unsorted_sample_levels.sort(dim=1).values
     dim = sample_trajs.shape[1]
     dd = scipy.stats.chi(dim)
-    pdfs = torch.tensor(np.log(dd.pdf(sample_levels)))
+    pdfs = torch.tensor(np.log(dd.pdf(sample_levels.cpu().numpy())))
     rkl_hists = torch.tensor([
         (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, pdfs)
     ])
