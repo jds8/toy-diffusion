@@ -640,10 +640,11 @@ def compute_ode_log_likelihood(
         '(n c) b 1 -> n c b 1',
         n=cfg.num_sample_batches
     )
-    sample_levels = sample_trajs_list.norm(dim=[2, 3]).sort(dim=1).values
+    unsorted_sample_levels = sample_trajs_list.norm(dim=[2, 3])[:, :hist_llks[0].shape[0]]
+    sample_levels = unsorted_sample_levels.sort(dim=1).values
     dim = sample_trajs.shape[1]
     dd = scipy.stats.chi(dim)
-    pdfs = np.log(dd.pdf(sample_levels))
+    pdfs = torch.tensor(np.log(dd.pdf(sample_levels)))
     rkl_hists = torch.tensor([
         (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, pdfs)
     ])
@@ -788,16 +789,16 @@ def plot_histogram_errors(
     repeat_suffix = f' ({cfg.num_sample_batches} runs)'
     if other_histogram_data is not None:
         for other_histogram_datum in other_histogram_data:
-            error_mu = other_histogram_datum.error_mu
-            error_pct_5 = other_histogram_datum.error_pct_5
-            error_pct_95 = other_histogram_datum.error_pct_95
+            other_error_mu = other_histogram_datum.error_mu
+            other_error_pct_5 = other_histogram_datum.error_pct_5
+            other_error_pct_95 = other_histogram_datum.error_pct_95
             other_best_line = other_histogram_datum.best_line
             other_best_line_label = other_histogram_datum.best_line_label
             other_title_prefix = other_histogram_datum.other_title_prefix + repeat_suffix
             other_subsample_sizes = other_histogram_datum.subsample_sizes
-            lwr = error_mu - error_pct_5
-            upr = error_pct_95 - error_mu
-            other_yerr = np.array([lwr, upr])
+            other_lwr = other_error_mu - other_error_pct_5
+            other_upr = other_error_pct_95 - other_error_mu
+            other_yerr = np.array([other_lwr, other_upr])
             ax1.errorbar(
                 other_subsample_sizes,
                 other_histogram_datum.error_mu,
@@ -827,21 +828,18 @@ def plot_histogram_errors(
     upr = error_pct_95 - error_mu
     yerr = np.array([lwr, upr])
 
-    try:
-        ax1.errorbar(
-            subsample_sizes,
-            error_mu,
-            yerr=yerr,
-            label=title_prefix,
-            color='b',
-        )
-    except:
-        import pdb; pdb.set_trace()
+    ax1.errorbar(
+        subsample_sizes,
+        error_mu,
+        yerr=yerr,
+        label=title_prefix + repeat_suffix,
+        color='b',
+    )
 
     # Compute theoretical rate
     bin_width = subsample_sizes ** (-1/3)  # Optimal
     # bin_width = 1 / np.log2(subsample_sizes)  # Sturges Rule
-    # jheoretical_rate = 1 / (subsample_sizes * bin_width)
+    # theoretical_rate = 1 / (subsample_sizes * bin_width)
     one_half_rate = 1 / (subsample_sizes ** (1/2))
     two_thirds_rate = 1 / (subsample_sizes ** (2/3))
     four_fifths_rate = 1 / (subsample_sizes ** (4/5))
@@ -880,16 +878,16 @@ def plot_histogram_errors(
 
     if other_histogram_data is not None:
         for other_histogram_datum in other_histogram_data:
-            error_mu = other_histogram_datum.error_mu
-            error_pct_5 = other_histogram_datum.error_pct_5
-            error_pct_95 = other_histogram_datum.error_pct_95
+            other_error_mu = other_histogram_datum.error_mu
+            other_error_pct_5 = other_histogram_datum.error_pct_5
+            other_error_pct_95 = other_histogram_datum.error_pct_95
             other_best_line = other_histogram_datum.best_line
             other_best_line_label = other_histogram_datum.best_line_label
             other_title_prefix = other_histogram_datum.other_title_prefix + repeat_suffix
             other_subsample_sizes = other_histogram_datum.subsample_sizes
-            lwr = error_mu - error_pct_5
-            upr = error_pct_95 - error_mu
-            other_yerr = np.array([lwr, upr])
+            other_lwr = other_error_mu - other_error_pct_5
+            other_upr = other_error_pct_95 - other_error_mu
+            other_yerr = np.array([other_lwr, other_upr])
             ax3.errorbar(
                 other_subsample_sizes,
                 other_histogram_datum.error_mu,
@@ -908,7 +906,7 @@ def plot_histogram_errors(
         subsample_sizes,
         error_mu,
         yerr=yerr,
-        label=title_prefix,
+        label=title_prefix + repeat_suffix,
         color='b',
     )
     ax3.set_xlabel(f'Log Sample Size')
@@ -1487,6 +1485,8 @@ def generate_pfode_hebo(
         best_line,
         best_line_label,
         subsaps,
+        hebo.all_props_list,
+        hebo.all_bins_list,
         hebo.all_num_bins,
         title_prefix,
     )
@@ -1590,11 +1590,13 @@ def get_hist_llks(
     all_props has shape n-1
     """
     hist_llks = []
+    max_subsample_size = hebo.subsample_sizes[-1].astype(int)
     for idx, (all_bins, all_props) in enumerate(zip(
             hebo.all_bins_list,
             hebo.all_props_list
     )):
-        sample_levels = sample_trajs[idx].norm(dim=[1, 2]).cpu().sort().values  # b
+        unsorted_sample_levels = sample_trajs[idx].norm(dim=[1, 2])[:max_subsample_size]
+        sample_levels = unsorted_sample_levels.cpu().sort().values  # b
         all_bins_tensor = torch.tensor(all_bins[-1])  # n
         all_bins_tensor[-1] += 1e-4
         repeated_all_bins = einops.repeat(all_bins_tensor, 'n -> n b', b=sample_levels.shape[0])
@@ -2095,7 +2097,7 @@ def sample(cfg):
             sample_trajs_list = []
             for i in range(cfg.num_sample_batches):
                 if saps is None:
-                    sample_traj_out = A(torch.randn(10*cfg.num_samples, dim, 1))
+                    sample_traj_out = A(torch.randn(100*cfg.num_samples, dim, 1))
                     if type(std.example) == MultivariateGaussianExampleConfig:
                         cond_idx = (sample_traj_out.samples.norm(dim=[1, 2]) > alpha)
                     elif type(std.example) == BrownianMotionDiffExampleConfig:
@@ -2138,15 +2140,16 @@ def sample(cfg):
             for hist_llk, sample_trajs in zip(hist_llks, sample_trajs_list):
                 sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
                 sample_levels = sorted_sample_levels.values
-                analytical_llk = np.log(dd.pdf(sample_levels))
-                rkls.append((hist_llk-analytical_llk).mean())
+                max_sample_size = hist_llk.shape[0]
+                analytical_llk = np.log(dd.pdf(sample_levels[:max_sample_size]))
+                rkls.append((hist_llk-torch.tensor(analytical_llk)).mean())
                 # plt.clf()
                 # plt.plot(sample_levels, np.exp(analytical_llk))
                 # plt.plot(sample_levels, hist_llk.exp())
             rkl_tensor = torch.tensor(rkls)
             quantiles = torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
             quantile_values = rkl_tensor.quantile(quantiles)
-            print(f'\nanalytical KL quantiles (0.05, 0.5, 0.95): {quantiles}\n')
+            print(f'\nanalytical KL quantiles (0.05, 0.5, 0.95): {quantile_values}\n')
             torch.save({
                     'quantiles': quantiles.cpu().numpy(),
                     'values': quantile_values.cpu().numpy(),
