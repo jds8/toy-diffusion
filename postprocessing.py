@@ -635,13 +635,13 @@ def make_performance_v_samples(cfg):
     will be for sample sizes 10x and 100x larger than the smallest IS sample size.
     """
     assert len(cfg.alphas) > 0 and len(cfg.samples) > 0
-    directory = f'{cfg.figs_dir}/{cfg.model_name}'
+    figs_dir = f'{cfg.figs_dir}/{cfg.model_name}'
     for alpha in cfg.alphas:
         # collect all sample data for each round
         sample_data = [None] * cfg.total_rounds
         sample_log_qrobs = [None] * cfg.total_rounds
-        for filename in os.listdir(directory):
-            file_path = os.path.join(directory, filename)
+        for filename in os.listdir(figs_dir):
+            file_path = os.path.join(figs_dir, filename)
             if re.search(f'alpha={alpha}_saps_[0-9]+_[0-9]+_round', file_path) is not None:
                 data = torch.load(file_path, map_location=device, weights_only=True)
                 rnd = get_round(file_path)
@@ -677,7 +677,7 @@ def make_performance_v_samples(cfg):
 
         omega_cfg = OmegaConf.to_object(cfg)
         if not isinstance(omega_cfg.example, BrownianMotionDiffExampleConfig):
-            true, _ = get_true_tail_prob(directory, alpha)
+            true, _ = get_true_tail_prob(figs_dir, alpha)
             true = true.to('cpu')
         else:
             batch_size = 1690000
