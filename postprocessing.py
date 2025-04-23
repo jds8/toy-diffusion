@@ -612,13 +612,13 @@ def get_saps_raw(saps, cfg) -> torch.Tensor:
     else:
         raise NotImplementedError
 
-def get_run_type(cfg_obj: PostProcessingConfig):
+def get_run_type(cfg_obj: PostProcessingConfig) -> List[str, str]:
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
-        return 'MultivariateGaussian'
+        return 'MultivariateGaussian', f'Multivariate Gaussian {cfg_obj.example.d}D'
     elif isinstance(cfg_obj.example, GaussianExampleConfig):
-        return 'Gaussian'
+        return 'Gaussian', 'Gaussian'
     elif isinstance(cfg_obj.example, BrownianMotionDiffExampleConfig):
-        return 'BrownianMotionDiff'
+        return 'BrownianMotionDiff', f'Brownian Motion ({cfg_obj.example.sde_steps-1} Steps)'
     else:
         raise NotImplementedError
 
@@ -734,7 +734,7 @@ def make_performance_v_samples(cfg):
             ax.scatter(saps, error[1], marker='o', label=f'Diffusion (N={saps})', color='blue')
 
         empirical_error = torch.load('empirical_errors.pt', weights_only=True)
-        run_type = get_run_type(cfg_obj)
+        run_type, model = get_run_type(cfg_obj)
         sap_error_pairs = [(sap, error) for sap, error in empirical_error[run_type][alpha].items()]
         for saps, error in sap_error_pairs:
             ax.plot([saps, saps], [error[0], error[2]], alpha=0.3, color='red', linewidth=2.5)
@@ -746,7 +746,6 @@ def make_performance_v_samples(cfg):
         ax2.legend()
         f.supxlabel('Monte Carlo Samples')
         f.supylabel('Relative Error of Estimate')
-        model = 'Gaussian' if run_type == 'Gaussian' else 'Brownian Motion'
         f.suptitle(f'{model} Performance vs. Number of Samples\n(alpha={alpha}, dim={cfg.diffusion.dim})')
 
         ax2.set_xscale('log')
