@@ -633,7 +633,7 @@ def compute_ode_log_likelihood(
     print('\naverage relative error: {}'.format(avg_rel_error))
 
     rkl_pfode = (scaled_ode_llk - analytical_llk).mean()
-    print('\nreverse KL divergence: {}'.format(rkl_pfode))
+    print('\nreverse KL divergence btwn diffusion and analytical: {}'.format(rkl_pfode))
 
     sample_trajs_list = einops.rearrange(
         sample_trajs,
@@ -644,9 +644,11 @@ def compute_ode_log_likelihood(
     sample_levels = unsorted_sample_levels.sort(dim=1).values
     dim = sample_trajs.shape[1]
     dd = scipy.stats.chi(dim)
-    pdfs = torch.tensor(np.log(dd.pdf(sample_levels.cpu().numpy())))
+    samples_cpu = sample_levels.cpu().numpy()
+    log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
+    log_pdfs_tensor = torch.tensor(log_pdfs)
     rkl_hists = torch.tensor([
-        (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, pdfs)
+        (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, log_pdfs_tensor)
     ])
     quantiles = rkl_hists.quantile(
         torch.tensor(
@@ -654,7 +656,7 @@ def compute_ode_log_likelihood(
             dtype=rkl_hists.dtype
         )
     )
-    print(f'\n median reverse KL divergence (0.05, 0.5, 0.95): {quantiles}')
+    print(f'\n reverse KL divergence quantiles (0.05, 0.5, 0.95) btwn hist of diffusion and analytical: {quantiles}')
 
     torch.save(
         ode_llk_val,
@@ -2142,7 +2144,9 @@ def sample(cfg):
                 sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
                 sample_levels = sorted_sample_levels.values
                 max_sample_size = hist_llk.shape[0]
-                analytical_llk = np.log(dd.pdf(sample_levels[:max_sample_size]))
+                samples_cpu = sample_levels.cpu().numpy()[:max_sample_size]
+                log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
+                analytical_llk = torch.tensor(log_pdfs)
                 rkls.append((hist_llk-torch.tensor(analytical_llk)).mean())
                 # plt.clf()
                 # plt.plot(sample_levels, np.exp(analytical_llk))
