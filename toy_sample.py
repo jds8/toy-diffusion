@@ -1457,7 +1457,8 @@ def generate_pfode_hebo(
         n=cfg.num_sample_batches
     )
     batch_errors = []
-    for sap, ode in zip(sample_levels_list, batched_ode):
+    sample_levels_list_cpu = sample_levels_list.cpu()
+    for sap, ode in zip(sample_levels_list_cpu, batched_ode):
         errors = []
         subsample_sizes_list = []
         for subsample_size in hebo.subsample_sizes:
@@ -1469,7 +1470,7 @@ def generate_pfode_hebo(
             errors.append(imse)
         error.clean_up()
         batch_errors.append(np.array(errors))
-    subsaps = einops.repeat(hebo.subsample_sizes, 'l -> (l n)', n=sample_levels_list.shape[0])
+    subsaps = einops.repeat(hebo.subsample_sizes, 'l -> (l n)', n=sample_levels_list_cpu.shape[0])
     batch_errors_np = np.array(batch_errors)
     errs = einops.rearrange(batch_errors_np, 'n l -> (l n)')
     m, b = np.polyfit(np.log(subsaps), np.log(errs), 1)
