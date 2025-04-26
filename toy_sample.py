@@ -1319,6 +1319,33 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
+def plot_error_vs_sample_size(
+        sample_trajs_list: torch.Tensor,
+        alpha_cpu: np.ndarray,
+        std: ToyEvaluator,
+        cfg: SampleConfig,
+        hebo: HistogramErrorBarOutput,
+):
+    """ 
+    Computes a tail integral estimate of the probability density function
+    starting at alpha and integrating to infinity using the histogram 
+    approximation and compares this estimate with the analytical tail 
+    integral using the Chi distribution from scipy. The historam 
+    approximation is constructed from subsamples in sample_trajs_list.
+    The first dimension of sample_trajs_list is the number of runs
+    used to construct error bars. This function plots error for each
+    histogram approximation given the sample size.
+    """
+    plt.clf()
+    sample_levels = sample_trajs_list.norm(dim=[2, 3])
+    sample_levels = einops.rearrange(
+        sample_levels,
+        '(n c) b -> n c b',
+        n=sample_trajs_list.shape[0]
+    )
+    sample_levels = sample_levels.cpu().numpy()
+    hebo
+
 def test_multivariate_gaussian(
         end_time: torch.Tensor,
         cfg: SampleConfig,
@@ -1368,6 +1395,8 @@ def test_multivariate_gaussian(
             other_histogram_data
         )
     plot_chi_hist(title_prefix, sample_trajs, alpha_np, std)
+
+    plot_error_vs_sample_size(sample_trajs_list, alpha_np, std, cfg, hebo)
 
     cond = std.cond if std.cond else torch.tensor([-1.])
     mu = torch.tensor(cfg.example.mu).to(sample_trajs.device)

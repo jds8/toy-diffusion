@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from dataclasses import dataclass, field
 from models.toy_diffusion_models_config import BaseSamplerConfig, ModelConfig, GuidanceType
 from toy_likelihood_configs import LikelihoodConfig
@@ -244,5 +244,15 @@ def get_proposal(example, std):
         return BrownianMotionDiffProposal(std)
     elif isinstance(example, StudentTExampleConfig):
         return StudentTProposal(std)
+    else:
+        raise NotImplementedError
+
+def get_run_type(cfg_obj: PostProcessingConfig) -> Tuple[str, str]:
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        return 'MultivariateGaussian', f'Multivariate Gaussian {cfg_obj.example.d}D'
+    elif isinstance(cfg_obj.example, GaussianExampleConfig):
+        return 'Gaussian', 'Gaussian'
+    elif isinstance(cfg_obj.example, BrownianMotionDiffExampleConfig):
+        return 'BrownianMotionDiff', f'Brownian Motion {cfg_obj.example.sde_steps-1} Steps'
     else:
         raise NotImplementedError
