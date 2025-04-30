@@ -786,7 +786,7 @@ def plot_histogram_errors(
 
     fig, ((ax1, ax3), (ax2, ax4)) = plt.subplots(2, 2)
 
-    subsample_sizes = histogram_error_bar_output.subsample_sizes
+    subsample_sizes = torch.tensor(histogram_error_bar_output.subsample_sizes).unique()
 
     repeat_suffix = f' ({cfg.num_sample_batches} runs)'
     if other_histogram_data is not None:

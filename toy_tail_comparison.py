@@ -7,6 +7,7 @@ import time
 import re
 from collections import namedtuple
 import einops
+import math
 
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -291,7 +292,7 @@ def compute_pfode_error_vs_bins(
     return error_data
 
 def plot_errors(ax, error_data: ErrorData):
-    ax.plot(
+    ax.scatter(
         error_data.x,
         error_data.median,
         label=error_data.label,
@@ -323,6 +324,7 @@ def make_error_vs_bins(
         pfode_error_data: ErrorData,
         alpha: float
 ):
+    print(f'x axis {sample_error_data.x}')
     plot_errors(ax, sample_error_data)
     plot_errors(ax, pfode_error_data)
     ax.set_xlabel('Number of Bins')
@@ -338,7 +340,12 @@ def make_plots(
     plt.clf()
     fig, (ax1, ax2) = plt.subplots(2, 1)
 
-    subsample_sizes = torch.linspace(50, cfg.num_samples, 10, dtype=int)
+    subsample_sizes = torch.logspace(
+        math.log10(500),
+        math.log10(cfg.num_samples),
+        10,
+        dtype=int
+    )
 
     all_bins = make_error_vs_samples_plot(
         ax1,
@@ -348,13 +355,13 @@ def make_plots(
         cfg,
         subsample_sizes
     )
+    ax1.set_xscale("log")
     make_error_vs_bins_plot(
         ax2,
         trajs,
         ode_llk,
         alpha,
         cfg,
-        subsample_sizes,
         all_bins
     )
 
@@ -403,8 +410,7 @@ def make_error_vs_bins_plot(
         ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
-        subsample_sizes: torch.Tensor,
-        all_bins
+        all_bins: torch.Tensor
 ):
     hist_error_vs_bins = compute_sample_error_vs_bins(
         trajs,
@@ -417,7 +423,7 @@ def make_error_vs_bins_plot(
         all_bins,
         alpha,
     )
-    make_error_vs_samples(
+    make_error_vs_bins(
         ax,
         hist_error_vs_bins,
         pfode_error_vs_bins,
