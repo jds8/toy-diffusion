@@ -24,7 +24,7 @@ from models.toy_diffusion_models_config import ContinuousSamplerConfig
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-ErrorData = namedtuple('ErrorData', 'x median error_bars label')
+ErrorData = namedtuple('ErrorData', 'x median error_bars label color')
 HistOutput = namedtuple('HistOutput', 'hist bins')
 
 #########################
@@ -49,15 +49,18 @@ def compute_tail_estimate(
         bins=num_bins,
         density=True,
     )
-    smallest_idx = (bins < alpha).sum()
-    empirical_bin_width = bins[1] - bins[0]
-    tail_estimate = hist[smallest_idx:].sum() * empirical_bin_width
-    xs = torch.linspace(alpha, subsap.max(), 1000)
-    pdf = scipy.stats.chi(4).pdf(xs)
-    plt.plot(xs, pdf, color='green')
-    plt.scatter(bins[smallest_idx:], hist[smallest_idx:], color='red')
-    plt.show()
-    return hist, bins, tail_estimate
+    smallest_idx = max((bins < alpha).sum() - 1, 0)
+    # empirical_bin_width = bins[1] - bins[0]
+    # tail_estimate = hist[smallest_idx:].sum() * empirical_bin_width
+    lwr_bins = bins[:-1]
+    upr_bins = bins[1:]
+    med_bins = (lwr_bins + upr_bins) / 2
+    # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+    tail_estimate = scipy.integrate.simpson(
+        hist[smallest_idx:],
+        x=med_bins[smallest_idx:]
+    )
+    return hist, bins, torch.tensor(tail_estimate)
 
 def compute_pfode_tail_estimate(
         subsap: torch.Tensor,
@@ -82,10 +85,11 @@ def compute_pfode_tail_estimate(
         else:
             num_out += 1
         bin_idx += 1
-    abscissas_sorted, asdf_idx = torch.stack(abscissas).sort()
-    ordinates_sorted = torch.stack(ordinates)[asdf_idx]
-    scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
-    tail_estimate = scipy.integrate.trapezoid(ordinates, abscissas)
+    abscissas_sorted, sorted_idx = torch.stack(abscissas).sort()
+    ordinates_sorted = torch.stack(ordinates)[sorted_idx]
+    # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
+    # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
+    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
     return torch.tensor(tail_estimate)
 
 def compute_pfode_tail_estimate_from_bins(
@@ -100,23 +104,26 @@ def compute_pfode_tail_estimate_from_bins(
     bin_indices = torch.bucketize(subsap, bins, right=False) - 1  # shift so bins[i] <= x < bins[i+1]
 
     # Initialize output
-    selected_samples = torch.full(
-        (len(bins) - 1,),
-        float('nan'),
-        dtype=subsap.dtype,
-        device=subsap.device
-    )
-    ordinates = torch.zeros_like(selected_samples)
+    selected_samples_list = []
+    ordinates_list = []
 
     # For each bin, find one sample
     for bin_idx in range(len(bins) - 1):
         in_bin = (bin_indices == bin_idx).nonzero(as_tuple=True)[0]
         if len(in_bin) > 0:
-            selected_samples[bin_idx] = subsap[in_bin[0]]
-            ordinates[bin_idx] = ode_llk[in_bin[0]].exp()
+            selected_samples_list.append(subsap[in_bin[0]])
+            ordinates_list.append(ode_llk[in_bin[0]].exp())
 
-    tail_estimate = scipy.integrate.trapezoid(ordinates, selected_samples)
-    return torch.tensor(tail_estimate)
+    selected_samples = torch.tensor(selected_samples_list)
+    ordinates = torch.tensor(ordinates_list)
+
+    # tail_estimate = scipy.integrate.trapezoid(ordinates, selected_samples)
+    # tail_estimate = ordinates_sorted[:-1] * selected_samples_sorted.diff()
+    selected_samples_sorted, sorted_idx = selected_samples.sort()
+    ordinates_sorted = ordinates[sorted_idx]
+    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=selected_samples_sorted)
+    tail_estimate_tensor = torch.tensor(tail_estimate)
+    return tail_estimate_tensor
 
 def sample(std):
     sample_traj_out = std.sample_trajectories(
@@ -129,10 +136,9 @@ def sample(std):
     out_trajs = trajs
     return out_trajs
 
-def compute_sample_error_vs_bins(
+def compute_sample_error_vs_samples(
         trajs: torch.Tensor,
         alpha: float,
-        cfg: SampleConfig,
         subsample_sizes: torch.Tensor,
 ) -> Tuple[ErrorData, List[List[HistOutput]]]:
     dim = trajs.shape[2]
@@ -144,30 +150,31 @@ def compute_sample_error_vs_bins(
     for size_idx, subsample_size in enumerate(subsample_sizes):
         all_subsaps = sample_levels[:, :subsample_size]
         subsample_bins = []
-        rel_errors = torch.zeros(trajs.shape[:2])
+        rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
             hist, bins, tail_estimate = compute_tail_estimate(subsap, alpha)
             subsample_bins.append(HistOutput(hist, bins))
             rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors[subsap_idx, size_idx] = rel_error
+            rel_errors.append(rel_error)
         all_bins.append(subsample_bins)
-        quantile = rel_errors.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors.dtype)
+        rel_errors_tensor = torch.stack(rel_errors)
+        quantile = rel_errors_tensor.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
         quantiles[size_idx] = quantile
     error_data = ErrorData(
         subsample_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'Histogram Approximation'
+        'Histogram Approximation',
+        'blue'
     )
     return error_data, all_bins
 
-def compute_pfode_error_vs_bins(
+def compute_pfode_error_vs_samples(
         trajs: torch.Tensor,
         all_bins: List,
         alpha: float,
-        cfg: SampleConfig,
         ode_llk: torch.Tensor,
         subsample_sizes: torch.Tensor,
 ) -> ErrorData:
@@ -176,8 +183,8 @@ def compute_pfode_error_vs_bins(
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
     quantiles = torch.zeros(len(subsample_sizes), 3)
-    for size_idx, subsample_size in enumerate(subsample_sizes):
-        rel_errors = torch.zeros(trajs.shape[:2])
+    for size_idx, _ in enumerate(subsample_sizes):
+        rel_errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
             hist_output = all_bins[size_idx][subsap_idx]
             tail_estimate = compute_pfode_tail_estimate(
@@ -187,34 +194,36 @@ def compute_pfode_error_vs_bins(
                 alpha
             )
             rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors[subsap_idx, size_idx] = rel_error
-        quantile = rel_errors.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors.dtype)
+            rel_errors.append(rel_error)
+        rel_errors_tensor = torch.stack(rel_errors)
+        quantile = rel_errors_tensor.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
         quantiles[size_idx] = quantile
     error_data = ErrorData(
         subsample_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'PFODE Approximation'
+        'PFODE Approximation',
+        'orange'
     )
     return error_data
 
-def compute_sample_error_vs_samples(
+def compute_sample_error_vs_bins(
         trajs: torch.Tensor,
         all_bins: List,
         alpha: float,
-        cfg: SampleConfig,
-        subsample_sizes: torch.Tensor
 ) -> ErrorData:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
     quantiles = torch.zeros(len(all_bins), 3)
+    bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
         num_bins = len(hist_output.bins)
+        bin_sizes.append(num_bins)
         all_subsaps = sample_levels[:, :num_bins]
         rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
@@ -227,29 +236,30 @@ def compute_sample_error_vs_samples(
         )
         quantiles[bin_idx] = quantile
     error_data = ErrorData(
-        subsample_sizes,
+        bin_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'Histogram Approximation'
+        'Histogram Approximation',
+        'blue'
     )
     return error_data
 
-def compute_pfode_error_vs_samples(
+def compute_pfode_error_vs_bins(
         trajs: torch.Tensor,
         ode_llk: torch.Tensor,
         all_bins: List,
         alpha: float,
-        cfg: SampleConfig,
-        subsample_sizes: torch.Tensor
 ) -> ErrorData:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
     quantiles = torch.zeros(len(all_bins), 3)
+    bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
         num_bins = len(hist_output.bins)
+        bin_sizes.append(num_bins)
         rel_errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
             tail_estimate = compute_pfode_tail_estimate_from_bins(
@@ -266,35 +276,28 @@ def compute_pfode_error_vs_samples(
         )
         quantiles[bin_idx] = quantile
     error_data = ErrorData(
-        subsample_sizes,
+        bin_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'PFODE Approximation'
+        'PFODE Approximation',
+        'orange'
     )
     return error_data
 
 def plot_errors(ax, error_data: ErrorData):
-    yerr0 = error_data.median - error_data.error_bars[0]
-    yerr1 = error_data.error_bars[1] - error_data.median
-    yerr = torch.stack([yerr0, yerr1])
-    ax.errorbar(
+    ax.plot(
         error_data.x,
         error_data.median,
-        yerr=yerr,
         label=error_data.label,
+        color=error_data.color
     )
-
-def make_error_vs_bins(
-        ax,
-        sample_error_data: ErrorData,
-        pfode_error_data: ErrorData,
-        alpha: float
-):
-    # plot_errors(ax, sample_error_data)
-    plot_errors(ax, pfode_error_data)
-    ax.set_xlabel('Number of Bins')
-    ax.set_ylabel('Relative Error')
-    ax.set_title(f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins')
+    ax.fill_between(
+        error_data.x,
+        error_data.error_bars[0],
+        error_data.error_bars[1],
+        color=error_data.color,
+        alpha=0.2
+    )
 
 def make_error_vs_samples(
         ax,
@@ -302,11 +305,23 @@ def make_error_vs_samples(
         pfode_error_data: ErrorData,
         alpha: float
 ):
-    # plot_errors(ax, sample_error_data)
+    plot_errors(ax, sample_error_data)
     plot_errors(ax, pfode_error_data)
     ax.set_xlabel('Sample Size')
     ax.set_ylabel('Relative Error')
     ax.set_title(f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size')
+
+def make_error_vs_bins(
+        ax,
+        sample_error_data: ErrorData,
+        pfode_error_data: ErrorData,
+        alpha: float
+):
+    plot_errors(ax, sample_error_data)
+    plot_errors(ax, pfode_error_data)
+    ax.set_xlabel('Number of Bins')
+    ax.set_ylabel('Relative Error')
+    ax.set_title(f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins')
 
 def make_plots(
         trajs: torch.Tensor,
@@ -319,7 +334,7 @@ def make_plots(
 
     subsample_sizes = torch.linspace(50, cfg.num_samples, 10, dtype=int)
 
-    all_bins = make_error_vs_bins_plot(
+    all_bins = make_error_vs_samples_plot(
         ax1,
         trajs,
         ode_llk,
@@ -327,7 +342,7 @@ def make_plots(
         cfg,
         subsample_sizes
     )
-    make_error_vs_samples_plot(
+    make_error_vs_bins_plot(
         ax2,
         trajs,
         ode_llk,
@@ -348,7 +363,7 @@ def make_plots(
         alpha
     ))
 
-def make_error_vs_bins_plot(
+def make_error_vs_samples_plot(
         ax,
         trajs: torch.Tensor,
         ode_llk: torch.Tensor,
@@ -356,29 +371,27 @@ def make_error_vs_bins_plot(
         cfg: SampleConfig,
         subsample_sizes: torch.Tensor
 ):
-    hist_error_vs_bins, all_bins = compute_sample_error_vs_bins(
+    hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         trajs,
         alpha,
-        cfg,
         subsample_sizes
     )
-    pfode_error_vs_bins = compute_pfode_error_vs_bins(
+    pfode_error_vs_samples = compute_pfode_error_vs_samples(
         trajs,
         all_bins,
         alpha,
-        cfg,
         ode_llk,
         subsample_sizes,
     )
-    make_error_vs_bins(
+    make_error_vs_samples(
         ax,
-        hist_error_vs_bins,
-        pfode_error_vs_bins,
+        hist_error_vs_samples,
+        pfode_error_vs_samples,
         alpha
     )
     return all_bins
 
-def make_error_vs_samples_plot(
+def make_error_vs_bins_plot(
         ax,
         trajs: torch.Tensor,
         ode_llk: torch.Tensor,
@@ -387,25 +400,21 @@ def make_error_vs_samples_plot(
         subsample_sizes: torch.Tensor,
         all_bins
 ):
-    hist_error_vs_samples = compute_sample_error_vs_samples(
+    hist_error_vs_bins = compute_sample_error_vs_bins(
         trajs,
         all_bins,
         alpha,
-        cfg,
-        subsample_sizes
     )
-    pfode_error_vs_samples = compute_pfode_error_vs_samples(
+    pfode_error_vs_bins = compute_pfode_error_vs_bins(
         trajs,
         ode_llk,
         all_bins,
         alpha,
-        cfg,
-        subsample_sizes
     )
     make_error_vs_samples(
         ax,
-        hist_error_vs_samples,
-        pfode_error_vs_samples,
+        hist_error_vs_bins,
+        pfode_error_vs_bins,
         alpha
     )
 
