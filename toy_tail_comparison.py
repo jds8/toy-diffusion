@@ -269,8 +269,8 @@ def compute_pfode_error_vs_bins(
         rel_errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
             tail_estimate = compute_pfode_tail_estimate_from_bins(
-                subsap,
-                ode_llk[subsap_idx],
+                subsap.cpu(),
+                ode_llk[subsap_idx].cpu(),
                 num_bins,
                 alpha
             )
