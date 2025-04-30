@@ -185,7 +185,7 @@ def compute_pfode_error_vs_samples(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(subsample_sizes), 3, dtype='cpu')
+    quantiles = torch.zeros(len(subsample_sizes), 3, device='cpu')
     for size_idx, _ in enumerate(subsample_sizes):
         rel_errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
@@ -221,7 +221,7 @@ def compute_sample_error_vs_bins(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(all_bins), 3, dtype='cpu')
+    quantiles = torch.zeros(len(all_bins), 3, device='cpu')
     bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
@@ -260,7 +260,7 @@ def compute_pfode_error_vs_bins(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(all_bins), 3, dtype='cpu')
+    quantiles = torch.zeros(len(all_bins), 3, device='cpu')
     bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
