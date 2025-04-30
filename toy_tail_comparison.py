@@ -152,7 +152,10 @@ def compute_sample_error_vs_samples(
         subsample_bins = []
         rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
-            hist, bins, tail_estimate = compute_tail_estimate(subsap, alpha)
+            hist, bins, tail_estimate = compute_tail_estimate(
+                subsap.cpu(),
+                alpha
+            )
             subsample_bins.append(HistOutput(hist, bins))
             rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
@@ -182,14 +185,14 @@ def compute_pfode_error_vs_samples(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(subsample_sizes), 3)
+    quantiles = torch.zeros(len(subsample_sizes), 3, dtype='cpu')
     for size_idx, _ in enumerate(subsample_sizes):
         rel_errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
             hist_output = all_bins[size_idx][subsap_idx]
             tail_estimate = compute_pfode_tail_estimate(
-                subsap,
-                ode_llk[subsap_idx],
+                subsap.cpu(),
+                ode_llk[subsap_idx].cpu(),
                 hist_output.bins,
                 alpha
             )
@@ -199,9 +202,9 @@ def compute_pfode_error_vs_samples(
         quantile = rel_errors_tensor.quantile(
             torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
-        quantiles[size_idx] = quantile
+        quantiles[size_idx] = quantile.cpu()
     error_data = ErrorData(
-        subsample_sizes,
+        subsample_sizes.cpu(),
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
         'PFODE Approximation',
@@ -218,7 +221,7 @@ def compute_sample_error_vs_bins(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(all_bins), 3)
+    quantiles = torch.zeros(len(all_bins), 3, dtype='cpu')
     bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
@@ -227,14 +230,17 @@ def compute_sample_error_vs_bins(
         all_subsaps = sample_levels[:, :num_bins]
         rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
-            hist, bins, tail_estimate = compute_tail_estimate(subsap, alpha)
+            hist, bins, tail_estimate = compute_tail_estimate(
+                subsap.cpu(),
+                alpha
+            )
             rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
         rel_errors_tensor = torch.stack(rel_errors)
         quantile = rel_errors_tensor.quantile(
             torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
-        quantiles[bin_idx] = quantile
+        quantiles[bin_idx] = quantile.cpu()
     error_data = ErrorData(
         bin_sizes,
         quantiles[:, 1],
@@ -254,7 +260,7 @@ def compute_pfode_error_vs_bins(
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
     sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(all_bins), 3)
+    quantiles = torch.zeros(len(all_bins), 3, dtype='cpu')
     bin_sizes = []
     for bin_idx, bins in enumerate(all_bins):
         hist_output = all_bins[bin_idx][0]
@@ -274,7 +280,7 @@ def compute_pfode_error_vs_bins(
         quantile = rel_errors_tensor.quantile(
             torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
-        quantiles[bin_idx] = quantile
+        quantiles[bin_idx] = quantile.cpu()
     error_data = ErrorData(
         bin_sizes,
         quantiles[:, 1],
