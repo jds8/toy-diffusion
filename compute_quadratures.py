@@ -90,6 +90,45 @@ def old_pdf_2d_quadrature_bm(p: np.ndarray, alpha: np.ndarray):
     result, _ = integrate.quad(integrand_dx1, 0., boundary)
     return result
 
+def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000):
+    dt = 1/3
+    thetas = np.linspace(0, np.pi, num_pts).reshape(-1, 1)
+    phis = np.linspace(0, 2 * np.pi, num_pts).reshape(1, -1)
+    dx1 = p * np.sin(thetas) * np.cos(phis)  # x coord
+    dx2 = p * np.sin(thetas) * np.sin(phis)  # y coord
+    dx3 = p * np.cos(thetas)  # z coord
+
+    x1 = dx1 * np.sqrt(dt)
+    x2 = (dx1 + dx2) * np.sqrt(dt)
+    x3 = (dx1 + dx2 + dx3) * np.sqrt(dt)
+
+    phi_vals = normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1) * normal_pdf(dx3, 0, 1)
+    import scipy
+    weights = phi_vals * p ** 2 * (4 * np.pi / (scipy.special.gamma(3/2) * thetas.shape[0] * phis.shape[0]))  # arc length elements
+
+    # total_weight = 1.
+    total_weight = np.float64(1128.361741843246)
+    # if alpha == 0.:
+    #     total_weight = 1.  # for alpha=0.
+    # elif alpha == 0.5:
+    #     total_weight = 0.7458913437205545  # for alpha=0.5
+    # elif alpha == 1.:
+    #     total_weight = 0.37064413336206625  # for alpha=1.
+    # elif alpha == 1.5:
+    #     total_weight = 0.14605801048951172  # for alpha=1.5
+    # elif alpha == 2.0:
+    #     total_weight = 0.047295252164004084  # for alpha=2.0
+    # else:
+    #     raise NotImplementedError
+    conditions = (np.abs(x1) > (alpha-1e-5)) | (np.abs(x2) > (alpha-1e-5)) | (np.abs(x3) > (alpha-1e-5))
+    exit_weight = np.sum(weights[conditions])
+
+    if exit_weight == total_weight == 0.:
+        result = 0.
+    else:
+        result = exit_weight / total_weight
+    return result
+
 def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     dt = 0.5
     thetas = np.linspace(0, 2 * np.pi, num_pts)
@@ -144,13 +183,23 @@ def estimate_integral(
     return result
 
 def plot_quadrature_vs_chi():
+    import scipy
     q_values = np.linspace(0, 5, 100)
     alpha = 0.
-    numerical_pdf = [pdf_2d_quadrature_bm(q, alpha) for q in q_values]
+    numerical_pdf = [pdf_3d_quadrature_bm(q, alpha) for q in q_values]
+    numerical_pdf_tensor = torch.tensor(numerical_pdf)
+    # alpha2 = 1.
+    # old_numerical_pdf_tensor = numerical_pdf_tensor.clone()
+    # numerical_pdf_tensor[(q_values < alpha2).nonzero()[0].squeeze()] = 0.
+    integral = scipy.integrate.simpson(numerical_pdf_tensor, x=q_values)
+    print(integral)
+    # denom = scipy.integrate.simpson(numerical_pdf_tensor, x=q_values)
+    # numerical_pdf_tensor /= denom
     analytical_pdf = [q * np.exp(-q**2 / 2) for q in q_values]
 
+    import pdb; pdb.set_trace()
     import matplotlib.pyplot as plt
-    plt.plot(q_values, numerical_pdf, label="Numerical Quadrature")
+    plt.plot(q_values, numerical_pdf_tensor, label="Numerical Quadrature")
     plt.plot(q_values, analytical_pdf, '--', label="Analytical Solution")
     plt.legend()
     plt.xlabel("q")
@@ -177,17 +226,18 @@ def plot_quadrature_vs_chi():
 
 
 if __name__ == '__main__':
-    alphas = np.linspace(0.0, 3.5, 8)
-    # alphas = [np.array(0.)]
-    for alpha in alphas:
-       str_alpha = str(alpha.item()).replace('.', '_')
-       print(f'pdf_values_alpha_{str_alpha}', '= {')
-       ps = np.linspace(alpha, 6., 250)
-       # ps = np.linspace(alpha, 6., 39)
-       for p in ps:
-          print(f'{p}: {pdf_2d_quadrature(p, alpha)},')
-          # print(f'{p}: {pdf_2d_quadrature(p)},')
-       print('}')
+    # alphas = np.linspace(0.0, 3.5, 8)
+    # # alphas = [np.array(0.)]
+    # for alpha in alphas:
+    #    str_alpha = str(alpha.item()).replace('.', '_')
+    #    print(f'pdf_values_alpha_{str_alpha}', '= {')
+    #    ps = np.linspace(alpha, 6., 250)
+    #    # ps = np.linspace(alpha, 6., 39)
+    #    for p in ps:
+    #       print(f'{p}: {pdf_2d_quadrature(p, alpha)},')
+    #       # print(f'{p}: {pdf_2d_quadrature(p)},')
+    #    print('}')
+
     # for alpha in [0.5]:
     #     print(quadrature3(alpha))
     # for alpha in [0.5]:
