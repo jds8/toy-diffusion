@@ -19,7 +19,8 @@ import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
-from toy_train_config import SampleConfig, get_run_type
+from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
+    BrownianMotionDiffExampleConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 
 
@@ -471,9 +472,17 @@ def sample(cfg):
         cfg_obj = OmegaConf.to_object(cfg)
         alpha_float = alpha.cpu().item()
         sample_levels = trajs.norm(dim=[1, 2])
-        chi_ode_llk = ode_llk[0][-1] + (cfg.example.d / 2) * torch.tensor(2 * torch.pi).log() + \
-                (cfg.example.d - 1) * sample_levels.log() - (cfg.example.d / 2 - 1) * \
-                torch.tensor(2.).log() - scipy.special.loggamma(cfg.example.d / 2)
+
+        if type(std.example) == MultivariateGaussianExampleConfig:
+            dim = cfg.example.d
+        elif type(std.example) == BrownianMotionDiffExampleConfig:
+            dim = cfg.example.sde_steps
+        else:
+            raise NotImplementedError
+
+        chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+                (dim - 1) * sample_levels.log() - (dim / 2 - 1) * \
+                torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         rearranged_odes = einops.rearrange(
             chi_ode_llk,
             '(b c) -> b c',
