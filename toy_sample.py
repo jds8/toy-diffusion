@@ -623,8 +623,9 @@ def compute_ode_log_likelihood(
         exact=cfg.compute_exact_trace,
         num_hutchinson_samples=cfg.num_hutchinson_samples,
     )
-    ode_llk_val = ode_llk[0].cpu()
     eval_time = timer.time() - tm
+    print(f'pfode time: {eval_time}')
+    ode_llk_val = ode_llk[0].cpu()
     scaled_ode_llk = scale_fn(ode_llk_val[-1])
     print('\node_llk: {}'.format(scaled_ode_llk))
 
@@ -635,28 +636,31 @@ def compute_ode_log_likelihood(
     rkl_pfode = (scaled_ode_llk - analytical_llk).mean()
     print('\nreverse KL divergence btwn diffusion and analytical: {}'.format(rkl_pfode))
 
-    sample_trajs_list = einops.rearrange(
-        sample_trajs,
-        '(n c) b 1 -> n c b 1',
-        n=cfg.num_sample_batches
-    )
-    unsorted_sample_levels = sample_trajs_list.norm(dim=[2, 3])[:, :hist_llks[0].shape[0]]
-    sample_levels = unsorted_sample_levels.sort(dim=1).values
-    dim = sample_trajs.shape[1]
-    dd = scipy.stats.chi(dim)
-    samples_cpu = sample_levels.cpu().numpy()
-    log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
-    log_pdfs_tensor = torch.tensor(log_pdfs)
-    rkl_hists = torch.tensor([
-        (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, log_pdfs_tensor)
-    ])
-    quantiles = rkl_hists.quantile(
-        torch.tensor(
-            [0.05, 0.5, 0.95],
-            dtype=rkl_hists.dtype
+    if hist_llks:
+        sample_trajs_list = einops.rearrange(
+            sample_trajs,
+            '(n c) b 1 -> n c b 1',
+            n=cfg.num_sample_batches
         )
-    )
-    print(f'\n reverse KL divergence quantiles (0.05, 0.5, 0.95) btwn hist of diffusion and analytical: {quantiles}')
+        unsorted_sample_levels = sample_trajs_list.norm(dim=[2, 3])[:, :hist_llks[0].shape[0]]
+        sample_levels = unsorted_sample_levels.sort(dim=1).values
+        dim = sample_trajs.shape[1]
+        dd = scipy.stats.chi(dim)
+        samples_cpu = sample_levels.cpu().numpy()
+        log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
+        log_pdfs_tensor = torch.tensor(log_pdfs)
+        rkl_hists = torch.tensor([
+            (hist_llk - pdf).mean() for hist_llk, pdf in zip(hist_llks, log_pdfs_tensor)
+        ])
+        quantiles = rkl_hists.quantile(
+            torch.tensor(
+                [0.05, 0.5, 0.95],
+                dtype=rkl_hists.dtype
+            )
+        )
+        print(f'\n reverse KL divergence quantiles (0.05, 0.5, 0.95) btwn hist of diffusion and analytical: {quantiles}')
+    else:
+        quantiles = torch.tensor([-1, -1, -1])
 
     torch.save(
         ode_llk_val,
@@ -815,7 +819,11 @@ def plot_histogram_errors(
                 color='gray'
             )
 
-    increment_size = int(np.diff(subsample_sizes)[0])
+    try:
+        increment_size = int(np.diff(subsample_sizes)[0])
+    except:
+        import pdb; pdb.set_trace()
+        increment_size = int(np.diff(subsample_sizes)[0])
     ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure_label} vs. Sample Size')
@@ -1319,33 +1327,6 @@ def plot_ellipsoid(end_time, cfg, sample_trajs, std):
     plt.scatter(traj[:, 0], traj[:, 1], color='blue')
     plt.savefig('{}/ellipsoid_scatter.pdf'.format(HydraConfig.get().run.dir))
 
-def plot_error_vs_sample_size(
-        sample_trajs_list: torch.Tensor,
-        alpha_cpu: np.ndarray,
-        std: ToyEvaluator,
-        cfg: SampleConfig,
-        hebo: HistogramErrorBarOutput,
-):
-    """ 
-    Computes a tail integral estimate of the probability density function
-    starting at alpha and integrating to infinity using the histogram 
-    approximation and compares this estimate with the analytical tail 
-    integral using the Chi distribution from scipy. The historam 
-    approximation is constructed from subsamples in sample_trajs_list.
-    The first dimension of sample_trajs_list is the number of runs
-    used to construct error bars. This function plots error for each
-    histogram approximation given the sample size.
-    """
-    plt.clf()
-    sample_levels = sample_trajs_list.norm(dim=[2, 3])
-    sample_levels = einops.rearrange(
-        sample_levels,
-        '(n c) b -> n c b',
-        n=sample_trajs_list.shape[0]
-    )
-    sample_levels = sample_levels.cpu().numpy()
-    hebo
-
 def test_multivariate_gaussian(
         end_time: torch.Tensor,
         cfg: SampleConfig,
@@ -1396,8 +1377,6 @@ def test_multivariate_gaussian(
         )
     plot_chi_hist(title_prefix, sample_trajs, alpha_np, std)
 
-    plot_error_vs_sample_size(sample_trajs_list, alpha_np, std, cfg, hebo)
-
     cond = std.cond if std.cond else torch.tensor([-1.])
     mu = torch.tensor(cfg.example.mu).to(sample_trajs.device)
     sigma = torch.tensor(cfg.example.sigma).to(sample_trajs.device)
@@ -1418,7 +1397,9 @@ def test_multivariate_gaussian(
     non_nan_a_llk = non_nan_analytical_llk.squeeze()
 
     scale_fn = lambda ode: ode - L.to(ode.device).logdet()
-    hist_llks = get_hist_llks(sample_trajs_list, hebo)
+    hist_llks = []
+    if cfg.run_histogram_convergence:
+        hist_llks = get_hist_llks(sample_trajs_list, hebo)
     ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         hist_llks,
@@ -2136,7 +2117,7 @@ def sample(cfg):
                         dt = torch.tensor(1. / dim)
                         scaled_x0 = sample_traj_out.samples * dt.sqrt()  # standardize data
                         bm = torch.cat([
-                            torch.zeros(10*cfg.num_samples, 1, 1),
+                            torch.zeros(scaled_x0.shape[0], 1, 1),
                             scaled_x0.cumsum(dim=1)
                         ], dim=1)
                         cond_idx = (bm.abs() > alpha).any(dim=[1,2])
@@ -2167,29 +2148,29 @@ def sample(cfg):
                 title_prefix,
                 cfg,
             )
-            hist_llks = get_hist_llks(sample_trajs_list, hebo)
-            rkls = []
-            for hist_llk, sample_trajs in zip(hist_llks, sample_trajs_list):
-                sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
-                sample_levels = sorted_sample_levels.values
-                max_sample_size = hist_llk.shape[0]
-                samples_cpu = sample_levels.cpu().numpy()[:max_sample_size]
-                log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
-                analytical_llk = torch.tensor(log_pdfs)
-                rkls.append((hist_llk-torch.tensor(analytical_llk)).mean())
-                # plt.clf()
-                # plt.plot(sample_levels, np.exp(analytical_llk))
-                # plt.plot(sample_levels, hist_llk.exp())
-            rkl_tensor = torch.tensor(rkls)
-            quantiles = torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
-            quantile_values = rkl_tensor.quantile(quantiles)
-            print(f'\nanalytical KL quantiles (0.05, 0.5, 0.95): {quantile_values}\n')
-            torch.save({
-                    'quantiles': quantiles.cpu().numpy(),
-                    'values': quantile_values.cpu().numpy(),
-                },
-                f'{HydraConfig.get().run.dir}/analytical_rkl_quantiles.pt'
-            )
+            # hist_llks = get_hist_llks(sample_trajs_list, hebo)
+            # rkls = []
+            # for hist_llk, sample_trajs in zip(hist_llks, sample_trajs_list):
+            #     sorted_sample_levels = sample_trajs.norm(dim=[1,2]).sort()
+            #     sample_levels = sorted_sample_levels.values
+            #     max_sample_size = hist_llk.shape[0]
+            #     samples_cpu = sample_levels.cpu().numpy()[:max_sample_size]
+            #     log_pdfs = np.log(dd.pdf(samples_cpu)) - np.log(1 - dd.cdf(samples_cpu))
+            #     analytical_llk = torch.tensor(log_pdfs)
+            #     rkls.append((hist_llk-torch.tensor(analytical_llk)).mean())
+            #     # plt.clf()
+            #     # plt.plot(sample_levels, np.exp(analytical_llk))
+            #     # plt.plot(sample_levels, hist_llk.exp())
+            # rkl_tensor = torch.tensor(rkls)
+            # quantiles = torch.tensor([0.05, 0.5, 0.95], dtype=rkl_tensor.dtype)
+            # quantile_values = rkl_tensor.quantile(quantiles)
+            # print(f'\nanalytical KL quantiles (0.05, 0.5, 0.95): {quantile_values}\n')
+            # torch.save({
+            #         'quantiles': quantiles.cpu().numpy(),
+            #         'values': quantile_values.cpu().numpy(),
+            #     },
+            #     f'{HydraConfig.get().run.dir}/analytical_rkl_quantiles.pt'
+            # )
             if type(std.example) == MultivariateGaussianExampleConfig:
                 plot_chi_hist(
                     title_prefix,
@@ -2205,9 +2186,24 @@ def sample(cfg):
             # if type(std.example) == BrownianMotionDiffExampleConfig:
             #     cfg.pdf_values_dir = calculator.pdf_values_dir
         else:
+            tm = timer.time()
             sample_traj_out = std.sample_trajectories(
                 cond=std.cond,
                 alpha=std.likelihood.alpha.reshape(-1, 1),
+            )
+            eval_time = timer.time() - tm
+            print(f'sample time: {eval_time}')
+
+            headers = [
+                'Time',
+            ]
+            data = [[
+                eval_time,
+            ]]
+            df = pd.DataFrame(data, columns=headers)
+            df.to_csv(
+                f'{HydraConfig.get().run.dir}/{cfg.model_name}_sample_time.csv',
+                index=False
             )
 
         # ode_trajs = (sample_traj_out.samples).reshape(-1, cfg.num_samples)
