@@ -338,7 +338,7 @@ def make_plots(
         cfg: SampleConfig
 ):
     plt.clf()
-    fig, (ax1, ax2) = plt.subplots(2, 1)
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharey=True)
 
     subsample_sizes = torch.logspace(
         math.log10(500),
@@ -355,7 +355,11 @@ def make_plots(
         cfg,
         subsample_sizes
     )
-    ax1.set_xscale("log")
+    # ax1.set_xscale("log")
+    # ax3 = ax1.twiny()
+    # ax3.set_xlim(ax1.get_xlim())
+    # ax3.set_xlabel('Num Bins')
+
     make_error_vs_bins_plot(
         ax2,
         trajs,
