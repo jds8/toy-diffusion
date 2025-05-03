@@ -9,6 +9,7 @@ from collections import namedtuple
 import einops
 import math
 
+import pandas as pd
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
@@ -292,7 +293,27 @@ def compute_pfode_error_vs_bins(
     )
     return error_data
 
-def plot_errors(ax, error_data: ErrorData):
+def save_error_data(error_data: ErrorData, title: str):
+    headers = [
+        'Abscissa',
+        'Median',
+        '5%',
+        '95%',
+    ]
+    data = [[
+        error_data.x,
+        error_data.median,
+        error_data.error_bars[0],
+        error_data.error_bars[1],
+    ]]
+    df = pd.DataFrame(data, columns=headers)
+    filename = f'{title}_{error_data.label}'.replace(' ', '_')
+    df.to_csv(
+        f'{HydraConfig.get().run.dir}/{filename}',
+        index=False
+    )
+
+def plot_errors(ax, error_data: ErrorData, title: str):
     ax.scatter(
         error_data.x,
         error_data.median,
@@ -307,17 +328,20 @@ def plot_errors(ax, error_data: ErrorData):
         alpha=0.2
     )
 
+    save_error_data(error_data, title)
+
 def make_error_vs_samples(
         ax,
         sample_error_data: ErrorData,
         pfode_error_data: ErrorData,
         alpha: float
 ):
-    plot_errors(ax, sample_error_data)
-    plot_errors(ax, pfode_error_data)
+    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
+    plot_errors(ax, sample_error_data, title)
+    plot_errors(ax, pfode_error_data, title)
     ax.set_xlabel('Sample Size')
     ax.set_ylabel('Relative Error')
-    ax.set_title(f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size')
+    ax.set_title(title)
 
 def make_error_vs_bins(
         ax,
@@ -326,11 +350,12 @@ def make_error_vs_bins(
         alpha: float
 ):
     print(f'x axis {sample_error_data.x}')
-    plot_errors(ax, sample_error_data)
-    plot_errors(ax, pfode_error_data)
+    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins'
+    plot_errors(ax, sample_error_data, title)
+    plot_errors(ax, pfode_error_data, title)
     ax.set_xlabel('Number of Bins')
     ax.set_ylabel('Relative Error')
-    ax.set_title(f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins')
+    ax.set_title(title)
 
 def make_plots(
         trajs: torch.Tensor,
