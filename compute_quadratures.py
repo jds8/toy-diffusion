@@ -90,6 +90,44 @@ def old_pdf_2d_quadrature_bm(p: np.ndarray, alpha: np.ndarray):
     result, _ = integrate.quad(integrand_dx1, 0., boundary)
     return result
 
+def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000):
+    dt = 1/3
+    thetas = np.linspace(0, np.pi, num_pts).reshape(-1, 1)
+    phis = np.linspace(0, 2 * np.pi, num_pts).reshape(1, -1)
+    dx1 = p * np.sin(thetas) * np.cos(phis)
+    dx2 = p * np.sin(thetas) * np.sin(phis)
+    dx3 = p * np.cos(thetas)
+
+    x1 = dx1 * np.sqrt(dt)
+    x2 = (dx1 + dx2) * np.sqrt(dt)
+    x3 = (dx1 + dx2 + dx3) * np.sqrt(dt)
+
+    phi_vals = normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1) * normal_pdf(dx3, 0, 1)
+    dtheta = thetas[1,0] - thetas[0,0]
+    dphi = phis[0,1] - phis[0,0]
+    weights = phi_vals * p ** 2 * np.sin(thetas) * dtheta * dphi
+
+    if alpha == 0.:
+        total_weight = 1.  # for alpha=0.
+    elif alpha == 0.5:
+        total_weight = 0.8060463160489418   # for alpha=0.5
+    elif alpha == 1.:
+        total_weight = 0.40119811854180637  # for alpha=1.
+    elif alpha == 1.5:
+        total_weight = 0.15720399570060603  # for alpha=1.5
+    elif alpha == 2.0:
+        total_weight = 0.050560932192670285  # for alpha=2.0
+    else:
+        raise NotImplementedError
+    conditions = (np.abs(x1) > (alpha-1e-5)) | (np.abs(x2) > (alpha-1e-5)) | (np.abs(x3) > (alpha-1e-5))
+    exit_weight = np.sum(weights[conditions])
+
+    if exit_weight == total_weight == 0.:
+        result = 0.
+    else:
+        result = exit_weight / total_weight
+    return result
+
 def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     dt = 0.5
     thetas = np.linspace(0, 2 * np.pi, num_pts)
@@ -145,16 +183,18 @@ def estimate_integral(
 
 def plot_quadrature_vs_chi():
     q_values = np.linspace(0, 5, 100)
-    alpha = 0.
-    numerical_pdf = [pdf_2d_quadrature_bm(q, alpha) for q in q_values]
-    analytical_pdf = [q * np.exp(-q**2 / 2) for q in q_values]
-
+    alpha = 1.5
+    numerical_pdf = [pdf_3d_quadrature_bm(q, alpha) for q in q_values]
+    analytical_pdf = stats.chi(3).pdf(q_values)
+    
+    denom = integrate.simpson(numerical_pdf, x=q_values)
+    print(denom)
     import matplotlib.pyplot as plt
     plt.plot(q_values, numerical_pdf, label="Numerical Quadrature")
     plt.plot(q_values, analytical_pdf, '--', label="Analytical Solution")
     plt.legend()
     plt.xlabel("q")
-    plt.ylabel("PDF")
+    plt.ylabel("PDF") 
     plt.title("Chi Distribution (2 DoF)")
     plt.show()
 
@@ -177,17 +217,17 @@ def plot_quadrature_vs_chi():
 
 
 if __name__ == '__main__':
-    alphas = np.linspace(0.0, 3.5, 8)
-    # alphas = [np.array(0.)]
-    for alpha in alphas:
-       str_alpha = str(alpha.item()).replace('.', '_')
-       print(f'pdf_values_alpha_{str_alpha}', '= {')
-       ps = np.linspace(alpha, 6., 250)
-       # ps = np.linspace(alpha, 6., 39)
-       for p in ps:
-          print(f'{p}: {pdf_2d_quadrature(p, alpha)},')
-          # print(f'{p}: {pdf_2d_quadrature(p)},')
-       print('}')
+    # alphas = np.linspace(0.0, 3.5, 8)
+    # # alphas = [np.array(0.)]
+    # for alpha in alphas:
+    #    str_alpha = str(alpha.item()).replace('.', '_')
+    #    print(f'pdf_values_alpha_{str_alpha}', '= {')
+    #    ps = np.linspace(alpha, 6., 250)
+    #    # ps = np.linspace(alpha, 6., 39)
+    #    for p in ps:
+    #       print(f'{p}: {pdf_2d_quadrature(p, alpha)},')
+    #       # print(f'{p}: {pdf_2d_quadrature(p)},')
+    #    print('}')
     # for alpha in [0.5]:
     #     print(quadrature3(alpha))
     # for alpha in [0.5]:
