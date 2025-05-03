@@ -447,15 +447,15 @@ class ToyTrainer:
         elif isinstance(self.example, BrownianMotionDiffExampleConfig):
             if self.cfg.example.sde_steps == 3:
                 dataset_name = 'bm_dataset_3.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
+            elif self.cfg.example.sde_steps == 4:
+                dataset_name = 'bm_dataset_4.pt'
             elif self.cfg.example.sde_steps == 5:
                 dataset_name = 'bm_dataset_5.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             elif self.cfg.example.sde_steps == 104:
                 dataset_name = 'bm_dataset.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
             else:
                 raise NotImplementedError
+            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
         else:
             raise NotImplementedError
 

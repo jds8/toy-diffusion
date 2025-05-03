@@ -94,9 +94,9 @@ def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     dt = 1/3
     thetas = np.linspace(0, np.pi, num_pts).reshape(-1, 1)
     phis = np.linspace(0, 2 * np.pi, num_pts).reshape(1, -1)
-    dx1 = p * np.sin(thetas) * np.cos(phis)
-    dx2 = p * np.sin(thetas) * np.sin(phis)
-    dx3 = p * np.cos(thetas)
+    dx1 = p * np.sin(thetas) * np.cos(phis)  # x coord
+    dx2 = p * np.sin(thetas) * np.sin(phis)  # y coord
+    dx3 = p * np.cos(thetas)  # z coord
 
     x1 = dx1 * np.sqrt(dt)
     x2 = (dx1 + dx2) * np.sqrt(dt)
@@ -182,6 +182,7 @@ def estimate_integral(
     return result
 
 def plot_quadrature_vs_chi():
+    import scipy
     q_values = np.linspace(0, 5, 100)
     alpha = 1.5
     numerical_pdf = [pdf_3d_quadrature_bm(q, alpha) for q in q_values]
