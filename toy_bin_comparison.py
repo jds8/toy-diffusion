@@ -98,11 +98,11 @@ def sample(cfg):
         for num_bins in all_num_bins:
             abscissa = torch.linspace(alpha.item(), max_sample, num_bins+1)
             abscissas.append(abscissa)
-        abscissa_tensor = torch.cat(abscissas).reshape(-1, 1)
+        abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
         fake_traj = torch.cat([
-            torch.zeros(abscissa_tensor.shape[0], dim-1),
+            torch.zeros(abscissa_tensor.shape[0], dim-1, device=device),
             abscissa_tensor
-        ], 1).unsqueeze(-1).to(device)
+        ], 1).unsqueeze(-1)
         ode_llk = std.ode_log_likelihood(
             fake_traj,
             cond=torch.tensor([-1.]),
