@@ -91,6 +91,7 @@ def sample(cfg):
         all_num_bins = torch.logspace(
             math.log10(100),
             math.log10(1000),
+            5,
             dtype=int
         )
         abscissas = []
