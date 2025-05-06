@@ -36,41 +36,29 @@ HistOutput = namedtuple('HistOutput', 'hist bins')
 def suppresswarning():
     warnings.warn("user", UserWarning)
 
-def save_pfode_errors(all_num_bins, rel_errors_tensor):
-    headers = [
-        'NumBins',
-        'Errors',
-    ]
-    data = [[
-        all_num_bins,
-        rel_errors_tensor
-    ]]
-    df = pd.DataFrame(data, columns=headers)
+def save_pfode_errors(
+        all_num_bins: torch.Tensor,
+        rel_errors_tensor: torch.Tensor
+):
     filename = 'pfode_bin_comparison_errors.csv'
-    df.to_csv(
-        f'{HydraConfig.get().run.dir}/{filename}',
-        index=False
-    )
+    torch.save({
+        'NumBins': all_num_bins,
+        'Errors': rel_errors_tensor
+    }, filename)
 
-def save_pfode_samples(abscissa, chi_ode_llk):
-    headers = [
-        'Abscissa',
-        'ChiOdeLlk',
-    ]
-    data = [[
-        abscissa,
-        chi_ode_llk
-    ]]
-    df = pd.DataFrame(data, columns=headers)
+def save_pfode_samples(
+        abscissa: torch.Tensor,
+        chi_ode_llk: torch.Tensork
+):
     num_bins = abscissa.shape[0]
     rel_directory = 'pfode_bin_comparison_data'
     abs_directory = f'{HydraConfig.get().run.dir}/{rel_directory}'
     os.makedirs(abs_directory, exist_ok=True)
     filename = f'{abs_directory}/pfode_bin_comparison_data_{num_bins}_bins.csv'
-    df.to_csv(
-        filename,
-        index=False
-    )
+    torch.save({
+        'Abscissa': abscissa,
+        'ChiOdeLlk': chi_ode_llk
+    }, filename)
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
