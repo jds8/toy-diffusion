@@ -119,7 +119,7 @@ def sample(cfg):
             idx = augmented_all_num_bins[i]
             ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
             tail_estimate = scipy.integrate.simpson(
-                ode_llk_subsample.cpu().numpy().exp(),
+                ode_llk_subsample.cpu().exp(),
                 x=abscissa
             )
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
