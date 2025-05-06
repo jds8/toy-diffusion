@@ -40,7 +40,7 @@ def save_pfode_errors(
         all_num_bins: torch.Tensor,
         rel_errors_tensor: torch.Tensor
 ):
-    filename = 'pfode_bin_comparison_errors.csv'
+    filename = f'{HydraConfig.get().run.dir}/pfode_bin_comparison_errors.csv'
     torch.save({
         'NumBins': all_num_bins,
         'Errors': rel_errors_tensor
@@ -48,7 +48,7 @@ def save_pfode_errors(
 
 def save_pfode_samples(
         abscissa: torch.Tensor,
-        chi_ode_llk: torch.Tensork
+        chi_ode_llk: torch.Tensor
 ):
     num_bins = abscissa.shape[0]
     rel_directory = 'pfode_bin_comparison_data'

@@ -9,7 +9,6 @@ from collections import namedtuple
 import einops
 import math
 
-import pandas as pd
 import hydra
 from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
@@ -294,24 +293,14 @@ def compute_pfode_error_vs_bins(
     return error_data
 
 def save_error_data(error_data: ErrorData, title: str):
-    headers = [
-        'Abscissa',
-        'Median',
-        '5%',
-        '95%',
-    ]
-    data = [[
-        error_data.x,
-        error_data.median,
-        error_data.error_bars[0],
-        error_data.error_bars[1],
-    ]]
-    df = pd.DataFrame(data, columns=headers)
-    filename = f'{title}_{error_data.label}'.replace(' ', '_')
-    df.to_csv(
-        f'{HydraConfig.get().run.dir}/{filename}.csv',
-        index=False
-    )
+    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
+    abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.csv',
+    torch.save({
+        'Abscissa': error_data.x,
+        'Median': error_data.median,
+        '5%': error_data.error_bars[0],
+        '95%': error_data.error_bars[1]
+    }, abs_filename)
 
 def plot_errors(ax, error_data: ErrorData, title: str):
     ax.scatter(
