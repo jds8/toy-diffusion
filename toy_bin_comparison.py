@@ -102,7 +102,7 @@ def sample(cfg):
         fake_traj = torch.cat([
             torch.zeros(abscissa_tensor.shape[0], dim-1),
             abscissa_tensor
-        ], 1).unsqueeze(-1)
+        ], 1).unsqueeze(-1).to(device)
         ode_llk = std.ode_log_likelihood(
             fake_traj,
             cond=torch.tensor([-1.]),
