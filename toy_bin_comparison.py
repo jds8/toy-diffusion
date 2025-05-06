@@ -55,7 +55,7 @@ def save_pfode_errors(all_num_bins, rel_errors_tensor):
 def save_pfode_samples(abscissa, chi_ode_llk):
     headers = [
         'Abscissa',
-        'ChiOdeLLk',
+        'ChiOdeLlk',
     ]
     data = [[
         abscissa,
@@ -68,7 +68,7 @@ def save_pfode_samples(abscissa, chi_ode_llk):
     os.makedirs(abs_directory, exist_ok=True)
     filename = f'{abs_directory}/pfode_bin_comparison_data_{num_bins}_bins.csv'
     df.to_csv(
-        f'{HydraConfig.get().run.dir}/{filename}',
+        filename,
         index=False
     )
 
@@ -98,32 +98,41 @@ def sample(cfg):
             raise NotImplementedError
 
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1 - dd.cdf(alpha)
+        analytical_tail = 1 - dd.cdf(alpha.item())
         max_sample = dd.ppf(0.99999)
-        all_num_bins = [1000, 10000, 100000]
-        rel_errors = []
+        all_num_bins = torch.linspace(100, 400, 1, dtype=int)
+        abscissas = []
         for num_bins in all_num_bins:
             abscissa = torch.linspace(alpha.item(), max_sample, num_bins+1)
-            fake_traj = torch.cat([
-                torch.zeros(num_bins+1, dim-1),
-                abscissa.reshape(-1, 1)
-            ], 1).unsqueeze(-1)
-            ode_llk = std.ode_log_likelihood(
-                fake_traj,
-                cond=torch.tensor([-1.]),
-                alpha=alpha,
-                exact=cfg.compute_exact_trace,
-            )
-            chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-                (dim - 1) * abscissa.log() - (dim / 2 - 1) * \
-                torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
-            tail_estimate = scipy.integrate.simpson(chi_ode_llk.exp(), x=abscissa)
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
+            abscissas.append(abscissa)
+        abscissa_tensor = torch.cat(abscissas).reshape(-1, 1)
+        fake_traj = torch.cat([
+            torch.zeros(abscissa_tensor.shape[0], dim-1),
+            abscissa_tensor
+        ], 1).unsqueeze(-1)
+        ode_llk = std.ode_log_likelihood(
+            fake_traj,
+            cond=torch.tensor([-1.]),
+            alpha=alpha,
+            exact=cfg.compute_exact_trace,
+        )
+        chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+            (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
+            torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        rel_errors = []
+        augmented_all_num_bins = torch.cat([torch.tensor([0]), all_num_bins+1])
+        for i, abscissa_count in enumerate(augmented_all_num_bins[1:]):
+            abscissa = abscissas[i]
+            idx = augmented_all_num_bins[i]
+            ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
+            tail_estimate = scipy.integrate.simpson(ode_llk_subsample.exp(), x=abscissa)
+            rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
-            save_pfode_samples(abscissa, chi_ode_llk)
-        rel_errors_tensor = torch.tensor(rel_errors)
+            save_pfode_samples(abscissa, ode_llk_subsample)
+        rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
         plt.plot(all_num_bins, rel_errors_tensor)
+        plt.show()
 
 
 if __name__ == "__main__":
