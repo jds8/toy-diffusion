@@ -309,7 +309,7 @@ def save_error_data(error_data: ErrorData, title: str):
     df = pd.DataFrame(data, columns=headers)
     filename = f'{title}_{error_data.label}'.replace(' ', '_')
     df.to_csv(
-        f'{HydraConfig.get().run.dir}/{filename}',
+        f'{HydraConfig.get().run.dir}/{filename}.csv',
         index=False
     )
 
