@@ -1,9 +1,9 @@
 defaults:
-  - pp_config
+  - vpsde_pp_config
   - sampler: vpsde_velocity_sampler
   - diffusion: base_temporal_unet
   - likelihood: base_likelihood
-  - example: gaussian_example
+  - example: multivariate_gaussian_example
   - _self_
 
 example:
