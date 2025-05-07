@@ -294,7 +294,7 @@ def compute_pfode_error_vs_bins(
 
 def save_error_data(error_data: ErrorData, title: str):
     rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
-    abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.csv',
+    abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.csv'
     torch.save({
         'Abscissa': error_data.x,
         'Median': error_data.median,
