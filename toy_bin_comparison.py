@@ -127,7 +127,7 @@ def sample(cfg):
             save_pfode_samples(abscissa, ode_llk_subsample)
             rel_errors_tensor = torch.stack(rel_errors)
             save_pfode_errors(all_num_bins, rel_errors_tensor)
-            plt.plot(all_num_bins, rel_errors_tensor)
+            plt.scatter(all_num_bins, rel_errors_tensor)
             plt.xlabel('Number of Bins')
             plt.ylabel('Relative Error')
             plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
@@ -136,7 +136,7 @@ def sample(cfg):
             plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(
                 HydraConfig.get().run.dir,
                 run_type,
-                alpha
+                alpha.item()
             ))
 
 
