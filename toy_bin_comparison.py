@@ -125,19 +125,19 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            rel_errors_tensor = torch.stack(rel_errors)
-            save_pfode_errors(all_num_bins, rel_errors_tensor)
-            plt.plot(all_num_bins, rel_errors_tensor)
-            plt.xlabel('Number of Bins')
-            plt.ylabel('Relative Error')
-            plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
-            _, run_type = get_run_type(cfg)
-            run_type = run_type.replace(' ', '_')
-            plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(
-                HydraConfig.get().run.dir,
-                run_type,
-                alpha
-            ))
+        rel_errors_tensor = torch.stack(rel_errors)
+        save_pfode_errors(all_num_bins, rel_errors_tensor)
+        plt.plot(all_num_bins, rel_errors_tensor)
+        plt.xlabel('Number of Bins')
+        plt.ylabel('Relative Error')
+        plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
+        _, run_type = get_run_type(cfg)
+        run_type = run_type.replace(' ', '_')
+        plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(
+            HydraConfig.get().run.dir,
+            run_type,
+            alpha
+        ))
 
 
 if __name__ == "__main__":
