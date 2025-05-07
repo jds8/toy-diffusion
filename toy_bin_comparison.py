@@ -40,7 +40,7 @@ def save_pfode_errors(
         all_num_bins: torch.Tensor,
         rel_errors_tensor: torch.Tensor
 ):
-    filename = f'{HydraConfig.get().run.dir}/pfode_bin_comparison_errors.csv'
+    filename = f'{HydraConfig.get().run.dir}/pfode_bin_comparison_errors.pt'
     torch.save({
         'NumBins': all_num_bins,
         'Errors': rel_errors_tensor
@@ -54,7 +54,7 @@ def save_pfode_samples(
     rel_directory = 'pfode_bin_comparison_data'
     abs_directory = f'{HydraConfig.get().run.dir}/{rel_directory}'
     os.makedirs(abs_directory, exist_ok=True)
-    filename = f'{abs_directory}/pfode_bin_comparison_data_{num_bins}_bins.csv'
+    filename = f'{abs_directory}/pfode_bin_comparison_data_{num_bins}_bins.pt'
     torch.save({
         'Abscissa': abscissa,
         'ChiOdeLlk': chi_ode_llk
@@ -125,19 +125,20 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            rel_errors_tensor = torch.stack(rel_errors)
-            save_pfode_errors(all_num_bins, rel_errors_tensor)
-            plt.scatter(all_num_bins, rel_errors_tensor)
-            plt.xlabel('Number of Bins')
-            plt.ylabel('Relative Error')
-            plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
-            _, run_type = get_run_type(cfg)
-            run_type = run_type.replace(' ', '_')
-            plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(
-                HydraConfig.get().run.dir,
-                run_type,
-                alpha.item()
-            ))
+        rel_errors_tensor = torch.stack(rel_errors)
+        save_pfode_errors(all_num_bins, rel_errors_tensor)
+        plt.scatter(all_num_bins, rel_errors_tensor)
+        plt.xlabel('Number of Bins')
+        plt.ylabel('Relative Error')
+        plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
+        cfg_obj = OmegaConf.to_object(cfg)
+        _, run_type = get_run_type(cfg_obj)
+        run_type = run_type.replace(' ', '_')
+        plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(
+            HydraConfig.get().run.dir,
+            run_type,
+            alpha.item()
+        ))
 
 
 if __name__ == "__main__":
