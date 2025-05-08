@@ -136,6 +136,16 @@ def compute_pfode_tail_estimate_from_bins(
     ordinates_sorted = ordinates[sorted_idx]
     tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=selected_samples_sorted)
     tail_estimate_tensor = torch.tensor(tail_estimate)
+    ys = [pdf_2d_quadrature_bm(a.cpu().numpy(), alpha) for a in selected_samples_sorted]
+    plt.clf()
+    plt.plot(selected_samples_sorted, ys)
+    plt.scatter(selected_samples_sorted, ordinates_sorted)
+    t = time.time()
+    plt.savefig('{}/pfode_tail_estimate_from_bins_plot_{}'.format(
+        HydraConfig.get().run.dir,
+        int(t)
+    ))
+    plt.clf()
     return tail_estimate_tensor
 
 def sample(std):
