@@ -89,9 +89,9 @@ def sample(cfg):
         analytical_tail = 1 - dd.cdf(alpha.item())
         max_sample = dd.ppf(0.99999)
         all_num_bins = torch.logspace(
-            math.log10(100),
+            math.log10(10),
             math.log10(1000),
-            5,
+            9,
             dtype=int
         )
         abscissas = []
@@ -114,9 +114,13 @@ def sample(cfg):
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         rel_errors = []
         augmented_all_num_bins = torch.cat([torch.tensor([0]), all_num_bins+1])
-        for i, abscissa_count in enumerate(augmented_all_num_bins[1:]):
+        augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
+        x = abscissas[-1]
+        pdf = dd.pdf(x)
+        for i in range(len(all_num_bins)):
             abscissa = abscissas[i]
-            idx = augmented_all_num_bins[i]
+            abscissa_count = len(abscissa)
+            idx = augmented_cumsum[i]
             ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
             tail_estimate = scipy.integrate.simpson(
                 ode_llk_subsample.cpu().exp(),
@@ -125,6 +129,13 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
+            plt.plot(x, pdf, color='blue')
+            plt.scatter(abscissa, ode_llk_subsample.exp(), color='red')
+            plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+                HydraConfig.get().run.dir,
+                i
+            ))
+            plt.clf()
         rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
         plt.scatter(all_num_bins, rel_errors_tensor)

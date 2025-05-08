@@ -22,6 +22,7 @@ from toy_sample import ContinuousEvaluator
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
+from compute_quadratures import pdf_2d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -92,6 +93,16 @@ def compute_pfode_tail_estimate(
     # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
     # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
     tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
+    ys = [pdf_2d_quadrature_bm(a, alpha) for a in abscissas_sorted]
+    plt.clf()
+    plt.plot(abscissas_sorted, ys)
+    plt.scatter(abscissas_sorted, ordinates_sorted)
+    t = time.time()
+    plt.savefig('{}/pfode_tail_estimate_plot_{}'.format(
+        HydraConfig.get().run.dir,
+        int(t)
+    ))
+    plt.clf()
     return torch.tensor(tail_estimate)
 
 def compute_pfode_tail_estimate_from_bins(
