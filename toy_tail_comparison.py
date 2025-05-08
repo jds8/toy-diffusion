@@ -93,7 +93,7 @@ def compute_pfode_tail_estimate(
     # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
     # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
     tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
-    ys = [pdf_2d_quadrature_bm(a, alpha) for a in abscissas_sorted]
+    ys = [pdf_2d_quadrature_bm(a.cpu().numpy(), alpha) for a in abscissas_sorted]
     plt.clf()
     plt.plot(abscissas_sorted, ys)
     plt.scatter(abscissas_sorted, ordinates_sorted)
