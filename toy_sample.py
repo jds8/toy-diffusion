@@ -1131,7 +1131,9 @@ def test_gaussian(end_time, cfg, sample_trajs, std):
     scale_fn = lambda ode: (
         ode - torch.tensor(cfg.example.example.sigma).log()
     )[non_nan_idx.squeeze()]
-    hist_llks = get_hist_llks(sample_trajs, hebo)
+    hist_llks = []
+    if cfg.run_histogram_convergence:
+        hist_llks = get_hist_llks(sample_trajs, hebo)
     ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         non_nan_a_llk,
         hist_llks,
@@ -1730,7 +1732,9 @@ def test_brownian_motion_diff(
     analytical_llk = uncond_analytical_llk - np.log(tail.item())
 
     scale_fn = lambda ode: ode - dt.sqrt().log() * (cfg.example.sde_steps-1)
-    hist_llks = get_hist_llks(sample_trajs_list, hebo)
+    hist_llks = []
+    if cfg.run_histogram_convergence:
+        hist_llks = get_hist_llks(sample_trajs_list, hebo)
     ode_llk, scaled_ode_llk = compute_ode_log_likelihood(
         analytical_llk,
         hist_llks,
