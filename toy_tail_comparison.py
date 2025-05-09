@@ -27,7 +27,7 @@ from compute_quadratures import pdf_2d_quadrature_bm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-ErrorData = namedtuple('ErrorData', 'x median error_bars label color')
+ErrorData = namedtuple('ErrorData', 'bins samples median error_bars label color')
 HistOutput = namedtuple('HistOutput', 'hist bins')
 
 #########################
@@ -269,6 +269,7 @@ def compute_pfode_error_vs_bins(
         alpha: float,
         std,
         cfg,
+        IQR: float,
 ) -> ErrorData:
     dd = scipy.stats.chi(dim)
     max_sample = dd.ppf(0.99999)
@@ -303,7 +304,12 @@ def compute_pfode_error_vs_bins(
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
     x = abscissas[-1]
     pdf = dd.pdf(x)
-    for i in range(len(bin_sizes)):
+    equivalents = []
+    for i, num_bins in enumerate(bin_sizes):
+        bin_width = int((max_sample - alpha) / num_bins)
+        equiv_saps = (bin_width / (2 * IQR)) ** -3
+        equivalents.append(equiv_saps)
+
         abscissa = abscissas[i]
         abscissa_count = len(abscissa)
         idx = augmented_cumsum[i]
@@ -322,11 +328,13 @@ def compute_pfode_error_vs_bins(
             i
         ))
         plt.clf()
-    median_tensor = torch.stack(rel_error)
-    zeros_tensor = torch.zeros_like(rel_error)
+    median_tensor = torch.stack(rel_errors)
+    zeros_tensor = torch.zeros_like(median_tensor)
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
+
     error_data = ErrorData(
         bin_sizes,
+        equivalents,
         median_tensor,
         conf_int_tensor,
         'PFODE Approximation',
@@ -378,7 +386,8 @@ def save_error_data(error_data: ErrorData, title: str):
     rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
     abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.pt'
     torch.save({
-        'Abscissa': error_data.x,
+        'Abscissa_bins': error_data.bins,
+        'Abscissa_samples': error_data.samples,
         'Median': error_data.median,
         '5%': error_data.error_bars[0],
         '95%': error_data.error_bars[1]
@@ -386,13 +395,13 @@ def save_error_data(error_data: ErrorData, title: str):
 
 def plot_errors(ax, error_data: ErrorData, title: str):
     ax.scatter(
-        error_data.x,
+        error_data.samples,
         error_data.median,
         label=error_data.label,
         color=error_data.color
     )
     ax.fill_between(
-        error_data.x,
+        error_data.samples,
         error_data.error_bars[0],
         error_data.error_bars[1],
         color=error_data.color,
@@ -420,7 +429,6 @@ def make_error_vs_bins(
         pfode_error_data: ErrorData,
         alpha: float
 ):
-    print(f'x axis {sample_error_data.x}')
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins'
     plot_errors(ax, sample_error_data, title)
     plot_errors(ax, pfode_error_data, title)
