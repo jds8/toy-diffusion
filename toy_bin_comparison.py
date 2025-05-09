@@ -130,7 +130,7 @@ def sample(cfg):
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
             plt.plot(x, pdf, color='blue')
-            plt.scatter(abscissa, ode_llk_subsample.exp(), color='red')
+            plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
             plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
                 HydraConfig.get().run.dir,
                 i
