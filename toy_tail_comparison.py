@@ -93,16 +93,17 @@ def compute_pfode_tail_estimate(
     # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
     # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
     tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
-    ys = [pdf_2d_quadrature_bm(a, alpha) for a in abscissas_sorted]
-    plt.clf()
-    plt.plot(abscissas_sorted, ys)
-    plt.scatter(abscissas_sorted, ordinates_sorted)
-    t = time.time()
-    plt.savefig('{}/pfode_tail_estimate_plot_{}'.format(
-        HydraConfig.get().run.dir,
-        int(t)
-    ))
-    plt.clf()
+    # ys = [pdf_2d_quadrature_bm(a, alpha) for a in abscissas_sorted]
+    ys = scipy.stats.chi(8).pdf(abscissas_sorted)
+    # plt.clf()
+    # plt.plot(abscissas_sorted, ys)
+    # plt.scatter(abscissas_sorted, ordinates_sorted)
+    # t = time.time()
+    # plt.savefig('{}/pfode_tail_estimate_plot_{}'.format(
+    #     HydraConfig.get().run.dir,
+    #     int(t)
+    # ))
+    # plt.clf()
     return torch.tensor(tail_estimate)
 
 def compute_pfode_tail_estimate_from_bins(
@@ -138,7 +139,7 @@ def compute_pfode_tail_estimate_from_bins(
     tail_estimate_tensor = torch.tensor(tail_estimate)
     return tail_estimate_tensor
 
-def sample(std):
+def sample(std: ContinuousEvaluator):
     sample_traj_out = std.sample_trajectories(
         cond=-1.,
         alpha=std.likelihood.alpha.reshape(-1, 1),
@@ -264,6 +265,77 @@ def compute_sample_error_vs_bins(
     return error_data
 
 def compute_pfode_error_vs_bins(
+        dim: float,
+        all_bins: List,
+        alpha: float,
+        std,
+        cfg,
+) -> ErrorData:
+    dd = scipy.stats.chi(dim)
+    max_sample = dd.ppf(0.99999)
+    analytical_tail = 1 - dd.cdf(alpha)
+    bin_sizes = torch.tensor([len(bins[0].bins) for bins in all_bins])
+    bin_sizes = torch.cat([bin_sizes, torch.logspace(
+        math.log10(len(all_bins[-1][0].bins)),
+        math.log10(1000),
+        5,
+        dtype=int
+    )[1:]]).unique()
+    abscissas = []
+    for num_bins in bin_sizes:
+        abscissa = torch.linspace(alpha, max_sample, num_bins+1)
+        abscissas.append(abscissa)
+    abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
+    fake_traj = torch.cat([
+        torch.zeros(abscissa_tensor.shape[0], dim-1, device=device),
+        abscissa_tensor
+    ], 1).unsqueeze(-1)
+    ode_llk = std.ode_log_likelihood(
+        fake_traj,
+        cond=torch.tensor([-1.]),
+        alpha=torch.tensor([alpha]),
+        exact=cfg.compute_exact_trace,
+    )
+    chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+        (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
+        torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+    rel_errors = []
+    augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
+    augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
+    x = abscissas[-1]
+    pdf = dd.pdf(x)
+    for i in range(len(bin_sizes)):
+        abscissa = abscissas[i]
+        abscissa_count = len(abscissa)
+        idx = augmented_cumsum[i]
+        ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
+        tail_estimate = scipy.integrate.simpson(
+            ode_llk_subsample.cpu().exp(),
+            x=abscissa
+        )
+        rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
+        rel_errors.append(rel_error)
+        # save_pfode_samples(abscissa, ode_llk_subsample)
+        plt.plot(x, pdf, color='blue')
+        plt.scatter(abscissa, ode_llk_subsample.exp(), color='red')
+        plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+            HydraConfig.get().run.dir,
+            i
+        ))
+        plt.clf()
+    median_tensor = torch.stack(rel_error)
+    zeros_tensor = torch.zeros_like(rel_error)
+    conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
+    error_data = ErrorData(
+        bin_sizes,
+        median_tensor,
+        conf_int_tensor,
+        'PFODE Approximation',
+        'orange'
+    )
+    return error_data
+
+def old_compute_pfode_error_vs_bins(
         trajs: torch.Tensor,
         ode_llk: torch.Tensor,
         all_bins: List,
@@ -361,7 +433,8 @@ def make_plots(
         trajs: torch.Tensor,
         ode_llk: torch.Tensor,
         alpha: float,
-        cfg: SampleConfig
+        cfg: SampleConfig,
+        std: ContinuousEvaluator,
 ):
     plt.clf()
     fig, (ax1, ax2) = plt.subplots(2, 1, sharey=True)
@@ -379,7 +452,8 @@ def make_plots(
         ode_llk,
         alpha,
         cfg,
-        subsample_sizes
+        subsample_sizes,
+        std,
     )
     # ax1.set_xscale("log")
     # ax3 = ax1.twiny()
@@ -392,7 +466,8 @@ def make_plots(
         ode_llk,
         alpha,
         cfg,
-        all_bins
+        all_bins,
+        std,
     )
 
     plt.legend()
@@ -412,19 +487,21 @@ def make_error_vs_samples_plot(
         ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
-        subsample_sizes: torch.Tensor
+        subsample_sizes: torch.Tensor,
+        std: ContinuousEvaluator
 ):
     hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         trajs,
         alpha,
         subsample_sizes
     )
-    pfode_error_vs_samples = compute_pfode_error_vs_samples(
-        trajs,
+    dim = trajs.shape[2]
+    pfode_error_vs_samples = compute_pfode_error_vs_bins(
+        dim,
         all_bins,
         alpha,
-        ode_llk,
-        subsample_sizes,
+        std,
+        cfg,
     )
     make_error_vs_samples(
         ax,
@@ -440,18 +517,21 @@ def make_error_vs_bins_plot(
         ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
-        all_bins: torch.Tensor
+        all_bins: torch.Tensor,
+        std: ContinuousEvaluator,
 ):
     hist_error_vs_bins = compute_sample_error_vs_bins(
         trajs,
         all_bins,
         alpha,
     )
+    dim = trajs.shape[2]
     pfode_error_vs_bins = compute_pfode_error_vs_bins(
-        trajs,
-        ode_llk,
+        dim,
         all_bins,
         alpha,
+        std,
+        cfg,
     )
     make_error_vs_bins(
         ax,
@@ -488,12 +568,14 @@ def sample(cfg):
             '(b c) h w -> b c h w',
             b=cfg.num_sample_batches
         )
-        ode_llk = std.ode_log_likelihood(
-            trajs,
-            cond=torch.tensor([-1.]),
-            alpha=alpha,
-            exact=cfg.compute_exact_trace,
-        )
+        ode_llk = torch.rand(trajs.shape[0])
+        ode_llk = ode_llk, 0
+        # ode_llk = std.ode_log_likelihood(
+        #     trajs,
+        #     cond=torch.tensor([-1.]),
+        #     alpha=alpha,
+        #     exact=cfg.compute_exact_trace,
+        # )
         cfg_obj = OmegaConf.to_object(cfg)
         alpha_float = alpha.cpu().item()
         sample_levels = trajs.norm(dim=[1, 2])
@@ -513,7 +595,13 @@ def sample(cfg):
             '(b c) -> b c',
             b=cfg.num_sample_batches
         )
-        make_plots(rearranged_trajs, rearranged_odes, alpha_float, cfg_obj)
+        make_plots(
+            rearranged_trajs,
+            rearranged_odes,
+            alpha_float,
+            cfg_obj,
+            std
+        )
 
 
 if __name__ == "__main__":
