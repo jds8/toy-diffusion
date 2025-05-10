@@ -284,13 +284,12 @@ def save_pfode_samples(
 
 def compute_pfode_error_vs_bins(
         sample_trajs: torch.Tensor,
-        dim: float,
         alpha: float,
         stds: List[ContinuousEvaluator],
         cfg: SampleConfig,
 ) -> ErrorData:
+    dim = sample_trajs.shape[2]
     dd = scipy.stats.chi(dim)
-    import pdb; pdb.set_trace()
     max_sample = dd.ppf(0.99999)
     analytical_tail = 1 - dd.cdf(alpha)
     num_bins = 1000
@@ -463,7 +462,6 @@ def make_plots(
         rearranged_trajs_list,
         alpha,
         cfg,
-        subsample_sizes,
         stds,
     )
     plt.xscale("log")
@@ -493,8 +491,7 @@ def make_error_vs_samples_plot(
     )
     dim = rearranged_trajs_list[0].shape[2]
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
-        dim,
-        all_bins,
+        rearranged_trajs_list,
         alpha,
         stds,
         cfg,
