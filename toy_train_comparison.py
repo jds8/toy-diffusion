@@ -306,10 +306,10 @@ def make_error_vs_samples(
         pfode_error_data: ErrorData,
         alpha: float
 ):
-    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
+    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Training Samples'
     plot_errors(sample_error_data, title)
     plot_errors(pfode_error_data, title)
-    plt.xlabel('Sample Size')
+    plt.xlabel('Training Samples')
     plt.ylabel('Relative Error')
     plt.title(title)
 
