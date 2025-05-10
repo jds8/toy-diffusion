@@ -296,14 +296,15 @@ def compute_pfode_error_vs_bins(
     max_sample = dd.ppf(0.99999)
     analytical_tail = 1 - dd.cdf(alpha)
     num_bins = 1000
-    bin_width = int((max_sample - alpha) / num_bins)
+    bin_width = (max_sample - alpha) / num_bins
     sample_trajs = einops.rearrange(
         sample_trajs,
         'b c h w -> (b c) h w',
         b=cfg.num_sample_batches
     ).norm(dim=[1, 2])
-    IQR = scipy.stats.iqr(sample_trajs)
-    equiv_saps = (bin_width / (2 * IQR)) ** -3
+    IQR = scipy.stats.iqr(sample_trajs.cpu())
+    equiv_saps = int((bin_width / (2 * IQR)) ** -3)
+    import pdb; pdb.set_trace()
     abscissa = torch.linspace(alpha, max_sample, num_bins+1)
     fake_traj = torch.cat([
         torch.zeros(abscissa.shape[0], dim-1, device=device),
@@ -320,8 +321,8 @@ def compute_pfode_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-            (dim - 1) * abscissa.squeeze().log() - (dim / 2 - 1) * \
+        chi_ode_llk = ode_llk[0][-1].cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+            (dim - 1) * abscissa.cpu().squeeze().log() - (dim / 2 - 1) * \
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         ode_llks.append(chi_ode_llk)
         tail_estimate = scipy.integrate.simpson(
