@@ -304,7 +304,6 @@ def compute_pfode_error_vs_bins(
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
     equiv_saps = int((bin_width / (2 * IQR)) ** -3)
-    import pdb; pdb.set_trace()
     abscissa = torch.linspace(alpha, max_sample, num_bins+1)
     fake_traj = torch.cat([
         torch.zeros(abscissa.shape[0], dim-1, device=device),
@@ -345,7 +344,7 @@ def compute_pfode_error_vs_bins(
 
     error_data = ErrorData(
         training_samples,
-        training_samples
+        training_samples,
         median_tensor,
         conf_int_tensor,
         'PFODE Approximation',
@@ -405,48 +404,33 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(ax, error_data: ErrorData, title: str):
-    ax.scatter(
+def plot_errors(error_data: ErrorData, title: str):
+    plt.scatter(
         error_data.samples,
         error_data.median,
         label=error_data.label,
         color=error_data.color
     )
-    ax.fill_between(
+    plt.fill_between(
         error_data.samples,
         error_data.error_bars[0],
         error_data.error_bars[1],
         color=error_data.color,
         alpha=0.2
     )
-
     save_error_data(error_data, title)
 
 def make_error_vs_samples(
-        ax,
         sample_error_data: ErrorData,
         pfode_error_data: ErrorData,
         alpha: float
 ):
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
-    plot_errors(ax, sample_error_data, title)
-    plot_errors(ax, pfode_error_data, title)
-    ax.set_xlabel('Sample Size')
-    ax.set_ylabel('Relative Error')
-    ax.set_title(title)
-
-def make_error_vs_bins(
-        ax,
-        sample_error_data: ErrorData,
-        pfode_error_data: ErrorData,
-        alpha: float
-):
-    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins'
-    plot_errors(ax, sample_error_data, title)
-    plot_errors(ax, pfode_error_data, title)
-    ax.set_xlabel('Number of Bins')
-    ax.set_ylabel('Relative Error')
-    ax.set_title(title)
+    plot_errors(sample_error_data, title)
+    plot_errors(pfode_error_data, title)
+    plt.set_xlabel('Sample Size')
+    plt.set_ylabel('Relative Error')
+    plt.set_title(title)
 
 def make_plots(
         rearranged_trajs_list: List[torch.Tensor],
@@ -562,7 +546,6 @@ def sample(cfg):
             rearranged_trajs_list.append(rearranged_trajs)
         alpha_float = alpha.cpu().item()
         training_samples = torch.tensor([get_num_samples(s.cfg.model_name) for s in stds])
-        import pdb; pdb.set_trace()
         make_plots(
             rearranged_trajs_list,
             alpha_float,
