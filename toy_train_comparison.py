@@ -270,6 +270,7 @@ def compute_sample_error_vs_bins(
 def save_pfode_samples(
         abscissa: torch.Tensor,
         chi_ode_llk: torch.Tensor,
+        equiv_saps: torch.Tensor,
         model_name: str
 ):
     pfode_dir = 'pfode_likelihoods'
@@ -279,6 +280,7 @@ def save_pfode_samples(
     torch.save({
         'Abscissa': abscissa,
         'ChiOdeLLK': chi_ode_llk,
+        'EquivSaps': equiv_saps,
         'ModelName': model_name
     }, abs_filename)
 
@@ -287,6 +289,7 @@ def compute_pfode_error_vs_bins(
         alpha: float,
         stds: List[ContinuousEvaluator],
         cfg: SampleConfig,
+        training_samples: torch.Tensor,
 ) -> ErrorData:
     dim = sample_trajs.shape[2]
     dd = scipy.stats.chi(dim)
@@ -304,7 +307,7 @@ def compute_pfode_error_vs_bins(
     abscissa = torch.linspace(alpha, max_sample, num_bins+1)
     fake_traj = torch.cat([
         torch.zeros(abscissa.shape[0], dim-1, device=device),
-        abscissa
+        abscissa.reshape(-1, 1).to(device)
     ], 1).unsqueeze(-1)
     ode_llks = []
     rel_errors = []
@@ -327,7 +330,7 @@ def compute_pfode_error_vs_bins(
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
-        save_pfode_samples(abscissa, chi_ode_llk, std.cfg.model_name)
+        save_pfode_samples(abscissa, chi_ode_llk, equiv_saps, std.cfg.model_name)
         # plt.plot(x, pdf, color='blue')
         # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -340,7 +343,8 @@ def compute_pfode_error_vs_bins(
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
 
     error_data = ErrorData(
-        equiv_saps,
+        training_samples,
+        training_samples
         median_tensor,
         conf_int_tensor,
         'PFODE Approximation',
@@ -448,6 +452,7 @@ def make_plots(
         alpha: float,
         cfg: SampleConfig,
         stds: List[ContinuousEvaluator],
+        training_samples: torch.Tensor
 ):
     plt.clf()
 
@@ -462,7 +467,9 @@ def make_plots(
         rearranged_trajs_list,
         alpha,
         cfg,
+        subsample_sizes,
         stds,
+        training_samples
     )
     plt.xscale("log")
     # ax3 = ax1.twiny()
@@ -482,7 +489,8 @@ def make_error_vs_samples_plot(
         alpha: float,
         cfg: SampleConfig,
         subsample_sizes: torch.Tensor,
-        stds: List[ContinuousEvaluator]
+        stds: List[ContinuousEvaluator],
+        training_samples: torch.Tensor
 ):
     hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         rearranged_trajs_list,
@@ -491,10 +499,11 @@ def make_error_vs_samples_plot(
     )
     dim = rearranged_trajs_list[0].shape[2]
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
-        rearranged_trajs_list,
+        rearranged_trajs_list[0],
         alpha,
         stds,
         cfg,
+        training_samples
     )
     make_error_vs_samples(
         hist_error_vs_samples,
@@ -502,6 +511,10 @@ def make_error_vs_samples_plot(
         alpha
     )
     return all_bins
+
+def get_num_samples(model_name: str) -> int:
+    result = re.search(r'_v([0-9]+)', model_name)
+    return int(result[1])
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
@@ -547,11 +560,14 @@ def sample(cfg):
             )
             rearranged_trajs_list.append(rearranged_trajs)
         alpha_float = alpha.cpu().item()
+        training_samples = torch.tensor([get_num_samples(s.cfg.model_name) for s in stds])
+        import pdb; pdb.set_trace()
         make_plots(
             rearranged_trajs_list,
             alpha_float,
             cfg_obj,
-            stds
+            stds,
+            training_samples
         )
 
 
