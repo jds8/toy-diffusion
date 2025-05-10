@@ -188,6 +188,11 @@ class SampleConfig(BaseConfig):
 
 
 @dataclass
+class TrainComparisonConfig(SampleConfig):
+    trained_models: List[str] = field(default_factory=list)
+
+
+@dataclass
 class SMCSampleConfig(SampleConfig):
     time_steps: int = 5
 

@@ -8,6 +8,7 @@ import re
 from collections import namedtuple
 import einops
 import math
+from copy import deepcopy
 
 import hydra
 from hydra.core.config_store import ConfigStore
@@ -20,7 +21,7 @@ import matplotlib.pyplot as plt
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig
+    BrownianMotionDiffExampleConfig, TrainComparisonConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import pdf_2d_quadrature_bm
 
@@ -157,7 +158,7 @@ def compute_sample_error_vs_samples(
     dim = rearranged_trajs_list[0].shape[2]
     dd = scipy.stats.chi(dim)
     analytical_tail = 1 - dd.cdf(alpha)
-    quantiles = torch.zeros(len(subsample_sizes), 3)
+    quantiles = []
     all_bins = []
     for rearranged_traj in rearranged_trajs_list:
         sample_levels = rearranged_traj.norm(dim=[2, 3])
@@ -176,12 +177,13 @@ def compute_sample_error_vs_samples(
         quantile = rel_errors_tensor.quantile(
             torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
         )
-        quantiles[size_idx] = quantile
+        quantiles.append(quantile)
+    quantiles_tensor = torch.stack(quantiles)
     error_data = ErrorData(
         subsample_sizes,
         subsample_sizes,
-        quantiles[:, 1],
-        quantiles[:, [0, 2]].movedim(0, 1),
+        quantiles_tensor[:, 1],
+        quantiles_tensor[:, [0, 2]].movedim(0, 1),
         'Histogram Approximation',
         'blue'
     )
@@ -265,35 +267,50 @@ def compute_sample_error_vs_bins(
     )
     return error_data
 
+def save_pfode_samples(
+        abscissa: torch.Tensor,
+        chi_ode_llk: torch.Tensor,
+        model_name: str
+):
+    pfode_dir = 'pfode_likelihoods'
+    abs_dir = f'{HydraConfig.get().run.dir}/{pfode_dir}'
+    os.makedirs(abs_dir, exist_ok=True)
+    abs_filename = f'{abs_dir}/{model_name}.pt'
+    torch.save({
+        'Abscissa': abscissa,
+        'ChiOdeLLK': chi_ode_llk,
+        'ModelName': model_name
+    }, abs_filename)
+
 def compute_pfode_error_vs_bins(
+        sample_trajs: torch.Tensor,
         dim: float,
-        all_bins: List,
         alpha: float,
         stds: List[ContinuousEvaluator],
         cfg: SampleConfig,
-        IQR: float,
 ) -> ErrorData:
     dd = scipy.stats.chi(dim)
+    import pdb; pdb.set_trace()
     max_sample = dd.ppf(0.99999)
     analytical_tail = 1 - dd.cdf(alpha)
-    bin_sizes = torch.tensor([len(bins[0].bins) for bins in all_bins])
-    bin_sizes = torch.cat([bin_sizes, torch.logspace(
-        math.log10(len(all_bins[-1][0].bins)),
-        math.log10(1000),
-        5,
-        dtype=int
-    )[1:]]).unique()
-    abscissas = []
-    for num_bins in bin_sizes:
-        abscissa = torch.linspace(alpha, max_sample, num_bins+1)
-        abscissas.append(abscissa)
-    abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
+    num_bins = 1000
+    bin_width = int((max_sample - alpha) / num_bins)
+    sample_trajs = einops.rearrange(
+        sample_trajs,
+        'b c h w -> (b c) h w',
+        b=cfg.num_sample_batches
+    ).norm(dim=[1, 2])
+    IQR = scipy.stats.iqr(sample_trajs)
+    equiv_saps = (bin_width / (2 * IQR)) ** -3
+    abscissa = torch.linspace(alpha, max_sample, num_bins+1)
     fake_traj = torch.cat([
-        torch.zeros(abscissa_tensor.shape[0], dim-1, device=device),
-        abscissa_tensor
+        torch.zeros(abscissa.shape[0], dim-1, device=device),
+        abscissa
     ], 1).unsqueeze(-1)
     ode_llks = []
     rel_errors = []
+    x = abscissa
+    pdf = dd.pdf(x)
     for std in stds:
         ode_llk = std.ode_log_likelihood(
             fake_traj,
@@ -302,28 +319,16 @@ def compute_pfode_error_vs_bins(
             exact=cfg.compute_exact_trace,
         )
         chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-            (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
+            (dim - 1) * abscissa.squeeze().log() - (dim / 2 - 1) * \
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         ode_llks.append(chi_ode_llk)
-        augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
-        augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
-        x = abscissas[-1]
-        pdf = dd.pdf(x)
-        equivalents = []
-        bin_width = int((max_sample - alpha) / num_bins)
-        equiv_saps = (bin_width / (2 * IQR)) ** -3
-        equivalents.append(equiv_saps)
-
-        abscissa = abscissas[i]
-        abscissa_count = len(abscissa)
-        idx = augmented_cumsum[i]
         tail_estimate = scipy.integrate.simpson(
-            ode_llk_subsample.cpu().exp(),
+            chi_ode_llk.cpu().exp(),
             x=abscissa
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
-        # save_pfode_samples(abscissa, ode_llk_subsample)
+        save_pfode_samples(abscissa, chi_ode_llk, std.cfg.model_name)
         # plt.plot(x, pdf, color='blue')
         # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -336,8 +341,7 @@ def compute_pfode_error_vs_bins(
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
 
     error_data = ErrorData(
-        bin_sizes,
-        equivalents,
+        equiv_saps,
         median_tensor,
         conf_int_tensor,
         'PFODE Approximation',
@@ -442,7 +446,6 @@ def make_error_vs_bins(
 
 def make_plots(
         rearranged_trajs_list: List[torch.Tensor],
-        rearranged_odes_list: List[torch.Tensor],
         alpha: float,
         cfg: SampleConfig,
         stds: List[ContinuousEvaluator],
@@ -458,7 +461,6 @@ def make_plots(
 
     all_bins = make_error_vs_samples_plot(
         rearranged_trajs_list,
-        rearranged_odes_list,
         alpha,
         cfg,
         subsample_sizes,
@@ -517,8 +519,9 @@ def sample(cfg):
     if isinstance(omega_sampler, ContinuousSamplerConfig):
         stds = []  
         for trained_model in cfg.trained_models:
-            cfg.model_name = trained_model
-            std = ContinuousEvaluator(cfg)
+            new_cfg = deepcopy(cfg)
+            new_cfg.model_name = trained_model
+            std = ContinuousEvaluator(new_cfg)
             stds.append(std)
     else:
         raise NotImplementedError
@@ -546,13 +549,6 @@ def sample(cfg):
                 b=cfg.num_sample_batches
             )
             rearranged_trajs_list.append(rearranged_trajs)
-            ode_llk = std.ode_log_likelihood(
-                trajs,
-                cond=torch.tensor([-1.]),
-                alpha=alpha,
-                exact=cfg.compute_exact_trace,
-            )
-            sample_levels = trajs.norm(dim=[1, 2])
         alpha_float = alpha.cpu().item()
         make_plots(
             rearranged_trajs_list,
@@ -568,7 +564,7 @@ if __name__ == "__main__":
         suppresswarning()
 
     cs = ConfigStore.instance()
-    cs.store(name="vpsde_sample_config", node=SampleConfig)
+    cs.store(name="vpsde_sample_config", node=TrainComparisonConfig)
     register_configs()
 
     with torch.no_grad():
