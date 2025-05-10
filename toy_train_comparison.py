@@ -345,7 +345,7 @@ def compute_pfode_error_vs_bins(
 
     error_data = ErrorData(
         training_samples,
-        training_samples
+        training_samples,
         median_tensor,
         conf_int_tensor,
         'PFODE Approximation',
@@ -423,7 +423,6 @@ def plot_errors(ax, error_data: ErrorData, title: str):
     save_error_data(error_data, title)
 
 def make_error_vs_samples(
-        ax,
         sample_error_data: ErrorData,
         pfode_error_data: ErrorData,
         alpha: float
