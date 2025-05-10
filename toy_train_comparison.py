@@ -309,9 +309,9 @@ def make_error_vs_samples(
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
     plot_errors(sample_error_data, title)
     plot_errors(pfode_error_data, title)
-    plt.set_xlabel('Sample Size')
-    plt.set_ylabel('Relative Error')
-    plt.set_title(title)
+    plt.xlabel('Sample Size')
+    plt.ylabel('Relative Error')
+    plt.title(title)
 
 def make_plots(
         rearranged_trajs_list: List[torch.Tensor],
