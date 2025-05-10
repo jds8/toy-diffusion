@@ -180,6 +180,7 @@ def compute_sample_error_vs_samples(
         quantiles[size_idx] = quantile
     error_data = ErrorData(
         subsample_sizes,
+        subsample_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
         'Histogram Approximation',
@@ -218,6 +219,7 @@ def compute_pfode_error_vs_samples(
         quantiles[size_idx] = quantile.cpu()
     error_data = ErrorData(
         subsample_sizes.cpu(),
+        subsample_sizes.cpu(),
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
         'PFODE Approximation',
@@ -255,6 +257,7 @@ def compute_sample_error_vs_bins(
         )
         quantiles[bin_idx] = quantile.cpu()
     error_data = ErrorData(
+        bin_sizes,
         bin_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
@@ -374,6 +377,7 @@ def old_compute_pfode_error_vs_bins(
         )
         quantiles[bin_idx] = quantile.cpu()
     error_data = ErrorData(
+        bin_sizes,
         bin_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
