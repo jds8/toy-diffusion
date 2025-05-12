@@ -465,7 +465,7 @@ def make_error_vs_samples_plot(
         subsample_sizes
     )
     dim = trajs.shape[2]
-    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]))
+    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]).cpu())
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
         dim,
         all_bins,
@@ -496,7 +496,7 @@ def make_error_vs_bins_plot(
         alpha,
     )
     dim = trajs.shape[2]
-    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]))
+    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]).cpu())
     pfode_error_vs_bins = compute_pfode_error_vs_bins(
         dim,
         all_bins,
