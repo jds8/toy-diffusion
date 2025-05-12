@@ -193,6 +193,13 @@ class TrainComparisonConfig(SampleConfig):
 
 
 @dataclass
+class BinComparisonConfig(SampleConfig):
+    histogram_bins_filename: str = ''
+    histogram_error_medians_filename: str = ''
+    histogram_errors_filename: str = ''
+
+
+@dataclass
 class SMCSampleConfig(SampleConfig):
     time_steps: int = 5
 

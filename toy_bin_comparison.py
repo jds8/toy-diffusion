@@ -129,16 +129,35 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            plt.plot(x, pdf, color='blue')
-            plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
-            plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
-                HydraConfig.get().run.dir,
-                i
-            ))
-            plt.clf()
+            # plt.plot(x, pdf, color='blue')
+            # plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
+            # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+            #     HydraConfig.get().run.dir,
+            #     i
+            # ))
+            # plt.clf()
         rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
         plt.scatter(all_num_bins, rel_errors_tensor)
+        try:
+            histogram_bins = torch.load(cfg.histogram_bins_filename)
+            histogram_error_medians = torch.load(cfg.histogram_error_medians_filename)
+            histogram_errors = torch.load(cfg.histogram_errors_filename)
+            plt.scatter(
+                histogram_bins,
+                histogram_error_medians,
+                label='Histogram',
+                color='blue'
+            )
+            plt.fill_between(
+                histogram_bins,
+                histogram_errors[0],
+                histogram_errors[1],
+                color='blue',
+                alpha=0.2
+            )
+        except:
+            pass
         plt.xlabel('Number of Bins')
         plt.ylabel('Relative Error')
         plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')

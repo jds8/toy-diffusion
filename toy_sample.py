@@ -396,7 +396,12 @@ class ContinuousEvaluator(ToyEvaluator):
         steps = steps.to(x.device)
         for time in torch.linspace(1., self.sampler.t_eps, steps, device=x.device):
             time = time.reshape(-1)
-            sf_est = self.get_score_function(t=time, x=x)
+            sf_est = self.get_score_function(
+                t=time,
+                x=x,
+                evaluate_likelihood=False,
+                **kwargs,
+            )
             x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
 
         return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps)
