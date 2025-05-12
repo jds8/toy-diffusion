@@ -188,45 +188,6 @@ def compute_sample_error_vs_samples(
     )
     return error_data, all_bins
 
-def compute_pfode_error_vs_samples(
-        trajs: torch.Tensor,
-        all_bins: List,
-        alpha: float,
-        ode_llk: torch.Tensor,
-        subsample_sizes: torch.Tensor,
-) -> ErrorData:
-    dim = trajs.shape[2]
-    dd = scipy.stats.chi(dim)
-    analytical_tail = 1 - dd.cdf(alpha)
-    sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(subsample_sizes), 3, device='cpu')
-    for size_idx, _ in enumerate(subsample_sizes):
-        rel_errors = []
-        for subsap_idx, subsap in enumerate(sample_levels):
-            hist_output = all_bins[size_idx][subsap_idx]
-            tail_estimate = compute_pfode_tail_estimate(
-                subsap.cpu(),
-                ode_llk[subsap_idx].cpu(),
-                hist_output.bins,
-                alpha
-            )
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors.append(rel_error)
-        rel_errors_tensor = torch.stack(rel_errors)
-        quantile = rel_errors_tensor.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
-        )
-        quantiles[size_idx] = quantile.cpu()
-    error_data = ErrorData(
-        subsample_sizes.cpu(),
-        subsample_sizes.cpu(),
-        quantiles[:, 1],
-        quantiles[:, [0, 2]].movedim(0, 1),
-        'PFODE Approximation',
-        'orange'
-    )
-    return error_data
-
 def compute_sample_error_vs_bins(
         trajs: torch.Tensor,
         all_bins: List,
@@ -270,8 +231,8 @@ def compute_pfode_error_vs_bins(
         dim: float,
         all_bins: List,
         alpha: float,
-        std,
-        cfg,
+        std: ContinuousEvaluator,
+        cfg: SampleConfig,
         IQR: float,
 ) -> ErrorData:
     dd = scipy.stats.chi(dim)
@@ -442,7 +403,6 @@ def make_error_vs_bins(
 
 def make_plots(
         trajs: torch.Tensor,
-        ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
         std: ContinuousEvaluator,
@@ -460,7 +420,6 @@ def make_plots(
     all_bins = make_error_vs_samples_plot(
         ax1,
         trajs,
-        ode_llk,
         alpha,
         cfg,
         subsample_sizes,
@@ -475,7 +434,6 @@ def make_plots(
     make_error_vs_bins_plot(
         ax2,
         trajs,
-        ode_llk,
         alpha,
         cfg,
         all_bins,
@@ -496,7 +454,6 @@ def make_plots(
 def make_error_vs_samples_plot(
         ax,
         trajs: torch.Tensor,
-        ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
         subsample_sizes: torch.Tensor,
@@ -508,12 +465,14 @@ def make_error_vs_samples_plot(
         subsample_sizes
     )
     dim = trajs.shape[2]
+    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]))
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
         dim,
         all_bins,
         alpha,
         std,
         cfg,
+        IQR,
     )
     make_error_vs_samples(
         ax,
@@ -526,7 +485,6 @@ def make_error_vs_samples_plot(
 def make_error_vs_bins_plot(
         ax,
         trajs: torch.Tensor,
-        ode_llk: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
         all_bins: torch.Tensor,
@@ -544,6 +502,7 @@ def make_error_vs_bins_plot(
         alpha,
         std,
         cfg,
+        IQR,
     )
     make_error_vs_bins(
         ax,
@@ -580,36 +539,10 @@ def sample(cfg):
             '(b c) h w -> b c h w',
             b=cfg.num_sample_batches
         )
-        ode_llk = torch.rand(trajs.shape[0])
-        ode_llk = ode_llk, 0
-        # ode_llk = std.ode_log_likelihood(
-        #     trajs,
-        #     cond=torch.tensor([-1.]),
-        #     alpha=alpha,
-        #     exact=cfg.compute_exact_trace,
-        # )
         cfg_obj = OmegaConf.to_object(cfg)
         alpha_float = alpha.cpu().item()
-        sample_levels = trajs.norm(dim=[1, 2])
-
-        if type(std.example) == MultivariateGaussianExampleConfig:
-            dim = cfg.example.d
-        elif type(std.example) == BrownianMotionDiffExampleConfig:
-            dim = cfg.example.sde_steps
-        else:
-            raise NotImplementedError
-
-        chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-                (dim - 1) * sample_levels.log() - (dim / 2 - 1) * \
-                torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
-        rearranged_odes = einops.rearrange(
-            chi_ode_llk,
-            '(b c) -> b c',
-            b=cfg.num_sample_batches
-        )
         make_plots(
             rearranged_trajs,
-            rearranged_odes,
             alpha_float,
             cfg_obj,
             std
