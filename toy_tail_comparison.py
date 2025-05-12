@@ -496,6 +496,7 @@ def make_error_vs_bins_plot(
         alpha,
     )
     dim = trajs.shape[2]
+    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]))
     pfode_error_vs_bins = compute_pfode_error_vs_bins(
         dim,
         all_bins,
