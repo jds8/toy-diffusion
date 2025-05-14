@@ -21,9 +21,10 @@ import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
-from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
+from toy_train_config import BinComparisonConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
+from compute_quadratures import pdf_2d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,7 +117,12 @@ def sample(cfg):
         augmented_all_num_bins = torch.cat([torch.tensor([0]), all_num_bins+1])
         augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
         x = abscissas[-1]
-        pdf = dd.pdf(x)
+        if type(std.example) == MultivariateGaussianExampleConfig:
+            pdf = dd.pdf(x)
+        elif type(std.example) == BrownianMotionDiffExampleConfig:
+            pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+        else:
+            raise NotImplementedError
         for i in range(len(all_num_bins)):
             abscissa = abscissas[i]
             abscissa_count = len(abscissa)
@@ -129,30 +135,33 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            # plt.plot(x, pdf, color='blue')
-            # plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
-            # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
-            #     HydraConfig.get().run.dir,
-            #     i
-            # ))
-            # plt.clf()
+            plt.plot(x, pdf, color='blue')
+            plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
+            plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+                HydraConfig.get().run.dir,
+                i
+            ))
+            plt.clf()
+        import pdb; pdb.set_trace()
         rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
-        plt.scatter(all_num_bins, rel_errors_tensor)
+        plt.scatter(all_num_bins, rel_errors_tensor, label='PFODE')
         try:
-            histogram_bins = torch.load(cfg.histogram_bins_filename)
-            histogram_error_medians = torch.load(cfg.histogram_error_medians_filename)
-            histogram_errors = torch.load(cfg.histogram_errors_filename)
+            histogram_data = torch.load(cfg.histogram_bins_filename)
+            histogram_bins = histogram_data['Abscissa_bins']
+            histogram_error_medians = histogram_data['Median']
+            histogram_5 = histogram_data['5%']
+            histogram_95 = histogram_data['95%']
             plt.scatter(
                 histogram_bins,
                 histogram_error_medians,
                 label='Histogram',
-                color='blue'
+                color='blue',
             )
             plt.fill_between(
                 histogram_bins,
-                histogram_errors[0],
-                histogram_errors[1],
+                histogram_5,
+                histogram_95,
                 color='blue',
                 alpha=0.2
             )
@@ -161,6 +170,8 @@ def sample(cfg):
         plt.xlabel('Number of Bins')
         plt.ylabel('Relative Error')
         plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
+        plt.xscale("log")
+        plt.legend()
         cfg_obj = OmegaConf.to_object(cfg)
         _, run_type = get_run_type(cfg_obj)
         run_type = run_type.replace(' ', '_')
@@ -177,7 +188,7 @@ if __name__ == "__main__":
         suppresswarning()
 
     cs = ConfigStore.instance()
-    cs.store(name="vpsde_sample_config", node=SampleConfig)
+    cs.store(name="vpsde_sample_config", node=BinComparisonConfig)
     register_configs()
 
     with torch.no_grad():

@@ -194,9 +194,7 @@ class TrainComparisonConfig(SampleConfig):
 
 @dataclass
 class BinComparisonConfig(SampleConfig):
-    histogram_bins_filename: str = ''
-    histogram_error_medians_filename: str = ''
-    histogram_errors_filename: str = ''
+    histogram_bins_filename: str = 'Relative_Error_of_Tail_Integral_(alpha=0.0)_vs._Number_of_Bins_Histogram_Approximation.pt'
 
 
 @dataclass

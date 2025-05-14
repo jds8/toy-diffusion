@@ -65,36 +65,6 @@ def compute_tail_estimate(
     )
     return hist, bins, torch.tensor(tail_estimate)
 
-def compute_pfode_tail_estimate(
-        subsap: torch.Tensor,
-        ode_llk: torch.Tensor,
-        bins: torch.Tensor,
-        alpha: float
-) -> torch.Tensor:
-    ordinates = []
-    abscissas = []
-    bin_idx = (bins < alpha).sum()
-    num_out = 0
-    while bin_idx < len(bins)-1:
-        max_idx = subsap <= bins[bin_idx+1]
-        min_idx = bins[bin_idx] <= subsap
-        and_idx = (max_idx & min_idx)
-        if and_idx.any():
-            subsap_idx = and_idx.nonzero()[0].item()
-            abscissa = subsap[subsap_idx]
-            abscissas.append(abscissa)
-            ordinate = ode_llk[subsap_idx].exp()
-            ordinates.append(ordinate)
-        else:
-            num_out += 1
-        bin_idx += 1
-    abscissas_sorted, sorted_idx = torch.stack(abscissas).sort()
-    ordinates_sorted = torch.stack(ordinates)[sorted_idx]
-    # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
-    # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
-    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
-    return torch.tensor(tail_estimate)
-
 def compute_pfode_tail_estimate_from_bins(
         subsap: torch.Tensor,
         ode_llk: torch.Tensor,
