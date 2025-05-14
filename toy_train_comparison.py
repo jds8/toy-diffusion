@@ -225,7 +225,7 @@ def compute_pfode_error_vs_bins(
         b=cfg.num_sample_batches
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
-    equiv_saps = int((bin_width / (2 * IQR)) ** -3)
+    equiv_saps = (bin_width / (2 * IQR)) ** -3
     abscissa = torch.linspace(alpha, max_sample, num_bins+1)
     fake_traj = torch.cat([
         torch.zeros(abscissa.shape[0], dim-1, device=device),
