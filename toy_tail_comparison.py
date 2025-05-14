@@ -240,7 +240,7 @@ def compute_pfode_error_vs_bins(
     # pdf = dd.pdf(x)
     equivalents = []
     for i, num_bins in enumerate(bin_sizes):
-        bin_width = int((max_sample - alpha) / num_bins)
+        bin_width = (max_sample - alpha) / num_bins
         equiv_saps = (bin_width / (2 * IQR)) ** -3
         equivalents.append(equiv_saps)
 
