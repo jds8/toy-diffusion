@@ -346,7 +346,6 @@ def plot_errors(ax, error_data: ErrorData, title: str):
     save_error_data(error_data, title)
 
 def make_error_vs_samples(
-        ax,
         sample_error_data: ErrorData,
         pfode_error_data: ErrorData,
         alpha: float
@@ -354,9 +353,9 @@ def make_error_vs_samples(
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
     plot_errors(ax, sample_error_data, title)
     plot_errors(ax, pfode_error_data, title)
-    ax.set_xlabel('Sample Size')
-    ax.set_ylabel('Relative Error')
-    ax.set_title(title)
+    plt.xlabel('Sample Size')
+    plt.ylabel('Relative Error')
+    plt.title(title)
 
 def make_error_vs_bins(
         ax,
@@ -378,7 +377,6 @@ def make_plots(
         std: ContinuousEvaluator,
 ):
     plt.clf()
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharey=True)
 
     subsample_sizes = torch.logspace(
         math.log10(500),
@@ -388,30 +386,19 @@ def make_plots(
     )
 
     all_bins = make_error_vs_samples_plot(
-        ax1,
         trajs,
         alpha,
         cfg,
         subsample_sizes,
         std,
     )
-    ax1.set_xscale("log")
-    ax2.set_xscale("log")
+    plt.xscale("log")
     # ax3 = ax1.twiny()
     # ax3.set_xlim(ax1.get_xlim())
     # ax3.set_xlabel('Num Bins')
 
-    make_error_vs_bins_plot(
-        ax2,
-        trajs,
-        alpha,
-        cfg,
-        all_bins,
-        std,
-    )
-
     plt.legend()
-    fig.tight_layout()
+    plt.tight_layout()
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')
@@ -422,7 +409,6 @@ def make_plots(
     ))
 
 def make_error_vs_samples_plot(
-        ax,
         trajs: torch.Tensor,
         alpha: float,
         cfg: SampleConfig,
@@ -445,7 +431,6 @@ def make_error_vs_samples_plot(
         IQR,
     )
     make_error_vs_samples(
-        ax,
         hist_error_vs_samples,
         pfode_error_vs_samples,
         alpha
