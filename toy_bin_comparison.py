@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
 from toy_train_config import BinComparisonConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig
+    BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import pdf_2d_quadrature_bm
 
@@ -79,15 +79,19 @@ def sample(cfg):
     with torch.no_grad():
         alpha = std.likelihood.alpha.reshape(-1, 1)
 
+        cfg_obj = OmegaConf.to_object(cfg)
+
         if type(std.example) == MultivariateGaussianExampleConfig:
             dim = cfg.example.d
+            dd = scipy.stats.chi(dim)
+            analytical_tail = 1 - dd.cdf(alpha.item())
         elif type(std.example) == BrownianMotionDiffExampleConfig:
             dim = cfg.example.sde_steps
+            target = get_target(cfg_obj)
+            analytical_tail = target.analytical_prob(alpha)
         else:
             raise NotImplementedError
 
-        dd = scipy.stats.chi(dim)
-        analytical_tail = 1 - dd.cdf(alpha.item())
         max_sample = dd.ppf(0.99999)
         all_num_bins = torch.logspace(
             math.log10(10),
@@ -135,14 +139,13 @@ def sample(cfg):
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            plt.plot(x, pdf, color='blue')
-            plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
-            plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
-                HydraConfig.get().run.dir,
-                i
-            ))
-            plt.clf()
-        import pdb; pdb.set_trace()
+            # plt.plot(x, pdf, color='blue')
+            # plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
+            # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+            #     HydraConfig.get().run.dir,
+            #     i
+            # ))
+            # plt.clf()
         rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
         plt.scatter(all_num_bins, rel_errors_tensor, label='PFODE')
@@ -172,7 +175,6 @@ def sample(cfg):
         plt.title(f'Relative Error of Tail Integral (alpha={alpha.item()}) vs. Sample Size')
         plt.xscale("log")
         plt.legend()
-        cfg_obj = OmegaConf.to_object(cfg)
         _, run_type = get_run_type(cfg_obj)
         run_type = run_type.replace(' ', '_')
         plt.savefig('{}/{}_{}_tail_integral_bin_comparison.pdf'.format(

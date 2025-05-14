@@ -236,8 +236,8 @@ def compute_pfode_error_vs_bins(
     rel_errors = []
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
-    x = abscissas[-1]
-    pdf = dd.pdf(x)
+    # x = abscissas[-1]
+    # pdf = dd.pdf(x)
     equivalents = []
     for i, num_bins in enumerate(bin_sizes):
         bin_width = int((max_sample - alpha) / num_bins)
