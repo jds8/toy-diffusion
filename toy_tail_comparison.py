@@ -328,14 +328,14 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(ax, error_data: ErrorData, title: str):
-    ax.scatter(
+def plot_errors(error_data: ErrorData, title: str):
+    plt.scatter(
         error_data.samples,
         error_data.median,
         label=error_data.label,
         color=error_data.color
     )
-    ax.fill_between(
+    plt.fill_between(
         error_data.samples,
         error_data.error_bars[0],
         error_data.error_bars[1],
@@ -351,8 +351,8 @@ def make_error_vs_samples(
         alpha: float
 ):
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
-    plot_errors(ax, sample_error_data, title)
-    plot_errors(ax, pfode_error_data, title)
+    plot_errors(sample_error_data, title)
+    plot_errors(pfode_error_data, title)
     plt.xlabel('Sample Size')
     plt.ylabel('Relative Error')
     plt.title(title)
@@ -364,8 +364,8 @@ def make_error_vs_bins(
         alpha: float
 ):
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Number of Bins'
-    plot_errors(ax, sample_error_data, title)
-    plot_errors(ax, pfode_error_data, title)
+    plot_errors(sample_error_data, title)
+    plot_errors(pfode_error_data, title)
     ax.set_xlabel('Number of Bins')
     ax.set_ylabel('Relative Error')
     ax.set_title(title)
@@ -402,7 +402,7 @@ def make_plots(
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')
-    plt.savefig('{}/{}_{}_tail_integral_error.pdf'.format(
+    plt.savefig('{}/{}_{}_tail_integral_error_vs_sample_size.pdf'.format(
         HydraConfig.get().run.dir,
         run_type,
         alpha

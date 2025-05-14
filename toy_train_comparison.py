@@ -343,7 +343,7 @@ def make_plots(
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')
-    plt.savefig('{}/{}_{}_tail_integral_error.pdf'.format(
+    plt.savefig('{}/{}_{}_tail_integral_error_vs_training.pdf'.format(
         HydraConfig.get().run.dir,
         run_type,
         alpha
