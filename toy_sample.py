@@ -40,7 +40,7 @@ from histogram_error_utils import get_bm_pdf_map, \
     AnalyticalCalculator, DensityCalculator, TrapezoidCalculator, \
     SimpsonsRuleCalculator, MISE, SimpsonsMISE, \
     ErrorMeasure#, SumError, MaxError, ForwardKLError, ReverseKLError
-from compute_quadratures import pdf_2d_quadrature_bm
+from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1643,8 +1643,14 @@ def test_brownian_motion_diff(
 
     title_prefix = 'BM_diffusion'
     alpha_np = alpha.numpy().squeeze()
+    if cfg.example.sde_steps == 3:
+        quadrature = pdf_2d_quadrature_bm
+    elif cfg.example.sde_steps == 4:
+        quadrature = pdf_3d_quadrature_bm
+    else:
+        raise NotImplementedError
     calculator = SimpsonsRuleCalculator(
-        pdf_2d_quadrature_bm,
+        quadrature,
         cfg.pdf_values_dir
     )
     sample_trajs_list = einops.rearrange(
@@ -1677,7 +1683,7 @@ def test_brownian_motion_diff(
         sample_trajs,
         alpha_np,
         std,
-        pdf_2d_quadrature_bm
+        quadrature,
     )
 
     # make histogram
@@ -2108,8 +2114,14 @@ def sample(cfg):
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
                 dist_type = 'BM'
+                if cfg.example.sde_steps == 2:
+                    quadrature = pdf_2d_quadrature_bm
+                elif cfg.example.sde_steps == 3:
+                    quadrature = pdf_3d_quadrature_bm
+                else:
+                    raise NotImplementedError
                 calculator = SimpsonsRuleCalculator(
-                    pdf_2d_quadrature_bm,
+                    quadrature,
                     cfg.pdf_values_dir
                 )
                 if cfg.sample_file:
