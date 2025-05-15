@@ -83,7 +83,6 @@ def sample(cfg):
 
         if type(std.example) == MultivariateGaussianExampleConfig:
             dim = cfg.example.d
-            dd = scipy.stats.chi(dim)
             analytical_tail = 1 - dd.cdf(alpha.item())
         elif type(std.example) == BrownianMotionDiffExampleConfig:
             dim = cfg.example.sde_steps
@@ -92,6 +91,7 @@ def sample(cfg):
         else:
             raise NotImplementedError
 
+        dd = scipy.stats.chi(dim)
         max_sample = dd.ppf(0.99999)
         all_num_bins = torch.logspace(
             math.log10(10),

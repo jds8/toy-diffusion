@@ -20,9 +20,9 @@ import matplotlib.pyplot as plt
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig
+    BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
-from compute_quadratures import pdf_2d_quadrature_bm
+from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -198,16 +198,29 @@ def compute_sample_error_vs_bins(
     return error_data
 
 def compute_pfode_error_vs_bins(
-        dim: float,
+        trajs: torch.Tensor,
         all_bins: List,
         alpha: float,
         std: ContinuousEvaluator,
         cfg: SampleConfig,
         IQR: float,
 ) -> ErrorData:
-    dd = scipy.stats.chi(dim)
-    max_sample = dd.ppf(0.99999)
-    analytical_tail = 1 - dd.cdf(alpha)
+    norm_trajs = trajs.norm(dim=[2, 3]).cpu()
+    IQR = scipy.stats.iqr(norm_trajs)
+    max_sample = norm_trajs.max()
+
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        dim = cfg.example.d
+        dd = scipy.stats.chi(dim)
+        analytical_tail = 1 - dd.cdf(alpha.item())
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        dim = cfg.example.sde_steps
+        cfg_obj = OmegaConf.to_object(cfg)
+        target = get_target(cfg_obj)
+        analytical_tail = target.analytical_prob(alpha)
+    else:
+        raise NotImplementedError
+
     bin_sizes = torch.tensor([len(bins[0].bins) for bins in all_bins])
     bin_sizes = torch.cat([bin_sizes, torch.logspace(
         math.log10(len(all_bins[-1][0].bins)),
@@ -236,8 +249,9 @@ def compute_pfode_error_vs_bins(
     rel_errors = []
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
-    # x = abscissas[-1]
+    x = abscissas[-1]
     # pdf = dd.pdf(x)
+    pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
     equivalents = []
     for i, num_bins in enumerate(bin_sizes):
         bin_width = (max_sample - alpha) / num_bins
@@ -254,14 +268,14 @@ def compute_pfode_error_vs_bins(
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
-        # save_pfode_samples(abscissa, ode_llk_subsample)
-        # plt.plot(x, pdf, color='blue')
-        # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
-        # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
-        #     HydraConfig.get().run.dir,
-        #     i
-        # ))
-        # plt.clf()
+        plt.plot(x, pdf, color='blue')
+        plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
+        plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+            HydraConfig.get().run.dir,
+            i
+        ))
+        plt.clf()
+    import pdb; pdb.set_trace()
     median_tensor = torch.stack(rel_errors)
     zeros_tensor = torch.zeros_like(median_tensor)
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
@@ -420,10 +434,8 @@ def make_error_vs_samples_plot(
         alpha,
         subsample_sizes
     )
-    dim = trajs.shape[2]
-    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]).cpu())
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
-        dim,
+        trajs,
         all_bins,
         alpha,
         std,
@@ -451,9 +463,8 @@ def make_error_vs_bins_plot(
         alpha,
     )
     dim = trajs.shape[2]
-    IQR = scipy.stats.iqr(trajs.norm(dim=[2, 3]).cpu())
     pfode_error_vs_bins = compute_pfode_error_vs_bins(
-        dim,
+        trajs,
         all_bins,
         alpha,
         std,
