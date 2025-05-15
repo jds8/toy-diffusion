@@ -203,7 +203,6 @@ def compute_pfode_error_vs_bins(
         alpha: float,
         std: ContinuousEvaluator,
         cfg: SampleConfig,
-        IQR: float,
 ) -> ErrorData:
     norm_trajs = trajs.norm(dim=[2, 3]).cpu()
     IQR = scipy.stats.iqr(norm_trajs)
@@ -440,7 +439,6 @@ def make_error_vs_samples_plot(
         alpha,
         std,
         cfg,
-        IQR,
     )
     make_error_vs_samples(
         hist_error_vs_samples,
@@ -469,7 +467,6 @@ def make_error_vs_bins_plot(
         alpha,
         std,
         cfg,
-        IQR,
     )
     make_error_vs_bins(
         ax,
