@@ -211,7 +211,7 @@ def compute_pfode_error_vs_bins(
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1 - dd.cdf(alpha.item())
+        analytical_tail = 1 - dd.cdf(alpha)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         # cfg_obj = OmegaConf.to_object(cfg)
@@ -254,9 +254,9 @@ def compute_pfode_error_vs_bins(
         pdf = dd.pdf(x)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         if cfg.example.sde_steps == 3:
-            pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+            pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in x]
         elif cfg.example.sde_steps == 4:
-            pdf = [pdf_3d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+            pdf = [pdf_3d_quadrature_bm(a.cpu().item(), alpha) for a in x]
         else:
             raise NotImplementedError
     else:
