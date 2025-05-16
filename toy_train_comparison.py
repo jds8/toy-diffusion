@@ -383,7 +383,7 @@ def get_num_samples(model_name: str) -> int:
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
     logger = logging.getLogger("main")
-    logger.info('run type: importance sampling')
+    logger.info('run type: train_comparison')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
 
