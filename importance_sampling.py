@@ -251,11 +251,15 @@ class BrownianMotionDiffTarget(Target):
     def analytical_prob(self, alpha: torch.Tensor) -> torch.Tensor:
         # no better solution known
         if self.cfg.example.sde_steps == 104:
+            if alpha == 0.:
+                return torch.tensor(1.)
             if alpha == 2.5:
                 return torch.tensor(0.0108)
             if alpha == 3.0:
                 return torch.tensor(0.00225)
         elif self.cfg.example.sde_steps == 3:
+            if alpha == 0.:
+                return torch.tensor(1.)
             if alpha == 0.5:
                 return torch.tensor(0.7458913437205545)
             if alpha == 1.0:
@@ -265,6 +269,8 @@ class BrownianMotionDiffTarget(Target):
             if alpha == 2.:
                 return torch.tensor(0.047295252164004084)
         elif self.cfg.example.sde_steps == 4:
+            if alpha == 0.:
+                return torch.tensor(1.)
             if alpha == 0.5:
                 return torch.tensor(0.8060463160489418)
             if alpha == 1.0:

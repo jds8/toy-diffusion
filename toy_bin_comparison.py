@@ -24,7 +24,7 @@ from toy_sample import ContinuousEvaluator
 from toy_train_config import BinComparisonConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
-from compute_quadratures import pdf_2d_quadrature_bm
+from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -83,11 +83,13 @@ def sample(cfg):
 
         if type(std.example) == MultivariateGaussianExampleConfig:
             dim = cfg.example.d
+            dd = scipy.stats.chi(dim)
             analytical_tail = 1 - dd.cdf(alpha.item())
         elif type(std.example) == BrownianMotionDiffExampleConfig:
             dim = cfg.example.sde_steps
-            target = get_target(cfg_obj)
-            analytical_tail = target.analytical_prob(alpha)
+            # target = get_target(cfg_obj)
+            # analytical_tail = target.analytical_prob(alpha)
+            analytical_tail = 1.
         else:
             raise NotImplementedError
 
@@ -110,7 +112,7 @@ def sample(cfg):
         ], 1).unsqueeze(-1)
         ode_llk = std.ode_log_likelihood(
             fake_traj,
-            cond=torch.tensor([-1.]),
+            cond=std.cond,
             alpha=alpha,
             exact=cfg.compute_exact_trace,
         )
@@ -124,7 +126,12 @@ def sample(cfg):
         if type(std.example) == MultivariateGaussianExampleConfig:
             pdf = dd.pdf(x)
         elif type(std.example) == BrownianMotionDiffExampleConfig:
-            pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+            if cfg.example.sde_steps == 3:
+                pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+            elif cfg.example.sde_steps == 4:
+                pdf = [pdf_3d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+            else:
+                raise NotImplementedError
         else:
             raise NotImplementedError
         for i in range(len(all_num_bins)):
@@ -136,16 +143,18 @@ def sample(cfg):
                 ode_llk_subsample.cpu().exp(),
                 x=abscissa
             )
+            lk = ode_llk_subsample.cpu().exp()
+            te2 = ((lk[:-1] + lk[1:]) / 2 * abscissa.diff()).sum()
             rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
             save_pfode_samples(abscissa, ode_llk_subsample)
-            # plt.plot(x, pdf, color='blue')
-            # plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
-            # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
-            #     HydraConfig.get().run.dir,
-            #     i
-            # ))
-            # plt.clf()
+            plt.plot(x, pdf, color='blue')
+            plt.scatter(abscissa.cpu(), ode_llk_subsample.exp().cpu(), color='red')
+            plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
+                HydraConfig.get().run.dir,
+                i
+            ))
+            plt.clf()
         rel_errors_tensor = torch.stack(rel_errors)
         save_pfode_errors(all_num_bins, rel_errors_tensor)
         plt.scatter(all_num_bins, rel_errors_tensor, label='PFODE')

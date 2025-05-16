@@ -214,9 +214,10 @@ def compute_pfode_error_vs_bins(
         analytical_tail = 1 - dd.cdf(alpha.item())
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
-        cfg_obj = OmegaConf.to_object(cfg)
-        target = get_target(cfg_obj)
-        analytical_tail = target.analytical_prob(alpha)
+        # cfg_obj = OmegaConf.to_object(cfg)
+        # target = get_target(cfg_obj)
+        # analytical_tail = target.analytical_prob(alpha)
+        analytical_tail = 1.
     else:
         raise NotImplementedError
 
@@ -238,7 +239,7 @@ def compute_pfode_error_vs_bins(
     ], 1).unsqueeze(-1)
     ode_llk = std.ode_log_likelihood(
         fake_traj,
-        cond=torch.tensor([-1.]),
+        cond=std.cond,
         alpha=torch.tensor([alpha]),
         exact=cfg.compute_exact_trace,
     )
@@ -249,8 +250,17 @@ def compute_pfode_error_vs_bins(
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
     x = abscissas[-1]
-    # pdf = dd.pdf(x)
-    pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        pdf = dd.pdf(x)
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        if cfg.example.sde_steps == 3:
+            pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+        elif cfg.example.sde_steps == 4:
+            pdf = [pdf_3d_quadrature_bm(a.cpu().item(), alpha.item()) for a in x]
+        else:
+            raise NotImplementedError
+    else:
+        raise NotImplementedError
     equivalents = []
     for i, num_bins in enumerate(bin_sizes):
         bin_width = (max_sample - alpha) / num_bins
