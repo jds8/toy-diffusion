@@ -1587,13 +1587,8 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
 
     chi_ode = chi_ode_llk.exp()
 
-    alpha = cfg.likelihood.alpha
-    dd = stats.chi(dim)
-    gaussian_pdf = dd.pdf(x) / (1-dd.cdf(alpha))
-
     plt.scatter(sample_levels, chi_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
-    plt.scatter(x, gaussian_pdf, color='g', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
     plt.xlabel('Radius')
