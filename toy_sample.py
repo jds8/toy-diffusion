@@ -617,6 +617,7 @@ def compute_ode_log_likelihood(
         alpha: torch.Tensor,
         scale_fn: Callable,
 ):
+    analytical_llk = analytical_llk.cpu()
     print('analytical_llk: {}'.format(analytical_llk))
 
     # compute log likelihood under diffusion model
@@ -631,11 +632,11 @@ def compute_ode_log_likelihood(
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
     ode_llk_val = ode_llk[0].cpu()
-    scaled_ode_llk = scale_fn(ode_llk_val[-1])
+    scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
-    avg_rel_error = torch.expm1(analytical_llk.cpu() - scaled_ode_llk.cpu()).abs().mean()
+    avg_rel_error = torch.expm1(analytical_llk - scaled_ode_llk).abs().mean()
     print('\naverage relative error: {}'.format(avg_rel_error))
 
     rkl_pfode = (scaled_ode_llk - analytical_llk).mean()
