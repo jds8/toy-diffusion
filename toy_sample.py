@@ -1577,16 +1577,22 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
     # plot points (ode_llk, sample_levels) against analytical chi
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
-    chi_ode_llk = ode_llk.cpu() + ((cfg.example.sde_steps - 1) / 2) * \
+    dim = cfg.example.sde_steps - 1
+    chi_ode_llk = ode_llk.cpu() + (dim / 2) * \
                  torch.tensor(2 * np.pi).log() + \
-                 (cfg.example.sde_steps - 2) * np.log(sample_levels) - \
-                 ((cfg.example.sde_steps - 1) / 2 - 1) * torch.tensor(2.).log() - \
-                 scipy.special.loggamma((cfg.example.sde_steps - 1) / 2)
+                 (dim - 1) * np.log(sample_levels) - \
+                 (dim / 2 - 1) * torch.tensor(2.).log() - \
+                 scipy.special.loggamma(dim / 2)
 
     chi_ode = chi_ode_llk.exp()
 
+    alpha = cfg.likelihood.alpha
+    dd = stats.chi(dim)
+    gaussian_pdf = dd.pdf(x) / (1-dd.cdf(alpha))
+
     plt.scatter(sample_levels, chi_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
+    plt.scatter(x, gaussian_pdf, color='g', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
     plt.xlabel('Radius')
@@ -2114,9 +2120,9 @@ def sample(cfg):
             elif type(std.example) == BrownianMotionDiffExampleConfig:
                 dim = cfg.example.sde_steps - 1
                 dist_type = 'BM'
-                if cfg.example.sde_steps == 2:
+                if cfg.example.sde_steps == 3:
                     quadrature = pdf_2d_quadrature_bm
-                elif cfg.example.sde_steps == 3:
+                elif cfg.example.sde_steps == 4:
                     quadrature = pdf_3d_quadrature_bm
                 else:
                     raise NotImplementedError

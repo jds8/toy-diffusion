@@ -284,7 +284,6 @@ def compute_pfode_error_vs_bins(
             i
         ))
         plt.clf()
-    import pdb; pdb.set_trace()
     median_tensor = torch.stack(rel_errors)
     zeros_tensor = torch.zeros_like(median_tensor)
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
@@ -491,6 +490,7 @@ def sample(cfg):
     logger.info('run type: tail_comparison')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
+    logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
 
     os.system('echo git commit: $(git rev-parse HEAD)')
 

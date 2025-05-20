@@ -386,6 +386,7 @@ def sample(cfg):
     logger.info('run type: train_comparison')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
+    logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
 
     os.system('echo git commit: $(git rev-parse HEAD)')
 
