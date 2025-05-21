@@ -635,7 +635,7 @@ def compute_ode_log_likelihood(
     ode_llk = (-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2)
     tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
     ode_llk -= tail.log()
-    ode_llk = ode_llk, 0
+    ode_llk = [ode_llk], 0
     ode_llk_val = ode_llk[0]
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     ode_lk_val = ode_llk_val[-1].exp()
