@@ -622,15 +622,18 @@ def compute_ode_log_likelihood(
 
     # compute log likelihood under diffusion model
     tm = timer.time()
-    ode_llk = std.ode_log_likelihood(
-        sample_trajs,
-        cond=std.cond,
-        alpha=alpha,
-        exact=cfg.compute_exact_trace,
-        num_hutchinson_samples=cfg.num_hutchinson_samples,
-    )
+    # ode_llk = std.ode_log_likelihood(
+    #     sample_trajs,
+    #     cond=std.cond,
+    #     alpha=alpha,
+    #     exact=cfg.compute_exact_trace,
+    #     num_hutchinson_samples=cfg.num_hutchinson_samples,
+    # )
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
+    ode_llk = (-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2), 0
+    tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
+    ode_llk /= tail
     ode_llk_val = ode_llk[0].cpu()
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     print('\node_llk: {}'.format(scaled_ode_llk))
