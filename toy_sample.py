@@ -631,6 +631,7 @@ def compute_ode_log_likelihood(
     # )
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
+    dim = sample_trajs.shape[1]
     ode_llk = (-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2), 0
     tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
     ode_llk /= tail
