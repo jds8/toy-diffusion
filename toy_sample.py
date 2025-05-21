@@ -641,7 +641,7 @@ def compute_ode_log_likelihood(
     ode_llk_val = ode_llk[0]
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     ode_lk_val = ode_llk_val[-1].exp()
-    print(f'is?: {(torch.abs(ode_llk_val[-1].cpu().squeeze() - (analytical_llk.cpu()+dim*dt.sqrt().log())) < 1e-5).all()}')
+    print(f'is?: {(torch.abs(ode_llk_val[-1].cpu().squeeze() - analytical_llk.cpu()) < 1e-5).all()}')
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
