@@ -632,11 +632,15 @@ def compute_ode_log_likelihood(
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
     dim = sample_trajs.shape[1]
-    ode_llk = (-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2), 0
+    ode_llk = (-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2)
     tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
-    ode_llk /= tail
-    ode_llk_val = ode_llk[0].cpu()
+    ode_llk -= tail.log()
+    ode_llk = ode_llk, 0
+    ode_llk_val = ode_llk[0]
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
+    ode_lk_val = ode_llk_val[-1].exp()
+    print(f'is?: {(torch.abs(ode_lk_val - analytical_llk.exp().cpu()) < 1e-3).all()}')
+    import pdb; pdb.set_trace()
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
