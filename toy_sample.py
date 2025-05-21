@@ -639,7 +639,7 @@ def compute_ode_log_likelihood(
     ode_llk_val = ode_llk[0]
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     ode_lk_val = ode_llk_val[-1].exp()
-    print(f'is?: {(torch.abs(ode_lk_val - analytical_llk.exp().cpu()) < 1e-3).all()}')
+    print(f'is?: {(torch.abs(ode_lk_val.cpu() - analytical_llk.exp().cpu()) < 1e-3).all()}')
     import pdb; pdb.set_trace()
     print('\node_llk: {}'.format(scaled_ode_llk))
 
