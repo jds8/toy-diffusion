@@ -549,7 +549,7 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x.device
         )
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
         latent, delta_ll = sol[0][-1], sol[1]
         # if self.cfg.test == TestType.Gaussian:
         #     pseudo_example = self.cfg.example.copy()
