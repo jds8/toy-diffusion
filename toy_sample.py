@@ -1595,7 +1595,6 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     ])
     pdf = gaussian_pdfs * parallelopiped_sa.numpy()
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
-    plt.scatter(sample_levels, analytical_pdf, color='g', label='Analytical From Samples')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
