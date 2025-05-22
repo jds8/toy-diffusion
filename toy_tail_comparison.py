@@ -123,9 +123,9 @@ def compute_sample_error_vs_samples(
         trajs: torch.Tensor,
         alpha: float,
         subsample_sizes: torch.Tensor,
+        std: ContinuousEvaluator,
+        cfg: SampleConfig,
 ) -> Tuple[ErrorData, List[List[HistOutput]]]:
-    dim = trajs.shape[2]
-    dd = scipy.stats.chi(dim)
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
@@ -173,6 +173,8 @@ def compute_sample_error_vs_bins(
         trajs: torch.Tensor,
         all_bins: List,
         alpha: float,
+        std: ContinuousEvaluator,
+        cfg: SampleConfig,
 ) -> ErrorData:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
@@ -427,7 +429,9 @@ def make_error_vs_samples_plot(
     hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         trajs,
         alpha,
-        subsample_sizes
+        subsample_sizes,
+        std,
+        cfg,
     )
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
         trajs,
@@ -455,6 +459,8 @@ def make_error_vs_bins_plot(
         trajs,
         all_bins,
         alpha,
+        std,
+        cfg,
     )
     dim = trajs.shape[2]
     pfode_error_vs_bins = compute_pfode_error_vs_bins(
