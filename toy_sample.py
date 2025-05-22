@@ -1578,15 +1578,18 @@ def plot_bm_pdf_histogram_estimate(
 def compute_parallelopiped_surface_area(r):
     return 4 * r / torch.tensor(5.).sqrt() * (1 + torch.tensor(2.).sqrt())
 
+def compute_parallelopiped_llk(sample_levels, ode_llk):
+    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in sample_levels])
+    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.log()
+    transformed_ode = transformed_ode_llk.exp()
+    return transformed_ode
+
 def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     dim = cfg.example.sde_steps - 1
-    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in sample_levels])
-    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.log()
-
-    transformed_ode = transformed_ode_llk.exp()
+    transformed_ode = compute_parallelopiped_llk(sample_levels, ode_llk)
 
     x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
     parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in x])

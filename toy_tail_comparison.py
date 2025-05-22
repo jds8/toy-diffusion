@@ -18,7 +18,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator
+from toy_sample import ContinuousEvaluator, compute_parallelopiped_llk
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
@@ -126,7 +126,18 @@ def compute_sample_error_vs_samples(
 ) -> Tuple[ErrorData, List[List[HistOutput]]]:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
-    analytical_tail = 1 - dd.cdf(alpha)
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        dim = cfg.example.d
+        dd = scipy.stats.chi(dim)
+        analytical_tail = 1 - dd.cdf(alpha)
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        dim = cfg.example.sde_steps
+        # cfg_obj = OmegaConf.to_object(cfg)
+        # target = get_target(cfg_obj)
+        # analytical_tail = target.analytical_prob(alpha)
+        analytical_tail = 1.
+    else:
+        raise NotImplementedError
     sample_levels = trajs.norm(dim=[2, 3])
     quantiles = torch.zeros(len(subsample_sizes), 3)
     all_bins = []
@@ -165,7 +176,18 @@ def compute_sample_error_vs_bins(
 ) -> ErrorData:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
-    analytical_tail = 1 - dd.cdf(alpha)
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        dim = cfg.example.d
+        dd = scipy.stats.chi(dim)
+        analytical_tail = 1 - dd.cdf(alpha)
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        dim = cfg.example.sde_steps
+        # cfg_obj = OmegaConf.to_object(cfg)
+        # target = get_target(cfg_obj)
+        # analytical_tail = target.analytical_prob(alpha)
+        analytical_tail = 1.
+    else:
+        raise NotImplementedError
     sample_levels = trajs.norm(dim=[2, 3])
     quantiles = torch.zeros(len(all_bins), 3, device='cpu')
     bin_sizes = []
@@ -243,13 +265,19 @@ def compute_pfode_error_vs_bins(
         alpha=torch.tensor([alpha]),
         exact=cfg.compute_exact_trace,
     )
-    chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-        (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
-        torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
-    rel_errors = []
-    augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
-    augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
-    x = abscissas[-1]
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        transformed_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+            (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
+            torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        transformed_ode_llk = compute_parallelopiped_llk(
+            abscissa_tensor,
+            ode_llk[0][-1]
+        )
+        rel_errors = []
+        augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
+        augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
+        x = abscissas[-1]
     if type(std.example) == MultivariateGaussianExampleConfig:
         pdf = dd.pdf(x)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
@@ -270,7 +298,7 @@ def compute_pfode_error_vs_bins(
         abscissa = abscissas[i]
         abscissa_count = len(abscissa)
         idx = augmented_cumsum[i]
-        ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
+        ode_llk_subsample = transformed_ode_llk[idx:idx+abscissa_count]
         tail_estimate = scipy.integrate.simpson(
             ode_llk_subsample.cpu().exp(),
             x=abscissa
@@ -293,47 +321,6 @@ def compute_pfode_error_vs_bins(
         equivalents,
         median_tensor,
         conf_int_tensor,
-        'PFODE Approximation',
-        'orange'
-    )
-    return error_data
-
-def old_compute_pfode_error_vs_bins(
-        trajs: torch.Tensor,
-        ode_llk: torch.Tensor,
-        all_bins: List,
-        alpha: float,
-) -> ErrorData:
-    dim = trajs.shape[2]
-    dd = scipy.stats.chi(dim)
-    analytical_tail = 1 - dd.cdf(alpha)
-    sample_levels = trajs.norm(dim=[2, 3])
-    quantiles = torch.zeros(len(all_bins), 3, device='cpu')
-    bin_sizes = []
-    for bin_idx, bins in enumerate(all_bins):
-        hist_output = all_bins[bin_idx][0]
-        num_bins = len(hist_output.bins)
-        bin_sizes.append(num_bins)
-        rel_errors = []
-        for subsap_idx, subsap in enumerate(sample_levels):
-            tail_estimate = compute_pfode_tail_estimate_from_bins(
-                subsap.cpu(),
-                ode_llk[subsap_idx].cpu(),
-                num_bins,
-                alpha
-            )
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors.append(rel_error)
-        rel_errors_tensor = torch.stack(rel_errors)
-        quantile = rel_errors_tensor.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
-        )
-        quantiles[bin_idx] = quantile.cpu()
-    error_data = ErrorData(
-        bin_sizes,
-        bin_sizes,
-        quantiles[:, 1],
-        quantiles[:, [0, 2]].movedim(0, 1),
         'PFODE Approximation',
         'orange'
     )

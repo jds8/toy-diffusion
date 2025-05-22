@@ -20,7 +20,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator
+from toy_sample import ContinuousEvaluator, compute_parallelopiped_llk
 from toy_train_config import BinComparisonConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
@@ -49,7 +49,7 @@ def save_pfode_errors(
 
 def save_pfode_samples(
         abscissa: torch.Tensor,
-        chi_ode_llk: torch.Tensor
+        transformed_ode_llk: torch.Tensor
 ):
     num_bins = abscissa.shape[0]
     rel_directory = 'pfode_bin_comparison_data'
@@ -58,7 +58,7 @@ def save_pfode_samples(
     filename = f'{abs_directory}/pfode_bin_comparison_data_{num_bins}_bins.pt'
     torch.save({
         'Abscissa': abscissa,
-        'ChiOdeLlk': chi_ode_llk
+        'TransformedOdeLlk': transformed_ode_llk
     }, filename)
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
@@ -117,9 +117,15 @@ def sample(cfg):
             alpha=alpha,
             exact=cfg.compute_exact_trace,
         )
-        chi_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-            (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
-            torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        if type(std.example) == MultivariateGaussianExampleConfig:
+            transformed_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+                (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
+                torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        elif type(std.example) == BrownianMotionDiffExampleConfig:
+            transformed_ode_llk = compute_parallelopiped_llk(
+                abscissa_tensor.squeeze(),
+                ode_llk[0][-1]
+            )
         rel_errors = []
         augmented_all_num_bins = torch.cat([torch.tensor([0]), all_num_bins+1])
         augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
@@ -139,7 +145,7 @@ def sample(cfg):
             abscissa = abscissas[i]
             abscissa_count = len(abscissa)
             idx = augmented_cumsum[i]
-            ode_llk_subsample = chi_ode_llk[idx:idx+abscissa_count]
+            ode_llk_subsample = transformed_ode_llk[idx:idx+abscissa_count]
             tail_estimate = scipy.integrate.simpson(
                 ode_llk_subsample.cpu().exp(),
                 x=abscissa
