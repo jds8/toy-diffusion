@@ -631,8 +631,8 @@ def compute_ode_log_likelihood(
     )
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
-    scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     ode_lk_val = ode_llk_val[-1].exp()
+    scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     print(f'is ode_llk close?: {(torch.abs(ode_llk_val[-1].cpu().squeeze() - analytical_llk.cpu()) < 1e-2).all()}')
     print('\node_llk: {}'.format(scaled_ode_llk))
 
