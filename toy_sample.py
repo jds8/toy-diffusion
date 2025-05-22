@@ -622,26 +622,18 @@ def compute_ode_log_likelihood(
 
     # compute log likelihood under diffusion model
     tm = timer.time()
-    # ode_llk = std.ode_log_likelihood(
-    #     sample_trajs,
-    #     cond=std.cond,
-    #     alpha=alpha,
-    #     exact=cfg.compute_exact_trace,
-    #     num_hutchinson_samples=cfg.num_hutchinson_samples,
-    # )
+    ode_llk = std.ode_log_likelihood(
+        sample_trajs,
+        cond=std.cond,
+        alpha=alpha,
+        exact=cfg.compute_exact_trace,
+        num_hutchinson_samples=cfg.num_hutchinson_samples,
+    )
     eval_time = timer.time() - tm
     print(f'pfode time: {eval_time}')
-    dim = sample_trajs.shape[1]
-    dt = torch.tensor(1/dim)
-    ode_llk = ((-sample_trajs.norm(dim=[1,2])**2/2).exp() * torch.tensor(2*torch.pi) ** (-dim/2)).log()
-    tail = get_target(std).analytical_prob(alpha) if alpha.cpu().numpy() else torch.tensor(1.)
-    ode_llk -= dim*dt.sqrt().log()
-    ode_llk -= tail.log()
-    ode_llk = [ode_llk], 0
-    ode_llk_val = ode_llk[0]
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
     ode_lk_val = ode_llk_val[-1].exp()
-    print(f'is?: {(torch.abs(ode_llk_val[-1].cpu().squeeze() - analytical_llk.cpu()) < 1e-5).all()}')
+    print(f'is ode_llk close?: {(torch.abs(ode_llk_val[-1].cpu().squeeze() - analytical_llk.cpu()) < 1e-2).all()}')
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
@@ -1583,28 +1575,32 @@ def plot_bm_pdf_histogram_estimate(
     plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
     return sample_levels, x, pdf
 
-def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, x, pdf, cfg):
-    # plot points (ode_llk, sample_levels) against analytical chi
+def compute_parallelopiped_surface_area(r):
+    return 4 * r / torch.tensor(5.).sqrt() * (1 + torch.tensor(2.).sqrt())
+
+def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg):
+    # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     dim = cfg.example.sde_steps - 1
-    chi_ode_llk = ode_llk.cpu() + (dim / 2) * \
-                 torch.tensor(2 * np.pi).log() + \
-                 (dim - 1) * np.log(sample_levels) - \
-                 (dim / 2 - 1) * torch.tensor(2.).log() - \
-                 scipy.special.loggamma(dim / 2)
+    parallelopiped_sa = torch.cat([compute_parallelopiped_surface_area(r) for r in sample_levels])
+    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.log()
 
-    chi_ode = chi_ode_llk.exp()
+    transformed_ode = transformed_ode_llk.exp()
 
-    plt.scatter(sample_levels, chi_ode, label='Density Estimates')
+    x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
+    parallelopiped_sa = torch.cat([compute_parallelopiped_surface_area(r) for r in x])
+    gaussian_pdfs = torch.cat([scipy.stats.norm(r) * scipy.stats.norm(0.) ** (dim-1)])
+    pdf = gaussian_pdfs * parallelopiped_sa
+    plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
-    plt.xlabel('Radius')
+    plt.xlabel('P-Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.sde_steps} Step BM Tail Density')
     num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
-    plt.savefig('{}/chi_pfode_estimate_{}.pdf'.format(
+    plt.savefig('{}/bm_pfode_estimate_{}.pdf'.format(
         HydraConfig.get().run.dir,
         num_hutchinson_samples
     ))
@@ -1767,7 +1763,7 @@ def test_brownian_motion_diff(
         scale_fn,
     )
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], x, pdf, cfg)
+        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], cfg)
 
         # if cfg.run_histogram_convergence:
         #     pfode_prefix = 'PFODE'
