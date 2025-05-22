@@ -1580,7 +1580,7 @@ def compute_parallelopiped_surface_area(r):
 
 def compute_parallelopiped_llk(sample_levels, ode_llk):
     parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in sample_levels])
-    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.log()
+    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.cpu().log()
     transformed_ode = transformed_ode_llk.exp()
     return transformed_ode
 
@@ -1596,7 +1596,7 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     gaussian_pdfs = np.array([
         scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail for r in x
     ])
-    pdf = gaussian_pdfs * parallelopiped_sa.numpy()
+    pdf = gaussian_pdfs.cpu() * parallelopiped_sa.cpu().numpy()
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
