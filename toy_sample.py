@@ -1578,21 +1578,24 @@ def plot_bm_pdf_histogram_estimate(
 def compute_parallelopiped_surface_area(r):
     return 4 * r / torch.tensor(5.).sqrt() * (1 + torch.tensor(2.).sqrt())
 
-def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg):
+def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     dim = cfg.example.sde_steps - 1
-    parallelopiped_sa = torch.cat([compute_parallelopiped_surface_area(r) for r in sample_levels])
+    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in sample_levels])
     transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.log()
 
     transformed_ode = transformed_ode_llk.exp()
 
     x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
-    parallelopiped_sa = torch.cat([compute_parallelopiped_surface_area(r) for r in x])
-    gaussian_pdfs = torch.cat([scipy.stats.norm(r) * scipy.stats.norm(0.) ** (dim-1)])
-    pdf = gaussian_pdfs * parallelopiped_sa
+    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in x])
+    gaussian_pdfs = np.array([
+        scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail for r in x
+    ])
+    pdf = gaussian_pdfs * parallelopiped_sa.numpy()
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
+    plt.scatter(sample_levels, analytical_pdf, color='g', label='Analytical From Samples')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
@@ -1763,7 +1766,7 @@ def test_brownian_motion_diff(
         scale_fn,
     )
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], cfg)
+        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], cfg, tail)
 
         # if cfg.run_histogram_convergence:
         #     pfode_prefix = 'PFODE'
