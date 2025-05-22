@@ -1607,7 +1607,7 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
         num_hutchinson_samples
     ))
 
-    return chi_ode
+    return transformed_ode
 
 def get_hist_llks(
         sample_trajs: torch.Tensor,
