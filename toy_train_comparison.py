@@ -384,7 +384,9 @@ def make_error_vs_samples_plot(
     hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         rearranged_trajs_list,
         alpha,
-        training_samples
+        training_samples,
+        stds[0],
+        cfg,
     )
     dim = rearranged_trajs_list[0].shape[2]
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
