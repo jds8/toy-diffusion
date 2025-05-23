@@ -1744,12 +1744,15 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     plt.clf()
     dim = cfg.example.sde_steps - 1
 
+    alpha = cfg.likelihood.alpha
     perimeters = torch.stack([compute_perimeter(r, alpha, dt) for r in sample_levels])
     transformed_ode = perimeters * ode_llk.exp()
 
     x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
-    gpdf = scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail
-    pdf = gpdf.cpu() * perimeter
+    gpdfs = torch.stack([
+        scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail for r in sample_levels
+    ])
+    pdf = gpdfs.cpu() * perimeters
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
