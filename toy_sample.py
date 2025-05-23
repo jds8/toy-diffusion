@@ -1641,20 +1641,20 @@ def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> 
     arc_len = r * theta
     return arc_len, theta
 
-def vertical_line_circle_intersection(r, alpha, dt):
+def vertical_line_circle_intersection(r, alpha, dt_sqrt):
     """
-    Computes the intersection points of the vertical line x = alpha/dt
+    Computes the intersection points of the vertical line x = alpha/dt_sqrt
     with the circle x^2 + y^2 = r^2
 
     Inputs:
         r     : scalar or tensor, radius of circle
         alpha : scalar or tensor
-        dt    : scalar or tensor
+        dt_sqrt    : scalar or tensor
 
     Returns:
         A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
     """
-    x = alpha / dt
+    x = alpha / dt_sqrt
 
     # x^2 + y^2 = r^2 => y^2 = r^2 - x^2
     rhs = r**2 - x**2
@@ -1669,20 +1669,20 @@ def vertical_line_circle_intersection(r, alpha, dt):
         y_neg = -y_pos
         return torch.stack([torch.tensor([x, y_pos]), torch.tensor([x, y_neg])])
 
-def line_circle_intersection(r, alpha, dt):
+def line_circle_intersection(r, alpha, dt_sqrt):
     """
-    Computes the intersection points of the line y = alpha/dt - x
+    Computes the intersection points of the line y = alpha/dt_sqrt - x
     with the circle x^2 + y^2 = r^2
 
     Inputs:
         r     : scalar or tensor, radius of circle
         alpha : scalar or tensor
-        dt    : scalar or tensor
+        dt_sqrt    : scalar or tensor
 
     Returns:
         A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
     """
-    C = alpha / dt  # constant term in y = C - x
+    C = alpha / dt_sqrt  # constant term in y = C - x
 
     # Substitute y = C - x into x^2 + y^2 = r^2
     # Gives: x^2 + (C - x)^2 = r^2
@@ -1729,23 +1729,22 @@ def compute_lengths(top_points, bottom_points, right_points, left_points):
         total_perimeter += left_length + right_length
     return total_perimeter
 
-def compute_perimeter(r, alpha, dt):
-    assert r <= torch.tensor(5.).sqrt()*alpha/dt
-    top_points = line_circle_intersection(r, alpha, dt)
-    bottom_points = line_circle_intersection(r, -alpha, dt)
-    right_points = vertical_line_circle_intersection(r, alpha, dt)
-    left_points = vertical_line_circle_intersection(r, -alpha, dt)
+def compute_perimeter(r, alpha, dt_sqrt):
+    assert r <= torch.tensor(5.).sqrt()*alpha/dt_sqrt
+    top_points = line_circle_intersection(r, alpha, dt_sqrt)
+    bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
+    right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
+    left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
     perimeter = compute_lengths(top_points, bottom_points, right_points, left_points)
     return perimeter
 
-def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
+def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, dt, alpha):
     # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     dim = cfg.example.sde_steps - 1
 
-    alpha = cfg.likelihood.alpha
-    perimeters = torch.stack([compute_perimeter(r, alpha, dt) for r in sample_levels])
+    perimeters = torch.stack([compute_perimeter(r, alpha, dt.sqrt()) for r in sample_levels])
     transformed_ode = perimeters * ode_llk.exp()
 
     x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
@@ -1924,7 +1923,14 @@ def test_brownian_motion_diff(
         scale_fn,
     )
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
-        chi_ode = plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk[0][-1], cfg, tail)
+        chi_ode = plot_bm_pdf_pfode_estimate(
+            sample_trajs,
+            ode_llk[0][-1],
+            cfg,
+            tail,
+            alpha,
+            dt
+        )
 
         # if cfg.run_histogram_convergence:
         #     pfode_prefix = 'PFODE'
