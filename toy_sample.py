@@ -1575,28 +1575,181 @@ def plot_bm_pdf_histogram_estimate(
     plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
     return sample_levels, x, pdf
 
-def compute_parallelopiped_surface_area(r):
-    return 4 * r / torch.tensor(5.).sqrt() * (1 + torch.tensor(2.).sqrt())
+def line_circle_intersection(r, alpha, dt):
+    """
+    Computes the intersection points of the line y = alpha/dt - x
+    with the circle x^2 + y^2 = r^2
 
-def compute_parallelopiped_llk(sample_levels, ode_llk):
-    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in sample_levels])
-    transformed_ode_llk = ode_llk.cpu() + parallelopiped_sa.cpu().log()
-    transformed_ode = transformed_ode_llk.exp()
-    return transformed_ode
+    Inputs:
+        r     : scalar or tensor, radius of circle
+        alpha : scalar or tensor
+        dt    : scalar or tensor
+
+    Returns:
+        A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
+    """
+    C = alpha / dt  # constant term in y = C - x
+
+    # Substitute y = C - x into x^2 + y^2 = r^2
+    # Gives: x^2 + (C - x)^2 = r^2
+    # => x^2 + C^2 - 2Cx + x^2 = r^2
+    # => 2x^2 - 2C x + C^2 - r^2 = 0
+
+    a = 2.0
+    b = -2.0 * C
+    c = C**2 - r**2
+
+    discriminant = b**2 - 4 * a * c
+
+    if discriminant < 0:
+        return torch.empty(0, 2)  # No real intersection
+    elif discriminant == 0:
+        x = -b / (2 * a)
+        y = C - x
+        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection
+    else:
+        sqrt_disc = torch.sqrt(discriminant)
+        x1 = (-b + sqrt_disc) / (2 * a)
+        x2 = (-b - sqrt_disc) / (2 * a)
+        y1 = C - x1
+        y2 = C - x2
+        return torch.stack([[x1, y1], [x2, y2]])
+
+def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the shortest arc length between two points on a circle.
+
+    Args:
+        p1: Tensor of shape (..., 2), first point on the circle
+        p2: Tensor of shape (..., 2), second point on the circle
+        r: Radius of the circle (scalar or tensor broadcastable to p1[..., 0])
+
+    Returns:
+        Arc length along the circle (same batch shape as input)
+    """
+    # Ensure both points lie on the circle by normalizing (optional, if not exact)
+    p1 = p1 / p1.norm(dim=-1, keepdim=True)
+    p2 = p2 / p2.norm(dim=-1, keepdim=True)
+
+    # Compute cosine of angle between p1 and p2
+    dot = (p1 * p2).sum(dim=-1)
+    cos_theta = torch.clamp(dot, -1.0, 1.0)  # Numerical stability
+
+    theta = torch.acos(cos_theta)
+
+    # Shortest arc (always <= πr)
+    arc_len = r * theta
+    return arc_len, theta
+
+def vertical_line_circle_intersection(r, alpha, dt):
+    """
+    Computes the intersection points of the vertical line x = alpha/dt
+    with the circle x^2 + y^2 = r^2
+
+    Inputs:
+        r     : scalar or tensor, radius of circle
+        alpha : scalar or tensor
+        dt    : scalar or tensor
+
+    Returns:
+        A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
+    """
+    x = alpha / dt
+
+    # x^2 + y^2 = r^2 => y^2 = r^2 - x^2
+    rhs = r**2 - x**2
+
+    if rhs < 0:
+        return torch.empty(0, 2)  # No real intersection
+    elif rhs == 0:
+        y = torch.tensor(0.0)
+        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection (tangent)
+    else:
+        y_pos = torch.sqrt(rhs)
+        y_neg = -y_pos
+        return torch.stack([torch.tensor([x, y_pos]), torch.tensor([x, y_neg])])
+
+def line_circle_intersection(r, alpha, dt):
+    """
+    Computes the intersection points of the line y = alpha/dt - x
+    with the circle x^2 + y^2 = r^2
+
+    Inputs:
+        r     : scalar or tensor, radius of circle
+        alpha : scalar or tensor
+        dt    : scalar or tensor
+
+    Returns:
+        A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
+    """
+    C = alpha / dt  # constant term in y = C - x
+
+    # Substitute y = C - x into x^2 + y^2 = r^2
+    # Gives: x^2 + (C - x)^2 = r^2
+    # => x^2 + C^2 - 2Cx + x^2 = r^2
+    # => 2x^2 - 2C x + C^2 - r^2 = 0
+
+    a = 2.0
+    b = -2.0 * C
+    c = C**2 - r**2
+
+    discriminant = b**2 - 4 * a * c
+
+    if discriminant < 0:
+        return torch.empty(0, 2)  # No real intersection
+    elif discriminant == 0:
+        x = -b / (2 * a)
+        y = C - x
+        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection
+    else:
+        sqrt_disc = torch.sqrt(discriminant)
+        x1 = (-b + sqrt_disc) / (2 * a)
+        x2 = (-b - sqrt_disc) / (2 * a)
+        y1 = C - x1
+        y2 = C - x2
+        return torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
+
+def compute_lengths(top_points, bottom_points, right_points, left_points):
+    total_perimeter = 0.
+    if top_points.nelement():
+        top_length, top_angle = shortest_arc_length(top_points[0], top_points[1], r)
+        bottom_length, bottom_angle = shortest_arc_length(bottom_points[0], bottom_points[1], r)
+        total_perimeter += top_length + bottom_length
+        top_top_point = top_points[top_points[:, 1].sort().indices[-1]]
+        top_bottom_point = top_points[top_points[:, 1].sort().indices[0]]
+        bottom_top_point = bottom_points[bottom_points[:, 1].sort().indices[-1]]
+        bottom_bottom_point = bottom_points[bottom_points[:, 1].sort().indices[0]]
+    if right_points.nelement():
+        right_bottom_point = right_points[right_points[:, 1].sort().indices[0]]
+        top_bottom_point = top_points[top_points[:, 1].sort().indices[0]]
+        right_length, right_angle = shortest_arc_length(top_bottom_point, right_bottom_point, r)
+        left_top_point = left_points[left_points[:, 1].sort().indices[-1]]
+        bottom_top_point = bottom_points[bottom_points[:, 1].sort().indices[-1]]
+        left_length, left_angle = shortest_arc_length(left_top_point, bottom_top_point, r)
+        total_perimeter += left_length + right_length
+    return total_perimeter
+
+def compute_perimeter(r, alpha, dt):
+    assert r <= torch.tensor(5.).sqrt()*alpha/dt
+    top_points = line_circle_intersection(r, alpha, dt)
+    bottom_points = line_circle_intersection(r, -alpha, dt)
+    right_points = vertical_line_circle_intersection(r, alpha, dt)
+    left_points = vertical_line_circle_intersection(r, -alpha, dt)
+    perimeter = compute_lengths(top_points, bottom_points, right_points, left_points)
+    return perimeter
 
 def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail):
     # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
     dim = cfg.example.sde_steps - 1
-    transformed_ode = compute_parallelopiped_llk(sample_levels, ode_llk)
+
+    perimeters = torch.stack([compute_perimeter(r, alpha, dt) for r in sample_levels])
+    transformed_ode = perimeters * ode_llk.exp()
 
     x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
-    parallelopiped_sa = torch.stack([compute_parallelopiped_surface_area(r) for r in x])
-    gaussian_pdfs = np.array([
-        scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail for r in x
-    ])
-    pdf = gaussian_pdfs.cpu() * parallelopiped_sa.cpu().numpy()
+    gpdf = scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail
+    pdf = gpdf.cpu() * perimeter
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
