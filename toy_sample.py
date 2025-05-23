@@ -633,7 +633,6 @@ def compute_ode_log_likelihood(
     print(f'pfode time: {eval_time}')
     ode_llk_val = ode_llk[0].cpu()
     scaled_ode_llk = scale_fn(ode_llk_val[-1]).cpu()
-    print(f'is ode_llk close?: {(torch.abs(ode_llk_val[-1].squeeze() - analytical_llk) < 1e-2).all()}')
     print('\node_llk: {}'.format(scaled_ode_llk))
 
     # compare log likelihoods by MSE
@@ -1709,8 +1708,8 @@ def line_circle_intersection(r, alpha, dt_sqrt):
         y2 = C - x2
         return torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
 
-def compute_lengths(top_points, bottom_points, right_points, left_points):
-    total_perimeter = 0.
+def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> torch.Tensor:
+    total_perimeter = torch.tensor(0.)
     if top_points.nelement():
         top_length, top_angle = shortest_arc_length(top_points[0], top_points[1], r)
         bottom_length, bottom_angle = shortest_arc_length(bottom_points[0], bottom_points[1], r)
@@ -1729,16 +1728,19 @@ def compute_lengths(top_points, bottom_points, right_points, left_points):
         total_perimeter += left_length + right_length
     return total_perimeter
 
-def compute_perimeter(r, alpha, dt_sqrt):
-    assert r <= torch.tensor(5.).sqrt()*alpha/dt_sqrt
+def compute_perimeter(r: float, alpha: torch.Tensor, dt_sqrt: torch.Tensor) -> torch.Tensor:
+    if r <= alpha:
+        return torch.tensor(0.)
+    if r >= torch.tensor(5.).sqrt()*alpha/dt_sqrt:
+        return 2 * torch.pi * r
     top_points = line_circle_intersection(r, alpha, dt_sqrt)
     bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
     right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
     left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
-    perimeter = compute_lengths(top_points, bottom_points, right_points, left_points)
+    perimeter = compute_lengths(r, top_points, bottom_points, right_points, left_points)
     return perimeter
 
-def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, dt, alpha):
+def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, alpha, dt, x, pdf):
     # plot points (ode_llk, sample_levels) against analytical
     sample_levels = sample_trajs.norm(dim=[1, 2]).cpu()  # [B]
     plt.clf()
@@ -1747,16 +1749,11 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, dt, alpha):
     perimeters = torch.stack([compute_perimeter(r, alpha, dt.sqrt()) for r in sample_levels])
     transformed_ode = perimeters * ode_llk.exp()
 
-    x = torch.linspace(cfg.likelihood.alpha, sample_levels.max(), 100)
-    gpdfs = torch.stack([
-        scipy.stats.norm.pdf(r) * scipy.stats.norm.pdf(0.) ** (dim-1) / tail for r in sample_levels
-    ])
-    pdf = gpdfs.cpu() * perimeters
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')
     plt.plot(x, pdf, color='r', linestyle='-')
     plt.legend()
-    plt.xlabel('P-Radius')
+    plt.xlabel('Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.sde_steps} Step BM Tail Density')
     num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
@@ -1764,6 +1761,7 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, dt, alpha):
         HydraConfig.get().run.dir,
         num_hutchinson_samples
     ))
+    import pdb; pdb.set_trace()
 
     return transformed_ode
 
@@ -1924,12 +1922,14 @@ def test_brownian_motion_diff(
     )
     if alpha in [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]:
         chi_ode = plot_bm_pdf_pfode_estimate(
-            sample_trajs,
-            ode_llk[0][-1],
-            cfg,
-            tail,
-            alpha,
-            dt
+            sample_trajs=sample_trajs,
+            ode_llk=ode_llk[0][-1],
+            cfg=cfg,
+            tail=tail,
+            alpha=alpha,
+            dt=dt,
+            x=x,
+            pdf=pdf
         )
 
         # if cfg.run_histogram_convergence:
