@@ -279,10 +279,10 @@ def compute_pfode_error_vs_bins(
             alpha=alpha,
             dt=dt
         )
-        rel_errors = []
-        augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
-        augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
-        x = abscissas[-1]
+    rel_errors = []
+    augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
+    augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
+    x = abscissas[-1]
     if type(std.example) == MultivariateGaussianExampleConfig:
         pdf = dd.pdf(x)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
