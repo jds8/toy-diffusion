@@ -1643,7 +1643,7 @@ def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> 
 def vertical_line_circle_intersection(
         r: torch.Tensor,
         alpha: torch.Tensor,
-        dt_sqr: torch.Tensort
+        dt_sqrt: torch.Tensor
 ):
     """
     Computes the intersection points of the vertical line x = alpha/dt_sqrt
@@ -1676,7 +1676,7 @@ def vertical_line_circle_intersection(
 def line_circle_intersection(
         r: torch.Tensor,
         alpha: torch.Tensor,
-        dt_sqr: torch.Tensort
+        dt_sqrt: torch.Tensor
 ):
     """
     Computes the intersection points of the line y = alpha/dt_sqrt - x
