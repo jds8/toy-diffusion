@@ -310,12 +310,16 @@ def compute_pfode_error_vs_bins(
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
-        plt.plot(x, pdf, color='blue')
-        plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
+        plt.plot(x, pdf, color='blue', label='analytical')
+        plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red', label='pfode')
         plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
             HydraConfig.get().run.dir,
             i
         ))
+        plt.xlabel('Radius')
+        plt.ylabel('Density')
+        plt.title(f'PFODE abscissa with estimate: {round(tail_estimate, 2)} and error: {round(rel_error, 2)}')
+        plt.legend()
         plt.clf()
     median_tensor = torch.stack(rel_errors)
     zeros_tensor = torch.zeros_like(median_tensor)
