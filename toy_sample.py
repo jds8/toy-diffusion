@@ -1640,7 +1640,11 @@ def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> 
     arc_len = r * theta
     return arc_len.cpu(), theta.cpu()
 
-def vertical_line_circle_intersection(r, alpha, dt_sqrt):
+def vertical_line_circle_intersection(
+        r: torch.Tensor,
+        alpha: torch.Tensor,
+        dt_sqr: torch.Tensort
+):
     """
     Computes the intersection points of the vertical line x = alpha/dt_sqrt
     with the circle x^2 + y^2 = r^2
@@ -1659,16 +1663,21 @@ def vertical_line_circle_intersection(r, alpha, dt_sqrt):
     rhs = r**2 - x**2
 
     if rhs < 0:
-        return torch.empty(0, 2)  # No real intersection
+        output = torch.empty(0, 2)  # No real intersection
     elif rhs == 0:
         y = torch.tensor(0.0)
-        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection (tangent)
+        output = torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection (tangent)
     else:
         y_pos = torch.sqrt(rhs)
         y_neg = -y_pos
-        return torch.stack([torch.tensor([x, y_pos]), torch.tensor([x, y_neg])])
+        output = torch.stack([torch.tensor([x, y_pos]), torch.tensor([x, y_neg])])
+    return output.cpu()
 
-def line_circle_intersection(r, alpha, dt_sqrt):
+def line_circle_intersection(
+        r: torch.Tensor,
+        alpha: torch.Tensor,
+        dt_sqr: torch.Tensort
+):
     """
     Computes the intersection points of the line y = alpha/dt_sqrt - x
     with the circle x^2 + y^2 = r^2
@@ -1695,18 +1704,19 @@ def line_circle_intersection(r, alpha, dt_sqrt):
     discriminant = b**2 - 4 * a * c
 
     if discriminant < 0:
-        return torch.empty(0, 2)  # No real intersection
+        output = torch.empty(0, 2)  # No real intersection
     elif discriminant == 0:
         x = -b / (2 * a)
         y = C - x
-        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection
+        output = torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection
     else:
         sqrt_disc = torch.sqrt(discriminant)
         x1 = (-b + sqrt_disc) / (2 * a)
         x2 = (-b - sqrt_disc) / (2 * a)
         y1 = C - x1
         y2 = C - x2
-        return torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
+        output = torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
+    return output.cpu()
 
 def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> torch.Tensor:
     total_perimeter = torch.tensor(0., device='cpu')
@@ -1728,21 +1738,28 @@ def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> 
         total_perimeter += left_length + right_length
     return total_perimeter
 
-def compute_perimeter(r: float, alpha: torch.Tensor, dt_sqrt: torch.Tensor) -> torch.Tensor:
+def compute_perimeter(
+        r: torch.Tensor,
+        alpha: torch.Tensor,
+        dt_sqrt: torch.Tensor
+) -> torch.Tensor:
     if r <= alpha:
-        return torch.tensor(0.)
-    if r >= torch.tensor(5.).sqrt()*alpha/dt_sqrt:
-        return 2 * torch.pi * r
-    top_points = line_circle_intersection(r, alpha, dt_sqrt)
-    bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
-    right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
-    left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
-    perimeter = compute_lengths(r, top_points, bottom_points, right_points, left_points)
-    return perimeter
+        output = torch.tensor(0.)
+    elif r >= torch.tensor(5.).sqrt()*alpha/dt_sqrt:
+        output = 2 * torch.pi * r
+    else:
+        top_points = line_circle_intersection(r, alpha, dt_sqrt)
+        bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
+        right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
+        left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
+        output = compute_lengths(r, top_points, bottom_points, right_points, left_points)
+    return output.cpu()
 
 def compute_transformed_ode(sample_levels, ode_llk, alpha, dt):
-    perimeters = torch.stack([compute_perimeter(r, alpha, dt.sqrt()) for r in sample_levels])
-    transformed_ode = perimeters * ode_llk.exp()
+    perimeters = torch.stack([
+        compute_perimeter(r.cpu(), alpha.cpu(), dt.sqrt().cpu()) for r in sample_levels
+    ], device='cpu')
+    transformed_ode = perimeters * ode_llk.exp().cpu()
     return transformed_ode
 
 def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, alpha, dt, x, pdf):
