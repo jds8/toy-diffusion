@@ -318,7 +318,9 @@ def compute_pfode_error_vs_bins(
         ))
         plt.xlabel('Radius')
         plt.ylabel('Density')
-        plt.title(f'PFODE abscissa with estimate: {round(tail_estimate, 2)} and error: {round(rel_error, 2)}')
+        plt.title(f'PFODE abscissa with estimate: '
+            f'{round(tail_estimate.item(), 2)} and error: '
+            f'{round(rel_error.item(), 2)}')
         plt.legend()
         plt.clf()
     median_tensor = torch.stack(rel_errors)
