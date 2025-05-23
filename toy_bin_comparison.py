@@ -20,7 +20,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_parallelopiped_llk
+from toy_sample import ContinuousEvaluator, compute_perimeter
 from toy_train_config import BinComparisonConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
@@ -122,7 +122,7 @@ def sample(cfg):
                 (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
                 torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         elif type(std.example) == BrownianMotionDiffExampleConfig:
-            transformed_ode_llk = compute_parallelopiped_llk(
+            transformed_ode_llk = compute_perimeter(
                 abscissa_tensor.squeeze(),
                 ode_llk[0][-1]
             )

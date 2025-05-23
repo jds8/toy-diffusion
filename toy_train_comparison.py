@@ -19,7 +19,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_parallelopiped_llk
+from toy_sample import ContinuousEvaluator, compute_perimeter
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, TrainComparisonConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
@@ -263,7 +263,7 @@ def compute_pfode_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        transformed_ode_llk = compute_parallelopiped_llk(
+        transformed_ode_llk = compute_perimeter(
             abscissa.cpu(),
             ode_llk[0][-1]
         )
