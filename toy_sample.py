@@ -1740,7 +1740,7 @@ def compute_perimeter(r: float, alpha: torch.Tensor, dt_sqrt: torch.Tensor) -> t
     perimeter = compute_lengths(r, top_points, bottom_points, right_points, left_points)
     return perimeter
 
-def compute_transformed_ode(sample_levels, ode_llk):
+def compute_transformed_ode(sample_levels, ode_llk, alpha, dt):
     perimeters = torch.stack([compute_perimeter(r, alpha, dt.sqrt()) for r in sample_levels])
     transformed_ode = perimeters * ode_llk.exp()
     return transformed_ode
@@ -1751,7 +1751,7 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, alpha, dt, x, p
     plt.clf()
     dim = cfg.example.sde_steps - 1
 
-    transformed_ode = compute_transformed_ode(sample_levels, ode_llk)
+    transformed_ode = compute_transformed_ode(sample_levels, ode_llk, alpha, dt)
 
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
     plt.scatter(x, pdf, color='r', label='Analytical PDF')

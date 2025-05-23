@@ -238,6 +238,7 @@ def compute_pfode_error_vs_bins(
         analytical_tail = 1 - dd.cdf(alpha)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
+        dt = torch.tensor(1/(dim-1))
         # cfg_obj = OmegaConf.to_object(cfg)
         # target = get_target(cfg_obj)
         # analytical_tail = target.analytical_prob(alpha)
@@ -273,8 +274,10 @@ def compute_pfode_error_vs_bins(
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         transformed_ode_llk = compute_transformed_ode(
-            abscissa_tensor,
-            ode_llk[0][-1]
+            abscissa_tensor.squeeze(),
+            ode_llk[0][-1],
+            alpha=alpha,
+            dt=dt
         )
         rel_errors = []
         augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])

@@ -91,6 +91,7 @@ def sample(cfg):
             # target = get_target(cfg_obj)
             # analytical_tail = target.analytical_prob(alpha)
             analytical_tail = 1.
+            dt = torch.tensor(1/(dim-1))
         else:
             raise NotImplementedError
 
@@ -124,7 +125,9 @@ def sample(cfg):
         elif type(std.example) == BrownianMotionDiffExampleConfig:
             transformed_ode_llk = compute_perimeter(
                 abscissa_tensor.squeeze(),
-                ode_llk[0][-1]
+                ode_llk[0][-1],
+                alpha=alpha,
+                dt=dt
             )
         rel_errors = []
         augmented_all_num_bins = torch.cat([torch.tensor([0]), all_num_bins+1])

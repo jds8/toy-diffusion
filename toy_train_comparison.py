@@ -19,7 +19,7 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_perimeter
+from toy_sample import ContinuousEvaluator, compute_transformed_ode
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, TrainComparisonConfig
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
@@ -234,6 +234,7 @@ def compute_pfode_error_vs_bins(
         # target = get_target(cfg_obj)
         # analytical_tail = target.analytical_prob(alpha)
         analytical_tail = 1.
+        dt = torch.tensor(1 / (dim-1))
     else:
         raise NotImplementedError
     dd = scipy.stats.chi(dim)
@@ -263,13 +264,19 @@ def compute_pfode_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        transformed_ode_llk = compute_perimeter(
-            abscissa.cpu(),
-            ode_llk[0][-1]
-        )
-        transformed_ode_llk = ode_llk[0][-1].cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-            (dim - 1) * abscissa.cpu().squeeze().log() - (dim / 2 - 1) * \
-            torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        if type(stds[0].example) == MultivariateGaussianExampleConfig:
+            transformed_ode_llk = ode_llk[0][-1].cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+                (dim - 1) * abscissa.cpu().squeeze().log() - (dim / 2 - 1) * \
+                torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
+            transformed_ode_llk = compute_transformed_ode(
+                abscissa.cpu().squeeze(),
+                ode_llk[0][-1],
+                alpha=alpha,
+                dt=dt
+            )
+        else:
+            raise NotImplementedError
         ode_llks.append(transformed_ode_llk)
         tail_estimate = scipy.integrate.simpson(
             transformed_ode_llk.cpu().exp(),
