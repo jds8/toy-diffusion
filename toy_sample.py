@@ -1638,7 +1638,7 @@ def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> 
 
     # Shortest arc (always <= πr)
     arc_len = r * theta
-    return arc_len, theta
+    return arc_len.cpu(), theta.cpu()
 
 def vertical_line_circle_intersection(r, alpha, dt_sqrt):
     """
@@ -1709,7 +1709,7 @@ def line_circle_intersection(r, alpha, dt_sqrt):
         return torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
 
 def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> torch.Tensor:
-    total_perimeter = torch.tensor(0.)
+    total_perimeter = torch.tensor(0., device='cpu')
     if top_points.nelement():
         top_length, top_angle = shortest_arc_length(top_points[0], top_points[1], r)
         bottom_length, bottom_angle = shortest_arc_length(bottom_points[0], bottom_points[1], r)
