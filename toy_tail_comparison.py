@@ -272,8 +272,9 @@ def compute_pfode_error_vs_bins(
         transformed_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
             (dim - 1) * abscissa_tensor.squeeze().log() - (dim / 2 - 1) * \
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+        transformed_ode = transformed_ode_llk.exp()
     elif type(std.example) == BrownianMotionDiffExampleConfig:
-        transformed_ode_llk = compute_transformed_ode(
+        transformed_ode = compute_transformed_ode(
             abscissa_tensor.squeeze(),
             ode_llk[0][-1],
             alpha=alpha,
@@ -303,17 +304,17 @@ def compute_pfode_error_vs_bins(
         abscissa = abscissas[i]
         abscissa_count = len(abscissa)
         idx = augmented_cumsum[i]
-        ode_llk_subsample = transformed_ode_llk[idx:idx+abscissa_count]
+        ode_lk_subsample = transformed_ode[idx:idx+abscissa_count]
         tail_estimate = scipy.integrate.simpson(
-            ode_llk_subsample.cpu().exp(),
+            ode_lk_subsample.cpu(),
             x=abscissa
         )
-        # ode = ode_llk_subsample.cpu().exp()
+        # ode = ode_lk_subsample.cpu().exp()
         # tail_estimate = ((ode[:-1] + ode[1:])/2 * abscissa.diff()[0]).sum()
         rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
-        plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red', label='pfode')
+        plt.scatter(abscissa, ode_lk_subsample.cpu().exp(), color='red', label='pfode')
         plt.xlabel('Radius')
         plt.ylabel('Density')
         plt.title(f'PFODE abscissa with estimate: '
