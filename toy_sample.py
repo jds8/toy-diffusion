@@ -1755,7 +1755,12 @@ def compute_perimeter(
         output = compute_lengths(r, top_points, bottom_points, right_points, left_points)
     return output.cpu()
 
-def compute_transformed_ode(sample_levels, ode_llk, alpha, dt):
+def compute_transformed_ode(
+        sample_levels: torch.Tensor,
+        ode_llk: torch.Tensor,
+        alpha: float,
+        dt: torch.Tensor,
+):
     perimeters = torch.stack([
         compute_perimeter(r.cpu(), alpha.cpu(), dt.sqrt().cpu()) for r in sample_levels
     ], device='cpu')
