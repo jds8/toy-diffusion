@@ -308,6 +308,8 @@ def compute_pfode_error_vs_bins(
             ode_llk_subsample.cpu().exp(),
             x=abscissa
         )
+        ode = ode_llk_subsample.cpu().exp()
+        tail_estimate = ((ode[:-1] + ode[1:])/2 * abscissa.diff()[0]).sum()
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
