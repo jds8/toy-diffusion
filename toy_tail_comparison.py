@@ -304,13 +304,13 @@ def compute_pfode_error_vs_bins(
         abscissa_count = len(abscissa)
         idx = augmented_cumsum[i]
         ode_llk_subsample = transformed_ode_llk[idx:idx+abscissa_count]
-        tail_estimate = scipy.integrate.simpson(
-            ode_llk_subsample.cpu().exp(),
-            x=abscissa
-        )
+        # tail_estimate = scipy.integrate.simpson(
+        #     ode_llk_subsample.cpu().exp(),
+        #     x=abscissa
+        # )
         ode = ode_llk_subsample.cpu().exp()
         tail_estimate = ((ode[:-1] + ode[1:])/2 * abscissa.diff()[0]).sum()
-        rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
+        rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
         plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red', label='pfode')
@@ -358,13 +358,14 @@ def plot_errors(error_data: ErrorData, title: str):
         label=error_data.label,
         color=error_data.color
     )
-    plt.fill_between(
-        error_data.samples,
-        error_data.error_bars[0],
-        error_data.error_bars[1],
-        color=error_data.color,
-        alpha=0.2
-    )
+    if error_data.error_bars[0].sum() + error_data.error_bars[1].sum():
+        plt.fill_between(
+            error_data.samples,
+            error_data.error_bars[0],
+            error_data.error_bars[1],
+            color=error_data.color,
+            alpha=0.2
+        )
 
     save_error_data(error_data, title)
 
