@@ -318,7 +318,7 @@ def compute_pfode_error_vs_bins(
         plt.ylabel('Density')
         plt.title(f'PFODE abscissa with estimate: '
             f'{round(tail_estimate.item(), 2)} and error: '
-            f'{round(rel_error.item(), 2)}\\'
+            f'{round(rel_error.item(), 2)}\n'
             f'ESS: {equiv_saps}')
         plt.legend()
         plt.savefig('{}/bin_comparison_density_estimates_{}'.format(

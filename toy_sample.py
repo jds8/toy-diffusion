@@ -1763,7 +1763,7 @@ def compute_transformed_ode(
 ):
     perimeters = torch.stack([
         compute_perimeter(r.cpu(), alpha, dt.sqrt().cpu()) for r in sample_levels
-    ], device='cpu')
+    ])
     transformed_ode = perimeters * ode_llk.exp().cpu()
     return transformed_ode
 
