@@ -304,12 +304,12 @@ def compute_pfode_error_vs_bins(
         abscissa_count = len(abscissa)
         idx = augmented_cumsum[i]
         ode_llk_subsample = transformed_ode_llk[idx:idx+abscissa_count]
-        # tail_estimate = scipy.integrate.simpson(
-        #     ode_llk_subsample.cpu().exp(),
-        #     x=abscissa
-        # )
-        ode = ode_llk_subsample.cpu().exp()
-        tail_estimate = ((ode[:-1] + ode[1:])/2 * abscissa.diff()[0]).sum()
+        tail_estimate = scipy.integrate.simpson(
+            ode_llk_subsample.cpu().exp(),
+            x=abscissa
+        )
+        # ode = ode_llk_subsample.cpu().exp()
+        # tail_estimate = ((ode[:-1] + ode[1:])/2 * abscissa.diff()[0]).sum()
         rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
