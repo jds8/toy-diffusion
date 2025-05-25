@@ -239,10 +239,8 @@ def compute_pfode_error_vs_bins(
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         dt = torch.tensor(1/(dim-1))
-        # cfg_obj = OmegaConf.to_object(cfg)
-        # target = get_target(cfg_obj)
-        # analytical_tail = target.analytical_prob(alpha)
-        analytical_tail = 1.
+        target = get_target(cfg)
+        analytical_tail = 1#target.analytical_prob(alpha)
     else:
         raise NotImplementedError
 
@@ -258,9 +256,11 @@ def compute_pfode_error_vs_bins(
         abscissa = torch.linspace(alpha, max_sample, num_bins+1)
         abscissas.append(abscissa)
     abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
+    intermediate_traj_elements = (abscissa_tensor**2/(dim-1)).sqrt()
+    intermediate_traj = intermediate_traj_elements.repeat(1, dim-1)
     fake_traj = torch.cat([
-        torch.zeros(abscissa_tensor.shape[0], dim-1, device=device),
-        abscissa_tensor
+        torch.zeros(abscissa_tensor.shape[0], 1, device=device),
+        intermediate_traj,
     ], 1).unsqueeze(-1)
     ode_llk = std.ode_log_likelihood(
         fake_traj,
@@ -312,7 +312,7 @@ def compute_pfode_error_vs_bins(
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
-        plt.scatter(abscissa, ode_lk_subsample.cpu().exp(), color='red', label='pfode')
+        plt.scatter(abscissa, ode_lk_subsample.cpu(), color='red', label='pfode')
         plt.xlabel('Radius')
         plt.ylabel('Density')
         plt.title(f'PFODE abscissa with estimate: '
