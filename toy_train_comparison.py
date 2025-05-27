@@ -139,17 +139,6 @@ def compute_pfode_tail_estimate_from_bins(
     # plt.clf()
     return tail_estimate_tensor
 
-def sample(std: ContinuousEvaluator):
-    sample_traj_out = std.sample_trajectories(
-        cond=-1.,
-        alpha=std.likelihood.alpha.reshape(-1, 1),
-    )
-
-    sample_trajs = sample_traj_out.samples
-    trajs = sample_trajs[-1]
-    out_trajs = trajs
-    return out_trajs
-
 def compute_sample_error_vs_samples(
         rearranged_trajs_list: List[torch.Tensor],
         alpha: float,
@@ -160,7 +149,7 @@ def compute_sample_error_vs_samples(
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1 - dd.cdf(alpha)
+        analytical_tail = 1.#1 - dd.cdf(alpha)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         # cfg_obj = OmegaConf.to_object(cfg)
@@ -202,7 +191,7 @@ def compute_sample_error_vs_samples(
 
 def save_pfode_samples(
         abscissa: torch.Tensor,
-        transformed_ode_llk: torch.Tensor,
+        transformed_ode_lk: torch.Tensor,
         equiv_saps: torch.Tensor,
         model_name: str
 ):
@@ -212,7 +201,7 @@ def save_pfode_samples(
     abs_filename = f'{abs_dir}/{model_name}.pt'
     torch.save({
         'Abscissa': abscissa,
-        'TransformedOdeLLK': transformed_ode_llk,
+        'TransformedOdeLLK': transformed_ode_lk,
         'EquivSaps': equiv_saps,
         'ModelName': model_name
     }, abs_filename)
@@ -227,7 +216,7 @@ def compute_pfode_error_vs_bins(
     if type(stds[0].example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1 - dd.cdf(alpha)
+        analytical_tail = 1.#1 - dd.cdf(alpha)
     elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         # cfg_obj = OmegaConf.to_object(cfg)
@@ -248,19 +237,17 @@ def compute_pfode_error_vs_bins(
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
     equiv_saps = (bin_width / (2 * IQR)) ** -3
-    abscissa = torch.linspace(alpha, max_sample, num_bins+1)
-    fake_traj = torch.cat([
-        torch.zeros(abscissa.shape[0], dim-1, device=device),
-        abscissa.reshape(-1, 1).to(device)
-    ], 1).unsqueeze(-1)
-    ode_llks = []
+    abscissa = torch.linspace(alpha, max_sample, num_bins+1).to(device)
+    intermediate_traj_elements = (abscissa**2/(dim-1)).sqrt()
+    fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
+    ode_lks = []
     rel_errors = []
     x = abscissa
     # pdf = dd.pdf(x)
     for std in stds:
         ode_llk = std.ode_log_likelihood(
             fake_traj,
-            cond=torch.tensor([-1.]),
+            cond=torch.tensor([1.]),
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
@@ -268,8 +255,9 @@ def compute_pfode_error_vs_bins(
             transformed_ode_llk = ode_llk[0][-1].cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
                 (dim - 1) * abscissa.cpu().squeeze().log() - (dim / 2 - 1) * \
                 torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
+            transformed_ode_lk = transformed_ode_llk.exp()
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            transformed_ode_llk = compute_transformed_ode(
+            transformed_ode_lk = compute_transformed_ode(
                 abscissa.cpu().squeeze(),
                 ode_llk[0][-1],
                 alpha=alpha,
@@ -277,14 +265,14 @@ def compute_pfode_error_vs_bins(
             )
         else:
             raise NotImplementedError
-        ode_llks.append(transformed_ode_llk)
+        ode_lks.append(transformed_ode_lk)
         tail_estimate = scipy.integrate.simpson(
-            transformed_ode_llk.cpu().exp(),
-            x=abscissa
+            transformed_ode_lk.cpu(),
+            x=abscissa.cpu()
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
-        save_pfode_samples(abscissa, transformed_ode_llk, equiv_saps, std.cfg.model_name)
+        save_pfode_samples(abscissa.cpu(), transformed_ode_lk, equiv_saps, std.cfg.model_name)
         # plt.plot(x, pdf, color='blue')
         # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -447,7 +435,7 @@ def sample(cfg):
         for std in stds:
             alpha = std.likelihood.alpha.reshape(-1, 1)
             sample_traj_out = std.sample_trajectories(
-                cond=torch.tensor([-1.]),
+                cond=torch.tensor([1.]),
                 alpha=alpha
             )
             sample_trajs = sample_traj_out.samples
