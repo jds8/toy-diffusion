@@ -379,6 +379,12 @@ def make_error_vs_samples(
     plt.xlabel('Sample Size')
     plt.ylabel('Relative Error')
     plt.title(title)
+    # add PFODE bin axis
+    ax = plt.gca()
+    ax_top = ax.secondary_xaxis('top')
+    ax_top.set_xticks(pfode_error_data.samples)
+    ax_top.set_xticklabels(pfode_error_data.bins)
+    ax_top.set_xlabel('Number of Bins')
 
 def make_error_vs_bins(
         ax,
