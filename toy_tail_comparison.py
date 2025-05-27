@@ -132,10 +132,9 @@ def compute_sample_error_vs_samples(
         analytical_tail = 1 - dd.cdf(alpha)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
-        # cfg_obj = OmegaConf.to_object(cfg)
-        # target = get_target(cfg_obj)
-        # analytical_tail = target.analytical_prob(alpha)
-        analytical_tail = 1.
+        cfg_obj = OmegaConf.to_object(cfg)
+        target = get_target(cfg_obj)
+        analytical_tail = target.analytical_prob(alpha)
     else:
         raise NotImplementedError
     sample_levels = trajs.norm(dim=[2, 3])
@@ -150,6 +149,7 @@ def compute_sample_error_vs_samples(
                 subsap.cpu(),
                 alpha
             )
+            print('te: ', tail_estimate)
             subsample_bins.append(HistOutput(hist, bins))
             rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
             rel_errors.append(rel_error)
@@ -239,10 +239,8 @@ def compute_pfode_error_vs_bins(
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         dt = torch.tensor(1/(dim-1))
-        # cfg_obj = OmegaConf.to_object(cfg)
-        # target = get_target(cfg_obj)
-        # analytical_tail = target.analytical_prob(alpha)
-        analytical_tail = 1.
+        target = get_target(cfg)
+        analytical_tail = 1
     else:
         raise NotImplementedError
 
@@ -258,10 +256,8 @@ def compute_pfode_error_vs_bins(
         abscissa = torch.linspace(alpha, max_sample, num_bins+1)
         abscissas.append(abscissa)
     abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
-    fake_traj = torch.cat([
-        torch.zeros(abscissa_tensor.shape[0], dim-1, device=device),
-        abscissa_tensor
-    ], 1).unsqueeze(-1)
+    intermediate_traj_elements = (abscissa_tensor**2/(dim-1)).sqrt()
+    fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
     ode_llk = std.ode_log_likelihood(
         fake_traj,
         cond=std.cond,
@@ -312,7 +308,7 @@ def compute_pfode_error_vs_bins(
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         plt.plot(x, pdf, color='blue', label='analytical')
-        plt.scatter(abscissa, ode_lk_subsample.cpu().exp(), color='red', label='pfode')
+        plt.scatter(abscissa, ode_lk_subsample.cpu(), color='red', label='pfode')
         plt.xlabel('Radius')
         plt.ylabel('Density')
         plt.title(f'PFODE abscissa with estimate: '
