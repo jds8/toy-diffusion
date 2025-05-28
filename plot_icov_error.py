@@ -87,7 +87,7 @@ def sample(cfg):
         plt.tight_layout()
         plt.savefig('{}/{}_alpha={}_error_heatmap.pdf'.format(
             HydraConfig.get().run.dir,
-            cfg.model_name
+            cfg.model_name,
             alpha.item(),
         ))
 
