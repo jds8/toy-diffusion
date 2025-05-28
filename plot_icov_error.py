@@ -55,14 +55,16 @@ def sample(cfg):
         raise NotImplementedError
 
     with torch.no_grad():
-        x = torch.linspace(-3., 3., steps=50)
-        y = torch.linspace(-3., 3., steps=50)
+        x_steps = 50
+        y_steps = 50
+        x = torch.linspace(-3., 3., steps=x_steps)
+        y = torch.linspace(-3., 3., steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
-        fake_traj = torch.stack([xx.reshape(-1), yy.reshape(-1)]).T.unsqueeze(-1)
+        fake_traj = torch.stack([xx.reshape(-1), yy.reshape(-1)]).T.unsqueeze(-1).to(device)
 
         # compute analytical likelihood
         normal = torch.distributions.Normal(0., 1.)
-        analytical = (normal.log_prob(x) + normal.log_prob(y)).exp()
+        analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
 
         # compute approximate likelihood
         alpha = std.likelihood.alpha.reshape(-1, 1)
@@ -72,14 +74,14 @@ def sample(cfg):
             alpha=alpha,
             exact=cfg.compute_exact_trace,
         )
-        approx = ode_llk[0][-1].exp()
+        approx = einops.rearrange(ode_llk[0][-1].exp().cpu(), '(i j) -> i j', i=x_steps)
 
         # compute error
         rel_error = torch.abs(approx - analytical) / analytical
 
         # plot error
         # plt.figure(figsize=(6, 5))
-        plt.pcolormesh(x, y, rel_error, shading='auto', cmap='viridis')
+        plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
         plt.colorbar(label='Relative Error')
         plt.xlabel('x')
         plt.ylabel('y')

@@ -238,8 +238,14 @@ def compute_pfode_error_vs_bins(
     IQR = scipy.stats.iqr(sample_trajs.cpu())
     equiv_saps = (bin_width / (2 * IQR)) ** -3
     abscissa = torch.linspace(alpha, max_sample, num_bins+1).to(device)
-    intermediate_traj_elements = (abscissa**2/(dim-1)).sqrt()
-    fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        intermediate_traj_elements = (abscissa_tensor**2/dim).sqrt()
+        fake_traj = intermediate_traj_elements.repeat(1, dim).unsqueeze(-1)
+    elif type(std.example) == MultivariateGaussianExampleConfig:
+        intermediate_traj_elements = (abscissa_tensor**2/(dim-1)).sqrt()
+        fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
+    else:
+        raise NotImplementedError
     ode_lks = []
     rel_errors = []
     x = abscissa
