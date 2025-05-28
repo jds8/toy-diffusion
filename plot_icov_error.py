@@ -78,7 +78,7 @@ def sample(cfg):
 
         # compute error
         rel_error = torch.abs(approx - analytical) / analytical
-        condition_idx = xx**2 + y**2 < alpha**2
+        condition_idx = xx**2 + yy**2 < alpha**2
         rel_error[condition_idx] = torch.nan
 
         # plot error
