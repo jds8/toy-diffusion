@@ -237,19 +237,19 @@ def compute_pfode_error_vs_bins(
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
     equiv_saps = (bin_width / (2 * IQR)) ** -3
-    abscissa = torch.linspace(alpha, max_sample, num_bins+1).to(device)
+    abscissa = torch.linspace(alpha, max_sample, num_bins+1).reshape(-1, 1).to(device)
     if type(stds[0].example) == MultivariateGaussianExampleConfig:
         intermediate_traj_elements = (abscissa**2/dim).sqrt()
         fake_traj = intermediate_traj_elements.repeat(1, dim).unsqueeze(-1)
+        # pdf = dd.pdf(abscissa)
     elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
         intermediate_traj_elements = (abscissa**2/(dim-1)).sqrt()
         fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
+        # pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in x]
     else:
         raise NotImplementedError
     ode_lks = []
     rel_errors = []
-    x = abscissa
-    # pdf = dd.pdf(x)
     for std in stds:
         ode_llk = std.ode_log_likelihood(
             fake_traj,
@@ -274,12 +274,12 @@ def compute_pfode_error_vs_bins(
         ode_lks.append(transformed_ode_lk)
         tail_estimate = scipy.integrate.simpson(
             transformed_ode_lk.cpu(),
-            x=abscissa.cpu()
+            x=abscissa.squeeze().cpu()
         )
         rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
         rel_errors.append(rel_error)
         save_pfode_samples(abscissa.cpu(), transformed_ode_lk, equiv_saps, std.cfg.model_name)
-        # plt.plot(x, pdf, color='blue')
+        # plt.plot(abscissa.cpu(), pdf, color='blue')
         # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
         #     HydraConfig.get().run.dir,
