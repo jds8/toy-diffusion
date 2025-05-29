@@ -36,6 +36,7 @@ def suppresswarning():
     warnings.warn("user", UserWarning)
 
 def compute_tail_estimate(
+        std: ContinuousEvaluator,
         subsap: torch.Tensor,
         alpha: float
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -54,7 +55,14 @@ def compute_tail_estimate(
         density=True,
     )
     x = torch.linspace(alpha, 4.0, 100)
-    pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in x]
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        dim = std.example.d
+        dd = scipy.stats.chi(dim)
+        pdf = [dd.pdf(a) for a in x]
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in x]
+    else:
+        raise NotImplementedError
     plt.plot(x, pdf, color='blue', label='analytical')
     plt.savefig('{}/histogram_plot_{}'.format(
         HydraConfig.get().run.dir,
@@ -143,6 +151,7 @@ def compute_sample_error_vs_samples(
         rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
             hist, bins, tail_estimate = compute_tail_estimate(
+                std,
                 subsap.cpu(),
                 alpha
             )
@@ -197,6 +206,7 @@ def compute_sample_error_vs_bins(
         rel_errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
             hist, bins, tail_estimate = compute_tail_estimate(
+                std,
                 subsap.cpu(),
                 alpha
             )
