@@ -61,10 +61,13 @@ def compute_tail_estimate(
     upr_bins = bins[1:]
     med_bins = (lwr_bins + upr_bins) / 2
     # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
-    tail_estimate = scipy.integrate.simpson(
-        hist[smallest_idx:],
-        x=med_bins[smallest_idx:]
-    )
+    try:
+        tail_estimate = scipy.integrate.simpson(
+            hist[smallest_idx:],
+            x=med_bins[smallest_idx:]
+        )
+    except:
+        tail_estimate = 0.
     return hist, bins, torch.tensor(tail_estimate)
 
 def compute_pfode_tail_estimate(
