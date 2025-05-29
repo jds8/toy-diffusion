@@ -37,6 +37,15 @@ HistOutput = namedtuple('HistOutput', 'hist bins')
 def suppresswarning():
     warnings.warn("user", UserWarning)
 
+def get_condition_idx(xx, yy, alpha, std):
+    if type(std.example) == MultivariateGaussianExampleConfig:
+        condition_idx = xx**2 + yy**2 < alpha**2
+    elif type(std.example) == BrownianMotionDiffExampleConfig:
+        dt = torch.tensor(1/2)
+        x1 = xx * torch.sqrt(dt)
+        x2 = (xx + yy) * torch.sqrt(dt)
+        condition_idx = (torch.abs(x1) < alpha) & (torch.abs(x2) < alpha)
+    return condition_idx
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
@@ -57,8 +66,9 @@ def sample(cfg):
     with torch.no_grad():
         x_steps = 50
         y_steps = 50
-        x = torch.linspace(-3., 3., steps=x_steps)
-        y = torch.linspace(-3., 3., steps=y_steps)
+        max_val = torch.tensor(5.) / torch.tensor(1/2) + 0.5
+        x = torch.linspace(-max_val, max_val, steps=x_steps)
+        y = torch.linspace(-max_val, max_val, steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
         fake_traj = torch.stack([xx.reshape(-1), yy.reshape(-1)]).T.unsqueeze(-1).to(device)
 
@@ -77,14 +87,14 @@ def sample(cfg):
         approx = einops.rearrange(ode_llk[0][-1].exp().cpu(), '(i j) -> i j', i=x_steps)
 
         # compute error
-        rel_error = torch.abs(approx - analytical) / analytical
-        condition_idx = xx**2 + yy**2 < alpha**2
+        rel_error = torch.abs(approx - analytical)
+        condition_idx = get_condition_idx(xx, yy, alpha, std)
         rel_error[condition_idx] = torch.nan
 
         # plot error
         # plt.figure(figsize=(6, 5))
         plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
-        plt.colorbar(label='Relative Error')
+        plt.colorbar(label='Error')
         plt.xlabel('x')
         plt.ylabel('y')
         plt.title('Heatmap')
