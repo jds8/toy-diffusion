@@ -231,7 +231,7 @@ def compute_pfode_error_vs_bins(
         dd = scipy.stats.chi(dim)
         max_sample = dd.ppf(0.99999)
         num_bins = 1000
-        bin_width = (max_sample - std.alpha) / num_bins
+        bin_width = (max_sample - std.likelihood.alpha) / num_bins
         sample_trajs = einops.rearrange(
             sample_trajs,
             'b c h w -> (b c) h w',
@@ -239,7 +239,7 @@ def compute_pfode_error_vs_bins(
         ).norm(dim=[1, 2])
         IQR = scipy.stats.iqr(sample_trajs.cpu())
         equiv_saps = (bin_width / (2 * IQR)) ** -3
-        abscissa = torch.linspace(std.alpha, max_sample, num_bins+1).to(device)
+        abscissa = torch.linspace(std.likelihood.alpha, max_sample, num_bins+1).to(device)
         intermediate_traj_elements = (abscissa**2/(dim-1)).sqrt()
         fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
         x = abscissa
@@ -247,7 +247,7 @@ def compute_pfode_error_vs_bins(
         ode_llk = std.ode_log_likelihood(
             fake_traj,
             cond=torch.tensor([1.]),
-            alpha=torch.tensor([std.alpha]),
+            alpha=torch.tensor([std.likelihood.alpha]),
             exact=cfg.compute_exact_trace,
         )
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
@@ -259,7 +259,7 @@ def compute_pfode_error_vs_bins(
             transformed_ode_lk = compute_transformed_ode(
                 abscissa.cpu().squeeze(),
                 ode_llk[0][-1],
-                alpha=std.alpha,
+                alpha=std.likelihood.alpha,
                 dt=dt
             )
         else:
