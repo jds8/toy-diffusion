@@ -82,49 +82,6 @@ def compute_tail_estimate(
     )
     return hist, bins, torch.tensor(tail_estimate)
 
-def compute_pfode_tail_estimate_from_bins(
-        subsap: torch.Tensor,
-        ode_llk: torch.Tensor,
-        num_bins: int,
-        alpha: float
-) -> torch.Tensor:
-    max_value = subsap.max()
-    bins = torch.linspace(alpha, max_value, num_bins+1)
-
-    bin_indices = torch.bucketize(subsap, bins, right=False) - 1  # shift so bins[i] <= x < bins[i+1]
-
-    # Initialize output
-    selected_samples_list = []
-    ordinates_list = []
-
-    # For each bin, find one sample
-    for bin_idx in range(len(bins) - 1):
-        in_bin = (bin_indices == bin_idx).nonzero(as_tuple=True)[0]
-        if len(in_bin) > 0:
-            selected_samples_list.append(subsap[in_bin[0]])
-            ordinates_list.append(ode_llk[in_bin[0]].exp())
-
-    selected_samples = torch.tensor(selected_samples_list)
-    ordinates = torch.tensor(ordinates_list)
-
-    # tail_estimate = scipy.integrate.trapezoid(ordinates, selected_samples)
-    # tail_estimate = ordinates_sorted[:-1] * selected_samples_sorted.diff()
-    selected_samples_sorted, sorted_idx = selected_samples.sort()
-    ordinates_sorted = ordinates[sorted_idx]
-    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=selected_samples_sorted)
-    tail_estimate_tensor = torch.tensor(tail_estimate)
-    # ys = [pdf_2d_quadrature_bm(a.cpu().numpy(), alpha) for a in selected_samples_sorted]
-    # plt.clf()
-    # plt.plot(selected_samples_sorted, ys)
-    # plt.scatter(selected_samples_sorted, ordinates_sorted)
-    # t = time.time()
-    # plt.savefig('{}/pfode_tail_estimate_from_bins_plot_{}'.format(
-    #     HydraConfig.get().run.dir,
-    #     int(t)
-    # ))
-    # plt.clf()
-    return tail_estimate_tensor
-
 def compute_sample_error_vs_samples(
         trajs: torch.Tensor,
         alpha: float,
