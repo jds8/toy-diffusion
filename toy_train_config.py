@@ -193,6 +193,11 @@ class TrainComparisonConfig(SampleConfig):
 
 
 @dataclass
+class AlphaComparisonConfig(SampleConfig):
+    alphas: List[float] = field(default_factory=list)
+
+
+@dataclass
 class BinComparisonConfig(SampleConfig):
     histogram_bins_filename: str = 'Relative_Error_of_Tail_Integral_(alpha=0.0)_vs._Number_of_Bins_Histogram_Approximation.pt'
 
