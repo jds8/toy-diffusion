@@ -166,6 +166,26 @@ class IntegratorType(Enum):
     EulerMaruyama = 'euler_maruyama'
 
 
+class ErrorMetric:
+    def __call__(self, est, true):
+        return self.error(est, true)
+    def error(self, est, true):
+        raise NotImplementedError
+    def name(self):
+        return self.__class__.__name__
+class RelativeErrorMetric(ErrorMetric):
+    def error(self, est, true):
+        return (est - true).abs() / true
+class SignedErrorMetric(ErrorMetric):
+    def error(self, est, true):
+        return (est - true) / true
+
+
+class ErrorMetricType(Enum):
+    RelativeError = 'relative_error'
+    SignedError = 'signed_error'
+
+
 @dataclass
 class SampleConfig(BaseConfig):
     debug: bool = False
@@ -181,7 +201,7 @@ class SampleConfig(BaseConfig):
     figs_dir: str = 'figs'
     num_sample_batches: int = 1
     run_histogram_convergence: bool = True
-
+    error_metric: ErrorMetricType = ErrorMetricType.RelativeError
 
     def get_config_file(self, save_dir, alpha, start_round):
         return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'
@@ -271,3 +291,11 @@ def get_run_type(cfg_obj: PostProcessingConfig) -> Tuple[str, str]:
         return 'BrownianMotionDiff', f'Brownian Motion {cfg_obj.example.sde_steps-1} Steps'
     else:
         raise NotImplementedError
+
+def get_error_metric(error_metric_type: ErrorMetricType):
+    if error_metric_type == ErrorMetricType.RelativeError:
+        return RelativeErrorMetric()
+    elif error_metric_type == ErrorMetricType.SignedError:
+        return SignedErrorMetric()
+    else:
+        NotImplementedError

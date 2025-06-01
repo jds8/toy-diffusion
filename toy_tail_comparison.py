@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig, get_target
+    BrownianMotionDiffExampleConfig, get_target, get_error_metric
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
@@ -34,6 +34,7 @@ HistOutput = namedtuple('HistOutput', 'hist bins')
 #########################
 def suppresswarning():
     warnings.warn("user", UserWarning)
+
 
 def compute_tail_estimate(
         std: ContinuousEvaluator,
@@ -88,6 +89,7 @@ def compute_sample_error_vs_samples(
         subsample_sizes: torch.Tensor,
         std: ContinuousEvaluator,
         cfg: SampleConfig,
+        error_metric: ErrorMetric,
 ) -> Tuple[ErrorData, List[List[HistOutput]]]:
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
@@ -105,7 +107,7 @@ def compute_sample_error_vs_samples(
     for size_idx, subsample_size in enumerate(subsample_sizes):
         all_subsaps = sample_levels[:, :subsample_size]
         subsample_bins = []
-        rel_errors = []
+        errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
             hist, bins, tail_estimate = compute_tail_estimate(
                 std,
@@ -113,12 +115,12 @@ def compute_sample_error_vs_samples(
                 alpha
             )
             subsample_bins.append(HistOutput(hist, bins))
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors.append(rel_error)
+            error = error_metric(tail_estimate, analytical_tail)
+            errors.append(error)
         all_bins.append(subsample_bins)
-        rel_errors_tensor = torch.stack(rel_errors)
-        quantile = rel_errors_tensor.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
+        errors_tensor = torch.stack(errors)
+        quantile = errors_tensor.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=errors_tensor.dtype)
         )
         quantiles[size_idx] = quantile
     error_data = ErrorData(
@@ -137,6 +139,7 @@ def compute_sample_error_vs_bins(
         alpha: float,
         std: ContinuousEvaluator,
         cfg: SampleConfig,
+        error_metric: ErrorMetric,
 ) -> ErrorData:
     dim = trajs.shape[2]
     dd = scipy.stats.chi(dim)
@@ -160,18 +163,18 @@ def compute_sample_error_vs_bins(
         num_bins = len(hist_output.bins)
         bin_sizes.append(num_bins)
         all_subsaps = sample_levels[:, :num_bins]
-        rel_errors = []
+        errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
             hist, bins, tail_estimate = compute_tail_estimate(
                 std,
                 subsap.cpu(),
                 alpha
             )
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors.append(rel_error)
-        rel_errors_tensor = torch.stack(rel_errors)
-        quantile = rel_errors_tensor.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
+            error = error_metric(tail_estimate, analytical_tail)
+            errors.append(error)
+        errors_tensor = torch.stack(errors)
+        quantile = errors_tensor.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=errors_tensor.dtype)
         )
         quantiles[bin_idx] = quantile.cpu()
     error_data = ErrorData(
@@ -190,6 +193,7 @@ def compute_pfode_error_vs_bins(
         alpha: float,
         std: ContinuousEvaluator,
         cfg: SampleConfig,
+        error_metric: ErrorMetric,
 ) -> ErrorData:
     norm_trajs = trajs.norm(dim=[2, 3]).cpu()
     IQR = scipy.stats.iqr(norm_trajs)
@@ -245,7 +249,7 @@ def compute_pfode_error_vs_bins(
             alpha=alpha,
             dt=dt
         )
-    rel_errors = []
+    errors = []
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
     x = abscissas[-1]
@@ -274,15 +278,15 @@ def compute_pfode_error_vs_bins(
             ode_lk_subsample.cpu(),
             x=abscissa
         )
-        rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
-        rel_errors.append(rel_error)
+        error = error_metric(tail_estimate, analytical_tail)
+        errors.append(error)
         plt.plot(x, pdf, color='blue', label='analytical')
         plt.scatter(abscissa, ode_lk_subsample.cpu(), color='red', label='pfode')
         plt.xlabel('Radius')
         plt.ylabel('Density')
         plt.title(f'PFODE abscissa with estimate: '
             f'{round(tail_estimate.item(), 2)} and error: '
-            f'{round(rel_error.item(), 2)}\n'
+            f'{round(error.item(), 2)}\n'
             f'ESS: {equiv_saps}')
         plt.legend()
         plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -290,7 +294,7 @@ def compute_pfode_error_vs_bins(
             i
         ))
         plt.clf()
-    median_tensor = torch.stack(rel_errors)
+    median_tensor = torch.stack(errors)
     zeros_tensor = torch.zeros_like(median_tensor)
     conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
 
@@ -371,6 +375,7 @@ def make_plots(
         alpha: float,
         cfg: SampleConfig,
         std: ContinuousEvaluator,
+        error_metric: ErrorMetric,
 ):
     plt.clf()
 
@@ -387,6 +392,7 @@ def make_plots(
         cfg,
         subsample_sizes,
         std,
+        error_metric,
     )
 
     plt.legend()
@@ -405,7 +411,8 @@ def make_error_vs_samples_plot(
         alpha: float,
         cfg: SampleConfig,
         subsample_sizes: torch.Tensor,
-        std: ContinuousEvaluator
+        std: ContinuousEvaluator,
+        error_metric: ErrorMetric
 ):
     hist_error_vs_samples, all_bins = compute_sample_error_vs_samples(
         trajs,
@@ -413,6 +420,7 @@ def make_error_vs_samples_plot(
         subsample_sizes,
         std,
         cfg,
+        error_metric,
     )
     pfode_error_vs_samples = compute_pfode_error_vs_bins(
         trajs,
@@ -420,6 +428,7 @@ def make_error_vs_samples_plot(
         alpha,
         std,
         cfg,
+        error_metric,
     )
     make_error_vs_samples(
         hist_error_vs_samples,
@@ -459,11 +468,13 @@ def sample(cfg):
         )
         cfg_obj = OmegaConf.to_object(cfg)
         alpha_float = alpha.cpu().item()
+        error_metric = get_error_metric(std.cfg.error_metric)
         make_plots(
             rearranged_trajs,
             alpha_float,
             cfg_obj,
-            std
+            std,
+            error_metric,
         )
 
 

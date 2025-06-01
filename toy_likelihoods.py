@@ -54,13 +54,13 @@ class MultivariateGaussianTailsLikelihood(Likelihood):
         self.alpha = alpha[:, 0]
 
     def get_condition(self, _, x0):
-        return (x0.norm(dim=1) > self.alpha).to(torch.float)
+        return (x0.norm(dim=[-1,-2]) > self.alpha).to(torch.float)
 
 
 class BrownianMotionDiffTailsLikelihood(Likelihood):
     def get_condition(self, x0_raw, _):
         # x0_raw is the brownian motion trajectory
-        return (x0_raw.abs() > self.alpha).any(dim=1, keepdim=True).float()
+        return (x0_raw.abs() > self.alpha).any(dim=-2, keepdim=True).float()
 
     def get_rarity(self, x0_raw, _):
         x0_raw = x0_raw if x0_raw is not None else torch.zeros_like(x0_raw)

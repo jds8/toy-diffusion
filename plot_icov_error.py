@@ -87,7 +87,8 @@ def sample(cfg):
         approx = einops.rearrange(ode_llk[0][-1].exp().cpu(), '(i j) -> i j', i=x_steps)
 
         # compute error
-        rel_error = torch.abs(approx - analytical)
+        # rel_error = torch.abs(approx - analytical)
+        rel_error = approx
         condition_idx = get_condition_idx(xx, yy, alpha, std)
         rel_error[condition_idx] = torch.nan
 
