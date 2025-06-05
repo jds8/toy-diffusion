@@ -66,7 +66,8 @@ def sample(cfg):
     with torch.no_grad():
         x_steps = 50
         y_steps = 50
-        max_val = torch.tensor(5.) / torch.tensor(1/2) + 0.5
+        alpha = std.likelihood.alpha.reshape(-1, 1)
+        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.5
         x = torch.linspace(-max_val, max_val, steps=x_steps)
         y = torch.linspace(-max_val, max_val, steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
@@ -77,7 +78,6 @@ def sample(cfg):
         analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
 
         # compute approximate likelihood
-        alpha = std.likelihood.alpha.reshape(-1, 1)
         ode_llk = std.ode_log_likelihood(
             fake_traj,
             cond=torch.tensor([cfg.cond]),
@@ -94,7 +94,8 @@ def sample(cfg):
 
         # plot error
         # plt.figure(figsize=(6, 5))
-        plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
+        # plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
+        plt.contourf(xx, yy, rel_error, cmap='viridis')
         plt.colorbar(label='Error')
         plt.xlabel('x')
         plt.ylabel('y')

@@ -18,6 +18,7 @@ from omegaconf import OmegaConf
 import torch
 import scipy
 import matplotlib.pyplot as plt
+import numpy as np
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_perimeter
@@ -70,24 +71,24 @@ def sample(cfg):
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
         )
-        samples = sample_traj_out.samples[-1]
+        samples = sample_traj_out.samples[-1].cpu().squeeze()
 
         # compute analytical likelihood
-        normal = torch.distributions.MultivariateNormal(torch.zeros(2), torch.eye(2))
-        analytical = normal.log_prob(samples).exp()
-
-        # compute error
-        condition_idx = get_condition_idx(samples, alpha, std)
-        analytical[condition_idx] = torch.nan
+        bin_width = 2. * scipy.stats.iqr(samples) * samples.shape[0] ** (-1/3)
+        num_bins = int((samples.max()) / bin_width)
+        hist, x_edges, y_edges = np.histogram2d(samples[:, 0], samples[:, 1], bins=num_bins, density=True)
+        mid_x = x_edges[:-1] + x_edges[1:]
+        mid_y = y_edges[:-1] + y_edges[1:]
+        xx, yy = torch.meshgrid(torch.tensor(mid_x), torch.tensor(mid_y), indexing='xy')
 
         # plot error
         # plt.figure(figsize=(6, 5))
-        # plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
-        plt.contourf(samples[:, 0], samples[:, 1], analytical, cmap='viridis')
-        plt.colorbar(label='Error')
+        # plt.pcolormesh(xx, yy, hist, shading='auto', cmap='viridis')
+        plt.contourf(xx, yy, hist, cmap='viridis')
+        plt.colorbar(label='Density')
         plt.xlabel('x')
         plt.ylabel('y')
-        plt.title('Heatmap')
+        plt.title('Density')
         plt.tight_layout()
         plt.savefig('{}/{}_alpha={}_error_heatmap.pdf'.format(
             HydraConfig.get().run.dir,
