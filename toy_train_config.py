@@ -174,11 +174,11 @@ class ErrorMetric:
     def name(self):
         return self.__class__.__name__
 class RelativeErrorMetric(ErrorMetric):
-    def error(self, est, true):
-        return (est - true).abs() / true
+    def error(self, est: float, true: float):
+        return torch.tensor(est - true).abs() / true
 class SignedErrorMetric(ErrorMetric):
-    def error(self, est, true):
-        return (est - true) / true
+    def error(self, est: float, true: float):
+        return torch.tensor(est - true) / true
 
 
 class ErrorMetricType(Enum):

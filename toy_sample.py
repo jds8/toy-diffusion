@@ -3,7 +3,7 @@ import os
 import warnings
 import logging
 import time as timer
-from typing_extensions import Callable, Optional, List, Union
+from typing_extensions import Callable, Optional, List, Union, Tuple
 
 from pathlib import Path
 
@@ -1718,8 +1718,16 @@ def line_circle_intersection(
         output = torch.stack([torch.tensor([x1, y1]), torch.tensor([x2, y2])])
     return output.cpu()
 
-def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> torch.Tensor:
-    total_perimeter = torch.tensor(0., device='cpu')
+def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> Tuple[torch.Tensor, torch.Tensor]:
+    total_perimeter = torch.tensor([0.], device='cpu')
+    top_angle = torch.tensor(0., device='cpu')
+    bottom_angle = torch.tensor(0., device='cpu')
+    right_angle = torch.tensor(0., device='cpu')
+    left_angle = torch.tensor(0., device='cpu')
+    top_angle_points = torch.zeros(2,2)
+    bottom_angle_points = torch.zeros(2,2)
+    right_angle_points = torch.zeros(2,2)
+    left_angle_points = torch.zeros(2,2)
     if top_points.nelement():
         top_length, top_angle = shortest_arc_length(top_points[0], top_points[1], r)
         bottom_length, bottom_angle = shortest_arc_length(bottom_points[0], bottom_points[1], r)
@@ -1728,6 +1736,8 @@ def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> 
         top_bottom_point = top_points[top_points[:, 1].sort().indices[0]]
         bottom_top_point = bottom_points[bottom_points[:, 1].sort().indices[-1]]
         bottom_bottom_point = bottom_points[bottom_points[:, 1].sort().indices[0]]
+        top_angle_points = torch.stack([top_points[1], top_points[0]])
+        bottom_angle_points = torch.stack([bottom_points[1], bottom_points[0]])
     if right_points.nelement():
         right_bottom_point = right_points[right_points[:, 1].sort().indices[0]]
         top_bottom_point = top_points[top_points[:, 1].sort().indices[0]]
@@ -1736,24 +1746,30 @@ def compute_lengths(r, top_points, bottom_points, right_points, left_points) -> 
         bottom_top_point = bottom_points[bottom_points[:, 1].sort().indices[-1]]
         left_length, left_angle = shortest_arc_length(left_top_point, bottom_top_point, r)
         total_perimeter += left_length + right_length
-    return total_perimeter
+        right_angle_points = torch.stack([right_bottom_point, top_bottom_point])
+        left_angle_points = torch.stack([bottom_top_point, left_top_point])
+    angles = torch.stack([top_angle, bottom_angle, right_angle, left_angle])
+    angle_points = torch.stack([top_angle_points, bottom_angle_points, right_angle_points, left_angle_points])
+    return total_perimeter, angles, angle_points
 
 def compute_perimeter(
         r: torch.Tensor,
         alpha: torch.Tensor,
         dt_sqrt: torch.Tensor
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    angles = torch.zeros(4)
+    angle_points = torch.zeros(4,2,2)
     if r <= alpha:
-        output = torch.tensor(0.)
+        output = torch.tensor([0.])
     elif r >= torch.tensor(5.).sqrt()*alpha/dt_sqrt:
-        output = 2 * torch.pi * r
+        output = torch.tensor([2 * torch.pi * r])
     else:
         top_points = line_circle_intersection(r, alpha, dt_sqrt)
         bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
         right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
         left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
-        output = compute_lengths(r, top_points, bottom_points, right_points, left_points)
-    return output.cpu()
+        output, angles, angle_points = compute_lengths(r, top_points, bottom_points, right_points, left_points)
+    return output.cpu(), angles.cpu(), angle_points.cpu()
 
 def compute_transformed_ode(
         sample_levels: torch.Tensor,
@@ -1762,9 +1778,9 @@ def compute_transformed_ode(
         dt: torch.Tensor,
 ):
     perimeters = torch.stack([
-        compute_perimeter(r.cpu(), alpha, dt.sqrt().cpu()) for r in sample_levels
+        compute_perimeter(r.cpu(), alpha, dt.sqrt().cpu())[0] for r in sample_levels
     ])
-    transformed_ode = perimeters * ode_llk.exp().cpu()
+    transformed_ode = perimeters.squeeze() * ode_llk.exp().cpu()
     return transformed_ode
 
 def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, alpha, dt, x, pdf):
