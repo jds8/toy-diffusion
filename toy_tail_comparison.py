@@ -559,6 +559,8 @@ def compute_pfode_error_vs_bins(
         pdf,
         ylim,
     )
+    torch.save(abscissa_repeat.flatten(), f'{HydraConfig.get().run.dir}/abscissa_repeat.pt')
+    torch.save(transformed_ode, f'{HydraConfig.get().run.dir}/transformed_ode.pt')
     equivalents = []
     conf_int_list = []
     nsb = cfg.num_sample_batches
