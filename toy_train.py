@@ -121,7 +121,7 @@ class ToyTrainer:
         else:
             self.diffusion_model.module.load_state_dict(model)
 
-    def load_model(self):
+    def try_load(self) -> Tuple[int, str]:
         model_path = get_model_path(self.cfg, self.cfg.diffusion.dim)
         path = Path(model_path)
         if not os.path.isfile(model_path):
@@ -129,22 +129,27 @@ class ToyTrainer:
             os.system('ssh -t jsefas@remote.cs.ubc.ca "scp submit-ml:/ubc/cs/research/ubc_ml/jsefas/toy-diffusion/diffusion_models/{} ~"'.format(path.name))
             os.system('scp jsefas@remote.cs.ubc.ca:~/{} {}'.format(path.name, model_path))
             if not os.path.isfile(model_path):
-                raise Exception('cannot find file: {}'.format(model_path))
-        try:
-            # load softmax model
-            print('attempting to load diffusion model: {}'.format(model_path))
-            self.load_model_state_dict(model_path, map_location='cuda')
-            metadata = self.load_metadata(model_path, map_location='cuda')
-        except Exception as e:
+                return 0, model_path
+        return 1, model_path
+
+    def load_model(self):
+        exit_code, model_path = self.try_load()
+        if exit_code:
             try:
-                self.load_model_state_dict(model_path, map_location='cpu')
-                metadata = self.load_metadata(model_path, map_location='cpu')
+                # load softmax model
+                print('attempting to load diffusion model: {}'.format(model_path))
+                self.load_model_state_dict(model_path, map_location='cuda')
+                metadata = self.load_metadata(model_path, map_location='cuda')
             except Exception as e:
-                print('FAILED to load model: {} because {}'.format(model_path, e))
-                raise e
-        if metadata is not None:
-            self.training_samples_thus_far = metadata['training_results']['training_samples_thus_far']
-        print('successfully loaded diffusion model')
+                try:
+                    self.load_model_state_dict(model_path, map_location='cpu')
+                    metadata = self.load_metadata(model_path, map_location='cpu')
+                except Exception as e:
+                    print('FAILED to load model: {} because {}'.format(model_path, e))
+                    raise e
+            if metadata is not None:
+                self.training_samples_thus_far = metadata['training_results']['training_samples_thus_far']
+            print('successfully loaded diffusion model')
 
     def initialize_optimizer(self):
         self.optimizer = torch.optim.Adam(self.diffusion_model.module.parameters(), self.cfg.lr)
@@ -665,7 +670,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
 
 def train(rank, world_size, cfg):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29500"
+    os.environ["MASTER_PORT"] = "29501"
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 
