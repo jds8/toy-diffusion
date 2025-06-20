@@ -40,7 +40,7 @@ def suppresswarning():
 def compute_tail_estimate(
         subsap: torch.Tensor,
         alpha: float
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # Construct a histogram from subsap data
     # and compute an estimate of the tail integral
     # of being greater than alpha from the histogram
@@ -68,7 +68,7 @@ def compute_tail_estimate(
         )
     except:
         tail_estimate = 0.
-    return hist, bins, torch.tensor(tail_estimate)
+    return hist, bins, tail_estimate
 
 def compute_pfode_tail_estimate(
         subsap: torch.Tensor,

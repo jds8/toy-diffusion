@@ -67,7 +67,7 @@ def sample(cfg):
         x_steps = 50
         y_steps = 50
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.5
+        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.1
         x = torch.linspace(-max_val, max_val, steps=x_steps)
         y = torch.linspace(-max_val, max_val, steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
@@ -87,8 +87,8 @@ def sample(cfg):
         approx = einops.rearrange(ode_llk[0][-1].exp().cpu(), '(i j) -> i j', i=x_steps)
 
         # compute error
-        # rel_error = torch.abs(approx - analytical)
-        rel_error = approx
+        rel_error = approx - analytical
+        # rel_error = approx
         condition_idx = get_condition_idx(xx, yy, alpha, std)
         rel_error[condition_idx] = torch.nan
 

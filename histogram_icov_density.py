@@ -83,14 +83,14 @@ def sample(cfg):
 
         # plot error
         # plt.figure(figsize=(6, 5))
-        # plt.pcolormesh(xx, yy, hist, shading='auto', cmap='viridis')
-        plt.contourf(xx, yy, hist, cmap='viridis')
+        plt.pcolormesh(xx, yy, hist.T, shading='auto', cmap='viridis')
+        # plt.contourf(xx, yy, hist, cmap='viridis')
         plt.colorbar(label='Density')
         plt.xlabel('x')
         plt.ylabel('y')
         plt.title('Density')
         plt.tight_layout()
-        plt.savefig('{}/{}_alpha={}_error_heatmap.pdf'.format(
+        plt.savefig('{}/{}_alpha={}_histogram_icov_density.pdf'.format(
             HydraConfig.get().run.dir,
             cfg.model_name,
             alpha.item(),
