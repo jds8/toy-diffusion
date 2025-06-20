@@ -86,6 +86,7 @@ class ToyTrainer:
             backend='gloo', rank=rank, world_size=world_size
         )
         self.diffusion_model = nn.parallel.DistributedDataParallel(diffusion_model, device_ids=[rank])
+        # self.diffusion_model = nn.parallel.DataParallel(diffusion_model)
         self.loss_fn = self.get_loss_fn()
         self.n_samples = torch.tensor([self.cfg.batch_size], device=device)
         self.end_time = torch.tensor(1., device=device)
@@ -615,10 +616,9 @@ class AlphaConditionTrainer(ConditionTrainer):
             torch.rand(x0_raw.shape[0]) * self.cfg.max_alpha
         ).tile(x0_raw.shape[1], 1).T.to(
             x0_raw.device
-        )
+        ).unsqueeze(-1)
         self.likelihood.set_alpha(alphas)
-        cond = self.likelihood.get_condition( x0_raw.squeeze(-1),
-                                              x0.squeeze(-1), ).reshape(-1, 1)
+        cond = self.likelihood.get_condition(x0_raw, x0).reshape(-1, 1)
         alpha = alphas[:, 0].reshape(-1, 1)
         return AlphaModelInput(x0_in, cond, alpha)
 
