@@ -731,8 +731,6 @@ def make_plots(
         cfg: SampleConfig,
         std: ContinuousEvaluator,
         error_metric: ErrorMetric,
-        ylim,
-        xlim
 ):
     plt.clf()
 

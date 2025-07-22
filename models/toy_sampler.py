@@ -344,7 +344,7 @@ class VPSDESampler(AbstractContinuousSampler):
         log_mean_coeff = self.log_mean_coeff(x_shape=mu.shape, t=t)
         mean = log_mean_coeff.exp() * mu
         first_var_term = cov_prior * (2. * log_mean_coeff).exp()
-        second_var_term = 1 - (2. * log_mean_coeff).exp()
+        second_var_term = 1 - (2. * log_mean_coeff[..., 0].diag_embed()).exp()
         cov = first_var_term + second_var_term
         return mean, log_mean_coeff, cov
 
