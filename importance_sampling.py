@@ -182,7 +182,9 @@ class BrownianMotionDiffTarget(Target):
             0.,
             self.dt.sqrt(),
         )
-        self.quadrature_values = {
+    @staticmethod
+    def bm_pdf(dim: int) -> float:
+        return {
             3: {
                 0.5: 0.74586752299,
                 1.: 0.37064871,
@@ -207,7 +209,7 @@ class BrownianMotionDiffTarget(Target):
                 3.5: 0.00048466001,
                 4.0: 6.4789885e-05,
             }
-        }
+        }[dim]
     def log_prob(self, saps: torch.Tensor) -> torch.Tensor:
         # the elements of saps are dependent, but those of
         # saps.diff(dim=1) are independent increments
@@ -280,11 +282,7 @@ class BrownianMotionDiffTarget(Target):
             if alpha == 2.:
                 return torch.tensor(0.050560932192670285)
         elif self.cfg.example.sde_steps == 5:
-            value_dct = self.quadrature_values[self.cfg.example.sde_steps]
-            alpha_float = alpha.item()
-            if alpha_float in value_dct:
-                return torch.tensor(value_dct[alpha_float])
-            raise NotImplementedError
+            return torch.tensor(self.bm_pdf(self.cfg.example.sde_steps)[alpha.item()])
         else:
             raise NotImplementedError
     def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:

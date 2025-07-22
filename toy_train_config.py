@@ -155,6 +155,7 @@ def get_classifier_path(cfg: TrainConfig):
 
 class TestType(Enum):
     Gaussian = 'gaussian'
+    MultivariateGaussian = 'multivariate_gaussian'
     BrownianMotion = 'brownian_motion'
     BrownianMotionDiff = 'brownian_motion_diff'
     Uniform = 'uniform'

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
+import os
+
 import scipy.stats as stats
 import scipy.integrate as integrate
 import numpy as np
 import torch
 
-from typing import Callable
+from typing import Callable, Optional
 
+from importance_sampling import BrownianMotionDiffTarget
 
 def normal_pdf(x, mean, var):
     """Probability density function of a normal distribution."""
@@ -140,19 +143,7 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     phi_vals = normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1)
     weights = phi_vals * p * (2 * np.pi / num_pts)  # arc length elements
 
-    # total_weight = np.sum(weights)
-    if alpha == 0.:
-        total_weight = 1.  # for alpha=0.
-    elif alpha == 0.5:
-        total_weight = 0.7458913437205545  # for alpha=0.5
-    elif alpha == 1.:
-        total_weight = 0.37064413336206625  # for alpha=1.
-    elif alpha == 1.5:
-        total_weight = 0.14605801048951172  # for alpha=1.5
-    elif alpha == 2.0:
-        total_weight = 0.047295252164004084  # for alpha=2.0
-    else:
-        raise NotImplementedError
+    total_weight = BrownianMotionDiffTarget.bm_pdf(3)[alpha]
     exit_weight = np.sum(weights[(np.abs(x1) > (alpha-1e-5)) | (np.abs(x2) > (alpha-1e-5))])
 
     if exit_weight == total_weight == 0.:
@@ -161,17 +152,38 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
         result = exit_weight / total_weight
     return result
 
-def get_2d_pdf(
-    max_sample: np.ndarray,
-    alpha: np.ndarray,
-    num_divisions: int,
-    quadrature_fn: Callable,
-):
-    ps = np.linspace(alpha, max_sample, num_divisions)
-    pdf_map = {
-        p: quadrature_fn(p, alpha) for p in ps
-    }
-    return pdf_map
+def get_quadrature_dir() -> str:
+    dr = 'quadrature_data/'
+    os.makedirs(dr, exist_ok=True)
+    return dr
+
+def get_quadrature_filename(sde_steps: int, num_abscissa: int, alpha: float) -> str:
+    quad_dir = get_quadrature_dir()
+    filename = f'{quad_dir}/sde_steps_{sde_steps}_num_abscissa_{num_abscissa}_alpha_{alpha:.1f}.pt'
+    return filename
+
+def cached(sde_steps: int, num_abscissa: int, alpha: float) -> Optional[torch.Tensor]:
+    filename = get_quadrature_filename(sde_steps, num_abscissa, alpha)
+    if os.path.isfile(filename):
+        print('loading pdf from cache')
+        return torch.load(filename)
+    print('computing pdf using quadrature')
+    return None
+
+def get_2d_pdf(sde_steps: int, abscissa: torch.Tensor, alpha: float):
+    cache = cached(sde_steps, abscissa.shape[0], alpha)
+    if cache:
+        return cache
+    filename = get_quadrature_filename(sde_steps, abscissa.shape[0], alpha)
+    if sde_steps == 3:
+        pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in abscissa]
+        torch.save(pdf, filename)
+    elif sde_steps == 4:
+        pdf = [pdf_3d_quadrature_bm(a.cpu().item(), alpha) for a in abscissa]
+        torch.save(pdf, filename)
+    else:
+        raise NotImplementedError
+    return pdf
 
 def estimate_integral(
     max_sample: np.ndarray,

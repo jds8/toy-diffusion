@@ -50,7 +50,7 @@ def get_condition_idx(xx, yy, alpha, std):
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
     logger = logging.getLogger("main")
-    logger.info('run type: bin_comparison')
+    logger.info('run type: plot_icov_error')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
     logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
@@ -64,10 +64,11 @@ def sample(cfg):
         raise NotImplementedError
 
     with torch.no_grad():
-        x_steps = 50
-        y_steps = 50
+        x_steps = cfg.num_samples
+        y_steps = cfg.num_samples
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.1
+        # max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.1
+        max_val = ((alpha.squeeze() + 1)/2).sqrt()
         x = torch.linspace(-max_val, max_val, steps=x_steps)
         y = torch.linspace(-max_val, max_val, steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
@@ -75,7 +76,9 @@ def sample(cfg):
 
         # compute analytical likelihood
         normal = torch.distributions.Normal(0., 1.)
-        analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
+        unnormed_analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
+        normalizing_factor = get_target(std).analytical_prob(alpha)
+        analytical = unnormed_analytical / normalizing_factor
 
         # compute approximate likelihood
         ode_llk = std.ode_log_likelihood(
@@ -88,24 +91,32 @@ def sample(cfg):
 
         # compute error
         rel_error = approx - analytical
-        # rel_error = approx
+        approx_out = approx.clone()
+        analytical_out = analytical.clone()
         condition_idx = get_condition_idx(xx, yy, alpha, std)
         rel_error[condition_idx] = torch.nan
+        approx_out[condition_idx] = torch.nan
+        analytical_out[condition_idx] = torch.nan
 
         # plot error
-        # plt.figure(figsize=(6, 5))
-        # plt.pcolormesh(xx, yy, rel_error, shading='auto', cmap='viridis')
-        plt.contourf(xx, yy, rel_error, cmap='viridis')
-        plt.colorbar(label='Error')
-        plt.xlabel('x')
-        plt.ylabel('y')
-        plt.title('Heatmap')
-        plt.tight_layout()
-        plt.savefig('{}/{}_alpha={}_error_heatmap.pdf'.format(
-            HydraConfig.get().run.dir,
-            cfg.model_name,
-            alpha.item(),
-        ))
+        labels = ['Error', 'Value', 'Value']
+        titles = ['Relative Error', 'PFODE', 'Analytical']
+        data = [rel_error, approx_out, analytical_out]
+        for label, title, datum in zip(labels, titles, data):
+            plt.clf()
+            plt.contourf(xx, yy, datum, cmap='viridis')
+            plt.colorbar(label=label)
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title(title)
+            plt.tight_layout()
+            plt.savefig('{}/{}_alpha={}_{}_error_heatmap.pdf'.format(
+                HydraConfig.get().run.dir,
+                cfg.model_name,
+                alpha.item(),
+                title.replace(' ', ''),
+            ))
+            plt.clf()
 
 
 if __name__ == "__main__":

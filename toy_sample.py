@@ -149,10 +149,11 @@ class ToyEvaluator:
             pseudo_example = self.cfg.example.copy()
             pseudo_example['mu'] = 0.
             pseudo_example['sigma'] = 1.
-            mean, _, std = self.sampler.analytical_marginal_prob(
+            mean, _, var = self.sampler.analytical_marginal_prob(
                 t=torch.tensor(1.),
                 example=pseudo_example,
             )
+            std = var.sqrt()
             x_min = dist.Normal(
                 mean.item(),
                 std.item(),
@@ -268,6 +269,8 @@ class ContinuousEvaluator(ToyEvaluator):
     def get_score_function(self, t, x, evaluate_likelihood, **kwargs):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
+        elif self.cfg.test == TestType.MultivariateGaussian:
+            return self.analytical_multivariate_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
@@ -341,12 +344,28 @@ class ContinuousEvaluator(ToyEvaluator):
         pseudo_example = self.cfg.example.copy()
         pseudo_example['mu'] = 0.
         pseudo_example['sigma'] = 1.
-        mean, lmc, std = self.sampler.analytical_marginal_prob(
+        mean, lmc, var = self.sampler.analytical_marginal_prob(
             t=t,
             example=pseudo_example
         )
-        var = std ** 2
         score = (mean - x) / var
+        return score
+
+    def analytical_multivariate_gaussian_score(self, t, x):
+        """
+        Compute the analytical marginal score of p_t for t in (0, 1)
+        given the SDE formulation from Song et al. in the case that
+        p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
+        """
+        mu = torch.zeros(1, 1, self.cfg.example.d)
+        sigma = torch.eye(self.cfg.example.d)
+        mean, lmc, var = self.sampler.analytical_marginal_prob_from_params(
+            t=t,
+            mu=mu,
+            cov_prior=sigma,
+        )
+        precision = var.pinverse()
+        score = torch.matmul(precision, mean - x)
         return score
 
     def analytical_brownian_motion_diff_score(self, t, x):
@@ -380,12 +399,11 @@ class ContinuousEvaluator(ToyEvaluator):
         pseudo_example = self.cfg.example.copy()
         pseudo_example['mu'] = 0.
         pseudo_example['sigma'] = 1.
-        mean, lmc, std = self.sampler.analytical_marginal_prob(
+        mean, lmc, var = self.sampler.analytical_marginal_prob(
             t=t,
             example=pseudo_example
         )
         num = -(self.cfg.example.nu + 1) * (x - mean)
-        var = std ** 2
         denom = var * (self.cfg.example.nu + (x - mean) ** 2 / var)
         return num / denom
 
@@ -424,6 +442,12 @@ class ContinuousEvaluator(ToyEvaluator):
             self.sampler.diffusion_timesteps,
             device=x_min.device
         )
+        # try:
+        #     # sol = self.euler_integrate(ode_fn, x_min, times)
+        #     sol = self.heun_integrate(ode_fn, x_min, times)
+        #     sol = (sol,)
+        # except:
+        #     import pdb; pdb.set_trace()
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
         # import matplotlib.pyplot as plt
         # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
@@ -507,6 +531,102 @@ class ContinuousEvaluator(ToyEvaluator):
         return sample_out
 
     @torch.no_grad()
+    def heun_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        if type(x) == tuple:
+            return self.heun_integrate_tuple(ode_fn, x, times)
+        return self.heun_integrate_tensor(ode_fn, x, times)
+
+    @torch.no_grad()
+    def heun_integrate_tensor(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        for t1, t2 in zip(times[:-1], times[1:]):
+            x = self.heun_step_tensor(ode_fn, x, t1, t2)
+        return x
+
+    @torch.no_grad()
+    def heun_step_tensor(
+            self,
+            ode_fn: Callable,
+            x: Tuple,
+            t1: torch.Tensor,
+            t2: torch.Tensor,
+    ):
+        dt = t2-t1
+        x1, dx1_dt = self.euler_step_tensor(ode_fn, x, t1, dt)
+        _, dx2_dt = self.euler_step_tensor(ode_fn, x1, t2, dt)
+        return x + (t2 - t1) * (dx2_dt + dx1_dt) / 2  # trapezoid rule
+
+    @torch.no_grad()
+    def heun_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        for t1, t2 in zip(times[:-1], times[1:]):
+            x = self.heun_step_tuple(ode_fn, x, t1, t2)
+        return ([x[0]], x[1].repeat(times.shape[0], 1))
+
+    @torch.no_grad()
+    def heun_step_tuple(
+            self,
+            ode_fn: Callable,
+            x: Tuple,
+            t1: torch.Tensor,
+            t2: torch.Tensor
+    ) -> Tuple[Tuple[torch.Tensor, torch.Tensor],
+               Tuple[torch.Tensor, torch.Tensor]]:
+        dt = t2-t1
+        x1, dx1_dt = self.euler_step_tuple(ode_fn, x, t1, dt)
+        _, dx2_dt = self.euler_step_tuple(ode_fn, x1, t2, dt)
+        y0 = x[0] + (t2 - t1) * (dx2_dt[0] + dx1_dt[0]) / 2  # trapezoid rule
+        y1 = x[1] + (t2 - t1) * (dx2_dt[1] + dx1_dt[1]) / 2  # trapezoid rule
+        y = (y0, y1)
+        return y
+
+    @torch.no_grad()
+    def euler_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        if type(x) == tuple:
+            return self.euler_integrate_tuple(ode_fn, x, times)
+        return self.euler_integrate_tensor(ode_fn, x, times)
+
+    @torch.no_grad()
+    def euler_integrate_tensor(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        for t, dt in zip(times[:-1], times.diff()):
+            x, _ = self.euler_step_tensor(ode_fn, x, t, dt)
+        return x
+
+    @torch.no_grad()
+    def euler_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+        for t, dt in zip(times[:-1], times.diff()):
+            x, _ = self.euler_step_tuple(ode_fn, x, t, dt)
+        return ([x[0]], x[1].repeat(times.shape[0], 1))
+
+    @torch.no_grad()
+    def euler_step_tensor(
+            self,
+            ode_fn: Callable,
+            x: Tuple,
+            t: torch.Tensor,
+            dt: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        dx_dt = ode_fn(t, x)
+        return x + dx_dt * dt, dx_dt
+
+    @torch.no_grad()
+    def euler_step_tuple(
+            self,
+            ode_fn: Callable,
+            x: Tuple,
+            t: torch.Tensor,
+            dt: torch.Tensor
+    ) -> Tuple[Tuple[torch.Tensor, torch.Tensor],
+               Tuple[torch.Tensor, torch.Tensor]]:
+        reshaped_x0 = x[0].reshape(-1)
+        x0_len = len(reshaped_x0)
+        dx_dt = ode_fn(t, x)
+        dx_dt0 = dx_dt[:x0_len].reshape(x[0].shape)
+        dx_dt1 = dx_dt[x0_len:].reshape(x[1].shape)
+        x0 = x[0] + dx_dt0 * dt
+        x1 = x[1] + dx_dt1 * dt
+        x = (x0, x1), (dx_dt0, dx_dt1)
+        return x
+
+    @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
         fevals = 0
@@ -542,14 +662,23 @@ class ContinuousEvaluator(ToyEvaluator):
             return out
         ll = x.new_zeros([x.shape[0]])
         x_min = x, ll
+        t_eps = self.sampler.t_eps
         times = torch.linspace(
             self.sampler.t_eps,
-            1.-self.sampler.t_eps,
+            1.,
             self.sampler.diffusion_timesteps,
             device=x.device
         )
+        # times = torch.linspace(
+        #     self.sampler.t_eps,
+        #     1.-self.sampler.t_eps,
+        #     self.sampler.diffusion_timesteps,
+        #     device=x.device
+        # )
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
-        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+        sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+        # sol = self.euler_integrate(ode_fn, x_min, times)
+        # sol = self.heun_integrate(ode_fn, x_min, times)
         latent, delta_ll = sol[0][-1], sol[1]
         # if self.cfg.test == TestType.Gaussian:
         #     pseudo_example = self.cfg.example.copy()

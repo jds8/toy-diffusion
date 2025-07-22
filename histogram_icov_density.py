@@ -40,7 +40,7 @@ def suppresswarning():
 
 def get_condition_idx(samples, alpha, std):
     if type(std.example) == MultivariateGaussianExampleConfig:
-        condition_idx = samples.norm(dim=1) < alpha**2
+        condition_idx = samples.norm(dim=1) < alpha
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dt = torch.tensor(1/2)
         x = samples * torch.sqrt(dt)
@@ -51,7 +51,7 @@ def get_condition_idx(samples, alpha, std):
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
     logger = logging.getLogger("main")
-    logger.info('run type: bin_comparison')
+    logger.info('run type: histogram_icov_density')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
     logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
@@ -66,7 +66,8 @@ def sample(cfg):
 
     with torch.no_grad():
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + .1
+        # max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + .1
+        max_val = alpha.squeeze() + 2.
         sample_traj_out = std.sample_trajectories(
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
@@ -81,7 +82,7 @@ def sample(cfg):
         mid_y = y_edges[:-1] + y_edges[1:]
         xx, yy = torch.meshgrid(torch.tensor(mid_x), torch.tensor(mid_y), indexing='xy')
 
-        # plot error
+        # plot histogram pdf
         # plt.figure(figsize=(6, 5))
         plt.pcolormesh(xx, yy, hist.T, shading='auto', cmap='viridis')
         # plt.contourf(xx, yy, hist, cmap='viridis')
@@ -91,6 +92,27 @@ def sample(cfg):
         plt.title('Density')
         plt.tight_layout()
         plt.savefig('{}/{}_alpha={}_histogram_icov_density.pdf'.format(
+            HydraConfig.get().run.dir,
+            cfg.model_name,
+            alpha.item(),
+        ))
+
+        # plot error
+        # compute analytical likelihood
+        normal = torch.distributions.Normal(0., 1.)
+        unnormed_analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
+        normalizing_factor = get_target(std).analytical_prob(alpha)
+        analytical = unnormed_analytical / normalizing_factor
+        error = hist.T - analytical.numpy()
+        # plt.figure(figsize=(6, 5))
+        plt.pcolormesh(xx, yy, error, shading='auto', cmap='viridis')
+        # plt.contourf(xx, yy, hist, cmap='viridis')
+        plt.colorbar(label='Density')
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.title('Density')
+        plt.tight_layout()
+        plt.savefig('{}/{}_alpha={}_histogram_icov_density_error.pdf'.format(
             HydraConfig.get().run.dir,
             cfg.model_name,
             alpha.item(),

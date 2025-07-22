@@ -332,18 +332,31 @@ class VPSDESampler(AbstractContinuousSampler):
 
     def analytical_marginal_prob(self, t: torch.Tensor, example):
         mu = torch.tensor([[[example.mu]]])
+        cov_prior = example.sigma ** 2
+        return self.analytical_marginal_prob_from_params(mu, cov_prior)
+
+    def analytical_marginal_prob_from_params(
+            self,
+            t: torch.Tensor,
+            mu: torch.Tensor,
+            cov_prior: torch.Tensor,
+    ):
         log_mean_coeff = self.log_mean_coeff(x_shape=mu.shape, t=t)
-        mean = log_mean_coeff.exp() * mu
-        first_var_term = example.sigma ** 2 * (2. * log_mean_coeff).exp()
+        mean = log_mean_coeff.exp() * mu.to(log_mean_coeff.device)
+        first_var_term = cov_prior.to(log_mean_coeff.device) * (2. * log_mean_coeff).exp()
         second_var_term = (1 - (2. * log_mean_coeff).exp())
-        std = (first_var_term + second_var_term).sqrt()
-        return mean, log_mean_coeff, std
+        cov = first_var_term + second_var_term
+        print(first_var_term.shape)
+        print(second_var_term.shape)
+        print(cov.shape)
+        return mean, log_mean_coeff, cov
 
     def prior_analytic_logp(self, example, device, latent):
-        mean, _, std = self.analytical_marginal_prob(
+        mean, _, cov = self.analytical_marginal_prob(
             t=torch.tensor(1.),
             example=example,
         )
+        std = cov.sqrt()
         return torch.distributions.Normal(mean, std, device).log_prob(latent)
 
     def prior_sampling(self, device):
