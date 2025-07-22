@@ -357,8 +357,8 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mu = torch.zeros(1, 1, self.cfg.example.d)
-        sigma = torch.eye(self.cfg.example.d)
+        mu = torch.zeros(1, self.cfg.example.d, 1, device=device)
+        sigma = torch.eye(self.cfg.example.d, device=device)
         mean, lmc, var = self.sampler.analytical_marginal_prob_from_params(
             t=t,
             mu=mu,
@@ -381,7 +381,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
         dt = 1. / (self.cfg.example.sde_steps-1)
 
-        var = f ** 2 * dt + g ** 2
+        var = f ** 2 * dt + g
 
         score = -x / var
 
@@ -2358,7 +2358,6 @@ def test(end_time, cfg, out_trajs, std, all_trajs, other_histogram_data):
             cfg,
             out_trajs,
             std,
-            other_histogram_data,
         )
     elif type(std.example) == MultivariateGaussianExampleConfig:
         test_multivariate_gaussian(
