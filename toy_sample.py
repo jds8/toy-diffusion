@@ -2484,15 +2484,19 @@ def get_raw(cfg, data):
 def plot_ode_trajs(cfg, std, sample_trajs):
     x_min = sample_trajs.x_min
     diffusion_trajs = sample_trajs.samples
+    cfg_obj = OmegaConf.to_object(cfg)
     test = cfg.test
-    cfg.test = TestType.MultivariateGaussian
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        test_type = TestType.MultivariateGaussian
+    else:
+        test_type = TestType.BrownianMotionDiff
+    cfg.test = test_type
     analytical_trajs = std.sample_trajectories(
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
         x_min=x_min,
     ).samples
 
-    cfg_obj = OmegaConf.to_object(cfg)
     raw_traj = get_raw(cfg_obj, analytical_trajs[-1])
     cond = std.likelihood.get_condition(raw_traj, analytical_trajs[-1]).to(bool)
     good_x_min = x_min[cond]
@@ -2530,7 +2534,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
     )[0].exp().cpu()
-    cfg.test = TestType.MultivariateGaussian
+    cfg.test = test_type
     analytical_numerical_pdf = std.ode_log_likelihood(
         analytical_trajs[-1, cond].to(device),
         cond=std.cond,
