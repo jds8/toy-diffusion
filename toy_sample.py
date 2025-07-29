@@ -364,8 +364,10 @@ class ContinuousEvaluator(ToyEvaluator):
         return mean, lmc, var
 
     def get_analytical_brownian_motion_diff_variance(self, t, x):
-        f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
-        g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
+        beta = self.sampler.continuous_beta_integral(t)
+        log_mean_coeff = -0.5 * beta[:, None, None]
+        f = log_mean_coeff.exp()
+        g = 1 - (2. * log_mean_coeff).exp()
 
         dt = 1. / (self.cfg.example.sde_steps-1)
 
@@ -373,11 +375,11 @@ class ContinuousEvaluator(ToyEvaluator):
         return var
 
     def get_variance_from_sampler(self, t, x):
-        if isinstance(self.cfg.example) == GaussianExampleConfig:
+        if isinstance(self.example, GaussianExampleConfig):
             return self.get_gaussian_marginal_prob_from_sampler(t, x)[2]
-        elif isinstance(self.cfg.example) == MultivariateGaussianExampleConfig:
+        elif isinstance(self.example, MultivariateGaussianExampleConfig):
             return self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)[2]
-        elif isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
+        elif isinstance(self.example, BrownianMotionDiffExampleConfig):
             return self.get_analytical_brownian_motion_diff_variance(t, x)
         else:
             raise NotImplementedError
@@ -411,7 +413,12 @@ class ContinuousEvaluator(ToyEvaluator):
         where we consider sequential differences dX_t equiv X_t - X_{t-1}
         and where X_t is Brownian Motion so X_t sim N(X_{t-1}, sqrt{dt})
         """
-        var = self.get_analytical_brownian_motion_diff_variance(t, x)
+        f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
+        g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
+
+        dt = 1. / (self.cfg.example.sde_steps-1)
+
+        var = f ** 2 * dt + g
         score = -x / var
 
         return score
