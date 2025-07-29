@@ -2538,7 +2538,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         exact=cfg.compute_exact_trace,
     )[0].exp().cpu()
     cfg.test = test
-    analytical_pdf = compute_analytical_icov(cfg, std, x_min).to('cpu')
+    analytical_pdf = compute_analytical_icov(cfg, std, x_min[cond]).to('cpu')
 
     # plot likelihoods
     axs[-1].plot(times, analytical_pdf, color='gray', alpha=0.7, label='Analytical')
