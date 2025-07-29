@@ -2427,6 +2427,14 @@ def viz_trajs(cfg, std, out_trajs, end_time):
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, HydraConfig.get().run.dir, clf=False)
 
+def get_dim(std):
+    if isinstance(std.cfg.example, GaussianExampleConfig):
+        return std.cfg.example.d
+    elif isinstance(std.cfg.example, MultivariateGaussianExampleConfig):
+        return std.cfg.example.d
+    elif isinstance(std.cfg.example, BrownianMotionDiffExampleConfig):
+        return std.cfg.example.sde_steps-1
+
 def compute_df_dx(cfg, std, x_min):
     # compute
     # $-\dfrac{1}{2}\beta(t)(I-\sigma(t)^{-1})$
@@ -2434,7 +2442,8 @@ def compute_df_dx(cfg, std, x_min):
     beta = std.sampler.continuous_beta_integral(ts).to(device)
     # note that the sigma output from the following function does NOT depend on x_min in the
     # Gaussian, BM, nor Student T cases
-    eye = torch.eye(cfg.example.d, device=device)
+    d = get_dim(std)
+    eye = torch.eye(d, device=device)
     sigma = std.get_variance_from_sampler(ts, x_min)
     sigma_inv = 1 / sigma if sigma[0].shape == torch.Size([1, 1]) else sigma.pinverse()
     df_dx = (-beta[:, None, None] / 2 * (eye - sigma_inv))
@@ -2470,7 +2479,7 @@ def get_raw(cfg, data):
         raw_data = torch.matmul(L, data) + mu
         return raw_data
     elif isinstance(cfg.example, BrownianMotionDiffExampleConfig):
-        dt = cfg.example.end_time / (cfg.example.sde_steps-1)
+        dt = torch.tensor(1. / (cfg.example.sde_steps-1))
         scaled_data = data * dt.sqrt()  # standardize data
         raw_data = torch.cat([
             torch.zeros(scaled_data.shape[0], 1, 1, device=device),
@@ -2498,7 +2507,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     ).samples
 
     raw_traj = get_raw(cfg_obj, analytical_trajs[-1])
-    cond = std.likelihood.get_condition(raw_traj, analytical_trajs[-1]).to(bool)
+    cond = std.likelihood.get_condition(raw_traj, analytical_trajs[-1]).to(bool).squeeze()
     good_x_min = x_min[cond]
     good_analytical_trajs = analytical_trajs[:, cond]
 
@@ -2506,7 +2515,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     analytical_numerical_samples = good_analytical_trajs.squeeze().cpu()
     analytical_samples = compute_analytical_ode_traj(cfg, std, x_min[cond]).squeeze().cpu()
 
-    d = cfg.example.d if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig) else cfg.example.sde_steps-1
+    d = get_dim(std)
 
     # Create figure and axis
     fig, axs = plt.subplots(d+1, 1)
