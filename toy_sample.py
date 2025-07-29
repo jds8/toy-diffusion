@@ -4,8 +4,12 @@ import warnings
 import logging
 import time as timer
 from typing_extensions import Callable, Optional, List, Union, Tuple
+import math
 
 from pathlib import Path
+
+import matplotlib.animation as animation
+import matplotlib.colors as colors
 
 from collections import namedtuple
 
@@ -45,7 +49,7 @@ from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-SampleOutput = namedtuple('SampleOutput', 'samples fevals')
+SampleOutput = namedtuple('SampleOutput', 'samples fevals x_min')
 
 SDEConfig = namedtuple('SDEConfig', 'drift diffusion sde_steps end_time')
 DiffusionConfig = namedtuple('DiffusionConfig', 'f g')
@@ -234,7 +238,7 @@ class DiscreteEvaluator(ToyEvaluator):
                     x, t.item(), posterior_mean,
                 )
             samples.append(x)
-        return SampleOutput(samples=samples, fevals=-1)
+        return SampleOutput(samples=samples, fevals=-1, x_min=x)
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
@@ -270,7 +274,11 @@ class ContinuousEvaluator(ToyEvaluator):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.MultivariateGaussian:
-            return self.analytical_multivariate_gaussian_score(t=t, x=x)
+            uncond_score = self.analytical_multivariate_gaussian_score(t=t, x=x)
+            return uncond_score
+            # mask = x.norm(dim=[1, 2]) < kwargs['alpha'].to(device).squeeze()
+            # score = uncond_score.masked_fill(mask[:, None, None], 0.0)
+            # return score
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
@@ -335,12 +343,7 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         return dx_dt
 
-    def analytical_gaussian_score(self, t, x):
-        """
-        Compute the analytical marginal score of p_t for t in (0, 1)
-        given the SDE formulation from Song et al. in the case that
-        p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
-        """
+    def get_gaussian_marginal_prob_from_sampler(self, t, x):
         pseudo_example = self.cfg.example.copy()
         pseudo_example['mu'] = 0.
         pseudo_example['sigma'] = 1.
@@ -348,6 +351,36 @@ class ContinuousEvaluator(ToyEvaluator):
             t=t,
             example=pseudo_example
         )
+        return mean, lmc, var
+
+    def get_multivariate_gaussian_marginal_prob_from_sampler(self, t, x):
+        mu = torch.zeros(1, self.cfg.example.d, 1, device=device)
+        sigma = torch.eye(self.cfg.example.d, device=device)
+        mean, lmc, var = self.sampler.analytical_marginal_prob_from_params(
+            t=t,
+            mu=mu,
+            cov_prior=sigma,
+        )
+        return mean, lmc, var
+
+    def get_marginal_from_sampler(self, t, x):
+        import pdb; pdb.set_trace()
+        if isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
+            return self.get_gaussian_marginal_prob_from_sampler(t, x)
+        elif isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
+            return self.get_gaussian_marginal_prob_from_sampler(t, x)
+        elif isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
+            return self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
+        else:
+            raise NotImplementedError
+
+    def analytical_gaussian_score(self, t, x):
+        """
+        Compute the analytical marginal score of p_t for t in (0, 1)
+        given the SDE formulation from Song et al. in the case that
+        p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
+        """
+        mean, lmc, var = self.get_gaussian_marginal_prob_from_sampler(t, x)
         score = (mean - x) / var
         return score
 
@@ -357,13 +390,7 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mu = torch.zeros(1, self.cfg.example.d, 1, device=device)
-        sigma = torch.eye(self.cfg.example.d, device=device)
-        mean, lmc, var = self.sampler.analytical_marginal_prob_from_params(
-            t=t,
-            mu=mu,
-            cov_prior=sigma,
-        )
+        mean, lmc, var = self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
         precision = var.pinverse()
         score = torch.matmul(precision, mean - x)
         return score
@@ -396,13 +423,7 @@ class ContinuousEvaluator(ToyEvaluator):
         nabla log p(x) = -(nu + 1)(x - mu) / sigma^2(nu + (x-mu)^2 / sigma^2)
         """
 
-        pseudo_example = self.cfg.example.copy()
-        pseudo_example['mu'] = 0.
-        pseudo_example['sigma'] = 1.
-        mean, lmc, var = self.sampler.analytical_marginal_prob(
-            t=t,
-            example=pseudo_example
-        )
+        mean, lmc, var = self.get_gaussian_marginal_prob_from_sampler(t, x)
         num = -(self.cfg.example.nu + 1) * (x - mean)
         denom = var * (self.cfg.example.nu + (x - mean) ** 2 / var)
         return num / denom
@@ -422,10 +443,13 @@ class ContinuousEvaluator(ToyEvaluator):
             )
             x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
 
-        return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps)
+        return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps, x_min=x_min)
 
     def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5, **kwargs):
-        x_min = self.get_x_min()
+        if 'x_min' in kwargs:
+            x_min = kwargs['x_min']
+        else:
+            x_min = self.get_x_min()
 
         fevals = 0
         def ode_fn(t, x):
@@ -449,6 +473,7 @@ class ContinuousEvaluator(ToyEvaluator):
         # except:
         #     import pdb; pdb.set_trace()
         sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+
         # import matplotlib.pyplot as plt
         # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
         # bm_trajs = torch.cat([
@@ -460,7 +485,7 @@ class ContinuousEvaluator(ToyEvaluator):
         # plt.plot(torch.arange(104), gt[0].squeeze().cpu(), color='red')
         # plt.show()
 
-        return SampleOutput(samples=sol, fevals=fevals)
+        return SampleOutput(samples=sol, fevals=fevals, x_min=x_min)
 
     def compute_bins(
             self,
@@ -662,7 +687,6 @@ class ContinuousEvaluator(ToyEvaluator):
             return out
         ll = x.new_zeros([x.shape[0]])
         x_min = x, ll
-        t_eps = self.sampler.t_eps
         times = torch.linspace(
             self.sampler.t_eps,
             1.,
@@ -1346,8 +1370,6 @@ def plot_chi_from_sample_trajs(
 def generate_diffusion_video(ode_llk, all_trajs, cfg):
     samples = all_trajs.squeeze().cpu()
     # generate gif of samples where each index in samples represents a frame
-    import matplotlib.animation as animation
-    import matplotlib.colors as colors
 
     # Create figure and axis
     fig, ax = plt.subplots()
@@ -1905,7 +1927,7 @@ def compute_transformed_ode(
         ode_llk: torch.Tensor,
         alpha: float,
         dt: torch.Tensor,
-):
+) -> torch.Tensor:
     perimeters = torch.stack([
         compute_perimeter(r.cpu(), alpha, dt.sqrt().cpu())[0] for r in sample_levels
     ])
@@ -2403,6 +2425,134 @@ def viz_trajs(cfg, std, out_trajs, end_time):
     for idx, out_traj in enumerate(out_trajs):
         std.viz_trajs(out_traj, end_time, idx, HydraConfig.get().run.dir, clf=False)
 
+def compute_df_dx(cfg, std, x_min):
+    # compute
+    # $-\dfrac{1}{2}\beta(t)(I-\sigma(t)^{-1})$
+    ts = torch.linspace(0., 1., std.sampler.diffusion_timesteps, device=device)
+    beta = std.sampler.continuous_beta_integral(ts).to(device)
+    # note that the sigma output from the following function does NOT depend on x_min in the
+    # Gaussian, BM, nor Student T cases
+    eye = torch.eye(cfg.example.d, device=device)
+    _, _, sigma = std.get_multivariate_gaussian_marginal_prob_from_sampler(ts, x_min)
+    sigma_inv = 1 / sigma if sigma[0].shape == torch.Size([1, 1]) else sigma.pinverse()
+    df_dx = (-beta[:, None, None] / 2 * (eye - sigma_inv))
+    return df_dx, ts
+
+def compute_analytical_ode_traj(cfg, std, x_min):
+    df_dx, ts = compute_df_dx(cfg, std, x_min)
+    lnx = (df_dx * ts.diff()[0]).flip(dims=[0]).cumsum(dim=0).flip(dims=[0])
+    lnx_exp = lnx.exp() if cfg.example.d == 1 else lnx.matrix_exp()
+    assert (lnx_exp.det() > 0).all()
+    coeff = lnx_exp.pinverse()
+    return torch.matmul(coeff[:, None], x_min[None])
+
+def compute_analytical_icov(cfg, std, x_min):
+    df_dx, ts = compute_df_dx(cfg, std, x_min)
+    lnx = -einops.einsum(df_dx, 'b n n -> b')  # compute traces
+    lnp = (lnx.flip(dims=[0]) * ts.diff()[0]).cumsum(dim=0).flip(dims=[0])  # compute integral
+    logp0 = std.sampler.prior_logp(x_min, device=device).flatten(1).sum(1)
+    logpt = logp0[None] - lnp[:, None]
+    return logpt.exp()
+
+def legend_without_duplicate_labels(ax):
+    handles, labels = ax.get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    ax.legend(*zip(*unique))
+
+def get_raw(cfg, data):
+    if isinstance(cfg.example, MultivariateGaussianExampleConfig):
+        d = cfg.example.d
+        mu = torch.tensor(cfg.example.mu, device=device)
+        sigma = torch.tensor(cfg.example.sigma, device=device)
+        L = torch.linalg.cholesky(sigma)
+        raw_data = torch.matmul(L, data) + mu
+        return raw_data
+    elif isinstance(cfg.example, BrownianMotionDiffExampleConfig):
+        dt = cfg.example.end_time / (cfg.example.sde_steps-1)
+        scaled_data = data * dt.sqrt()  # standardize data
+        raw_data = torch.cat([
+            torch.zeros(scaled_data.shape[0], 1, 1, device=device),
+            scaled_data.cumsum(dim=1)
+        ], dim=1)
+        return raw_data
+    else:
+        print(cfg.example)
+        raise NotImplementedError
+
+def plot_ode_trajs(cfg, std, sample_trajs):
+    x_min = sample_trajs.x_min
+    diffusion_trajs = sample_trajs.samples
+    test = cfg.test
+    cfg.test = TestType.MultivariateGaussian
+    analytical_trajs = std.sample_trajectories(
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        x_min=x_min,
+    ).samples
+
+    cfg_obj = OmegaConf.to_object(cfg)
+    raw_traj = get_raw(cfg, analytical_trajs[-1])
+    cond = std.likelihood.get_condition(raw_traj, analytical_trajs[-1]).to(bool)
+    good_x_min = x_min[cond]
+    good_analytical_trajs = analytical_trajs[-1, cond]
+
+    diffusion_samples = diffusion_trajs.squeeze().cpu()
+    analytical_numerical_samples = good_analytical_trajs.squeeze().cpu()
+    analytical_samples = compute_analytical_ode_traj(cfg, std, x_min[cond]).squeeze().cpu()
+
+    d = cfg.example.d if isinstance(cfg.example, MultivariateGaussianExampleConfig) else cfg.example.sde_steps-1
+
+    # Create figure and axis
+    fig, axs = plt.subplots(d+1, 1)
+    plt.suptitle('ODE Trajectories Analytical vs. Diffusion')
+    single_times = torch.arange(std.sampler.diffusion_timesteps, dtype=int)
+    times = einops.repeat(
+        single_times,
+        't -> t b',
+        b=cfg.num_samples
+    )
+    # plot samples
+    for i, ax in enumerate(axs[:-1]):
+        ax.plot(times, analytical_samples[..., i], color='gray', alpha=0.7, label='Analytical')
+        ax.plot(times, analytical_numerical_samples[..., i], color='black', dashes=[3, 1], label='Analytical (Numerical)')
+        ax.plot(times, diffusion_samples[..., i], color='blue', dashes=[4, 4], label='Diffusion')
+        ax.set_ylabel(f'State (dim {i})')
+        ax.set_xticks(single_times)
+
+    # legend_without_duplicate_labels(ax)
+    # compute likelihoods
+    cfg.test = test
+    diffusion_pdf = std.ode_log_likelihood(
+        diffusion_trajs[-1].to(device),
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        exact=cfg.compute_exact_trace,
+    )[0].exp().cpu()
+    cfg.test = TestType.MultivariateGaussian
+    analytical_numerical_pdf = std.ode_log_likelihood(
+        analytical_trajs[-1].to(device),
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        exact=cfg.compute_exact_trace,
+    )[0].exp().cpu()
+    cfg.test = test
+    analytical_pdf = compute_analytical_icov(cfg, std, x_min).to('cpu')
+
+    # plot likelihoods
+    axs[-1].plot(times, analytical_pdf, color='gray', alpha=0.7, label='Analytical')
+    axs[-1].plot(times, analytical_numerical_pdf, color='black', dashes=[3, 1], alpha=0.7, label='Analytical (Numerical)')
+    axs[-1].plot(times, diffusion_pdf, color='blue', dashes=[4, 4], label='Diffusion')
+
+    axs[-1].set_xlabel('Diffusion Timestep')
+    axs[-1].set_ylabel('PDF')
+    axs[-1].set_xticks(single_times)
+
+    plt.savefig('{}/ode_trajs_eps={}.pdf'.format(
+        HydraConfig.get().run.dir,
+        std.sampler.t_eps,
+    ))
+    plt.clf()
+
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
     logger = logging.getLogger("main")
@@ -2580,6 +2730,9 @@ def sample(cfg):
         out_trajs = trajs
 
         # viz_trajs(cfg, std, out_trajs, end_time)
+
+        cfg_obj = OmegaConf.to_object(cfg)
+        plot_ode_trajs(cfg, std, sample_traj_out)
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()

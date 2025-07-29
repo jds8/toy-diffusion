@@ -183,7 +183,7 @@ class BrownianMotionDiffTarget(Target):
             self.dt.sqrt(),
         )
     @staticmethod
-    def bm_pdf(dim: int) -> float:
+    def bm_cdf(dim: int) -> float:
         return {
             3: {
                 0.5: 0.74586752299,
@@ -282,7 +282,7 @@ class BrownianMotionDiffTarget(Target):
             if alpha == 2.:
                 return torch.tensor(0.050560932192670285)
         elif self.cfg.example.sde_steps == 5:
-            return torch.tensor(self.bm_pdf(self.cfg.example.sde_steps)[alpha.item()])
+            return torch.tensor(self.bm_cdf(self.cfg.example.sde_steps)[alpha.item()])
         else:
             raise NotImplementedError
     def analytical_upper_bound(self, alpha: torch.Tensor) -> torch.Tensor:

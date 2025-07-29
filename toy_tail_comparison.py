@@ -20,9 +20,10 @@ import numpy as np
 from scipy.interpolate import griddata
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter
+from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric
+    BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
+    TestType
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import get_2d_pdf, pdf_2d_quadrature_bm
 
@@ -82,7 +83,11 @@ def compute_tail_estimate(
     # of being greater than alpha from the histogram
     # Freedman-Diaconis
     bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** (-1/3)
-    num_bins = int((subsap.max()) / bin_width)
+    try:
+        num_bins = int((subsap.max()) / bin_width)
+    except:
+        import pdb; pdb.set_trace()
+        num_bins = int((subsap.max()) / bin_width)
 
     # Create the histogram
     plt.clf()
@@ -407,6 +412,7 @@ def plot_pfode_pdf_approximation(
     num_sample_batches: int,
     analytical_pdf: List[torch.Tensor],
     ylim: Tuple=None,
+    xlim: Tuple=None,
 ):
     plt.clf()
     flattened_abscissa = abscissa_repeat.flatten()
@@ -490,11 +496,11 @@ def compute_pfode_error_vs_bins(
         dim = cfg.example.sde_steps
         dt = torch.tensor(1/(dim-1))
         target = get_target(cfg)
-        bm_pdf = target.bm_pdf(dim)
-        bm_pdf_keys = list(bm_pdf.keys())
-        idx = int((torch.tensor(bm_pdf_keys) < max_sample).sum() - 1)
-        alpha_key = bm_pdf_keys[idx]
-        approx_leftover = bm_pdf[alpha_key]
+        bm_cdf = target.bm_cdf(dim)
+        bm_cdf_keys = list(bm_cdf.keys())
+        idx = int((torch.tensor(bm_cdf_keys) < max_sample).sum() - 1)
+        alpha_key = bm_cdf_keys[idx]
+        approx_leftover = bm_cdf[alpha_key]
         analytical_tail = 1 - approx_leftover
     else:
         raise NotImplementedError
@@ -546,7 +552,7 @@ def compute_pfode_error_vs_bins(
     bin_width = 2. * IQR * norm_trajs.shape[1] ** (-1/3)  # Freedman-Diaconis
     num_bins = int((norm_trajs.max() - alpha) / bin_width)
     print('plotting histogram pdf')
-    ylim = (0, pdf.max()+0.1)
+    ylim = (0, max(pdf)+0.1)
     # ylim = plot_histogram_pdf_approximation(
     #     norm_trajs,
     #     cfg.num_sample_batches,
@@ -573,6 +579,8 @@ def compute_pfode_error_vs_bins(
             (dim - 1) * abscissa_repeat.flatten().squeeze().log() - (dim / 2 - 1) * \
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         transformed_ode = transformed_ode_llk.exp().cpu()
+        if cfg.test == TestType.MultivariateGaussian:
+            transformed_ode /= normalizing_factor
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         transformed_ode = compute_transformed_ode(
             abscissa_repeat.flatten(),
@@ -580,6 +588,14 @@ def compute_pfode_error_vs_bins(
             alpha=alpha,
             dt=dt
         ).cpu()
+        if cfg.test == TestType.BrownianMotionDiff:
+            bm_cdf = target.bm_cdf(dim)
+            cdf = bm_cdf[alpha]
+            normalizing_constant = torch.tensor(
+                1-cdf,
+                device=transformed_ode.device
+            )
+            transformed_ode /= normalizing_constant
     errors = []
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
@@ -608,7 +624,6 @@ def compute_pfode_error_vs_bins(
         ode_lk_subsample_list = []
         for k in range(nsb):
             ode_lk_subsample = transformed_ode[idx+k:idx+k+nsb*abscissa_count:nsb]
-            abscissa_repeat.flatten()[idx+k:idx+k+nsb*abscissa_count:nsb]
             ode_lk_subsample_list.append(ode_lk_subsample)
         abscissa_interp = interp(abscissa)
         # if type(std.example) == BrownianMotionDiffExampleConfig:
@@ -655,7 +670,7 @@ def compute_pfode_error_vs_bins(
         equivalents,
         median_tensor,
         conf_int_tensor.T,
-        'PFODE Approximation',
+        'Density Approximation',
         'orange'
     )
     return error_data, ylim, xlim
@@ -707,7 +722,8 @@ def find_order_of_magnitude_subtensor(x: torch.Tensor) -> torch.Tensor:
 def make_error_vs_samples(
         sample_error_data: ErrorData,
         pfode_error_data: ErrorData,
-        alpha: float
+        alpha: float,
+        cfg: SampleConfig,
 ):
     title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
     plot_errors(sample_error_data, title)
@@ -725,6 +741,19 @@ def make_error_vs_samples(
     ax_top.set_xticklabels(ticklabels)
     ax_top.set_xlabel('Number of Bins')
 
+    plt.legend()
+
+    plt.ylim((0., 0.2))
+    plt.yscale('log')
+
+    _, run_type = get_run_type(cfg)
+    run_type = run_type.replace(' ', '_')
+    plt.savefig('{}/{}_{}_tail_integral_error_vs_sample_size.pdf'.format(
+        HydraConfig.get().run.dir,
+        run_type,
+        alpha
+    ))
+
 def make_plots(
         trajs: torch.Tensor,
         alpha: float,
@@ -736,12 +765,12 @@ def make_plots(
 
     subsample_sizes = torch.logspace(
         math.log10(500),
-        math.log10(cfg.num_samples),
+        math.log10(trajs.shape[1]),
         10,
         dtype=int
     )
 
-    all_bins, hist_error_vs_samples, pfode_error_vs_samples, ylim, xlim = make_error_vs_samples_plot(
+    all_bins, hist_error_vs_samples, pfode_error_vs_samples = make_error_vs_samples_plot(
         trajs,
         alpha,
         cfg,
@@ -749,20 +778,6 @@ def make_plots(
         std,
         error_metric,
     )
-
-    plt.ylim(ylim)
-    plt.xlim(xlim)
-
-    plt.legend()
-    plt.tight_layout()
-
-    _, run_type = get_run_type(cfg)
-    run_type = run_type.replace(' ', '_')
-    plt.savefig('{}/{}_{}_tail_integral_error_vs_sample_size.pdf'.format(
-        HydraConfig.get().run.dir,
-        run_type,
-        alpha
-    ))
 
 def make_error_vs_samples_plot(
         trajs: torch.Tensor,
@@ -791,9 +806,10 @@ def make_error_vs_samples_plot(
     make_error_vs_samples(
         hist_error_vs_samples,
         pfode_error_vs_samples,
-        alpha
+        alpha,
+        cfg,
     )
-    return all_bins, hist_error_vs_samples, pfode_error_vs_samples, ylim, xlim
+    return all_bins, hist_error_vs_samples, pfode_error_vs_samples
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
@@ -825,6 +841,10 @@ def sample(cfg):
             b=cfg.num_sample_batches
         )
         cfg_obj = OmegaConf.to_object(cfg)
+        if cfg.test in [TestType.MultivariateGaussian, TestType.BrownianMotionDiff]:
+            trajs_raw = get_raw(cfg_obj, rearranged_trajs)
+            mask = std.likelihood.get_condition(trajs_raw, rearranged_trajs).to(bool)
+            rearranged_trajs = rearranged_trajs[:, mask]
         alpha_float = alpha.cpu().item()
         error_metric = get_error_metric(std.cfg.error_metric)
         make_plots(
