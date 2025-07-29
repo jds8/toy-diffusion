@@ -2491,16 +2491,16 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     ).samples
 
     cfg_obj = OmegaConf.to_object(cfg)
-    raw_traj = get_raw(cfg, analytical_trajs[-1])
+    raw_traj = get_raw(cfg_obj, analytical_trajs[-1])
     cond = std.likelihood.get_condition(raw_traj, analytical_trajs[-1]).to(bool)
     good_x_min = x_min[cond]
-    good_analytical_trajs = analytical_trajs[-1, cond]
+    good_analytical_trajs = analytical_trajs[:, cond]
 
-    diffusion_samples = diffusion_trajs.squeeze().cpu()
+    diffusion_samples = diffusion_trajs.squeeze().cpu()[:, cond]
     analytical_numerical_samples = good_analytical_trajs.squeeze().cpu()
     analytical_samples = compute_analytical_ode_traj(cfg, std, x_min[cond]).squeeze().cpu()
 
-    d = cfg.example.d if isinstance(cfg.example, MultivariateGaussianExampleConfig) else cfg.example.sde_steps-1
+    d = cfg.example.d if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig) else cfg.example.sde_steps-1
 
     # Create figure and axis
     fig, axs = plt.subplots(d+1, 1)
@@ -2509,7 +2509,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     times = einops.repeat(
         single_times,
         't -> t b',
-        b=cfg.num_samples
+        b=cond.sum(),
     )
     # plot samples
     for i, ax in enumerate(axs[:-1]):
