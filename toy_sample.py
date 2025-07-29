@@ -2428,12 +2428,14 @@ def viz_trajs(cfg, std, out_trajs, end_time):
         std.viz_trajs(out_traj, end_time, idx, HydraConfig.get().run.dir, clf=False)
 
 def get_dim(std):
-    if isinstance(std.cfg.example, GaussianExampleConfig):
-        return std.cfg.example.d
-    elif isinstance(std.cfg.example, MultivariateGaussianExampleConfig):
-        return std.cfg.example.d
-    elif isinstance(std.cfg.example, BrownianMotionDiffExampleConfig):
-        return std.cfg.example.sde_steps-1
+    if isinstance(std.example, GaussianExampleConfig):
+        return std.example.d
+    elif isinstance(std.example, MultivariateGaussianExampleConfig):
+        return std.example.d
+    elif isinstance(std.example, BrownianMotionDiffExampleConfig):
+        return std.example.sde_steps-1
+    else:
+        raise NotImplementedError
 
 def compute_df_dx(cfg, std, x_min):
     # compute
