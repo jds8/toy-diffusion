@@ -363,14 +363,22 @@ class ContinuousEvaluator(ToyEvaluator):
         )
         return mean, lmc, var
 
-    def get_marginal_from_sampler(self, t, x):
-        import pdb; pdb.set_trace()
-        if isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
-            return self.get_gaussian_marginal_prob_from_sampler(t, x)
+    def get_analytical_brownian_motion_diff_variance(self, t, x):
+        f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
+        g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
+
+        dt = 1. / (self.cfg.example.sde_steps-1)
+
+        var = f ** 2 * dt + g
+        return var
+
+    def get_variance_from_sampler(self, t, x):
+        if isinstance(self.cfg.example) == GaussianExampleConfig:
+            return self.get_gaussian_marginal_prob_from_sampler(t, x)[2]
+        elif isinstance(self.cfg.example) == MultivariateGaussianExampleConfig:
+            return self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)[2]
         elif isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
-            return self.get_gaussian_marginal_prob_from_sampler(t, x)
-        elif isinstance(self.cfg.example) == BrownianMotionDiffExampleConfig:
-            return self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
+            return self.get_analytical_brownian_motion_diff_variance(t, x)
         else:
             raise NotImplementedError
 
@@ -403,13 +411,7 @@ class ContinuousEvaluator(ToyEvaluator):
         where we consider sequential differences dX_t equiv X_t - X_{t-1}
         and where X_t is Brownian Motion so X_t sim N(X_{t-1}, sqrt{dt})
         """
-        f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
-        g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
-
-        dt = 1. / (self.cfg.example.sde_steps-1)
-
-        var = f ** 2 * dt + g
-
+        var = self.get_analytical_brownian_motion_diff_variance(t, x)
         score = -x / var
 
         return score
@@ -2433,7 +2435,7 @@ def compute_df_dx(cfg, std, x_min):
     # note that the sigma output from the following function does NOT depend on x_min in the
     # Gaussian, BM, nor Student T cases
     eye = torch.eye(cfg.example.d, device=device)
-    _, _, sigma = std.get_multivariate_gaussian_marginal_prob_from_sampler(ts, x_min)
+    sigma = std.get_variance_from_sampler(ts, x_min)
     sigma_inv = 1 / sigma if sigma[0].shape == torch.Size([1, 1]) else sigma.pinverse()
     df_dx = (-beta[:, None, None] / 2 * (eye - sigma_inv))
     return df_dx, ts
@@ -2523,14 +2525,14 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     # compute likelihoods
     cfg.test = test
     diffusion_pdf = std.ode_log_likelihood(
-        diffusion_trajs[-1].to(device),
+        diffusion_trajs[-1, cond].to(device),
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
     )[0].exp().cpu()
     cfg.test = TestType.MultivariateGaussian
     analytical_numerical_pdf = std.ode_log_likelihood(
-        analytical_trajs[-1].to(device),
+        analytical_trajs[-1, cond].to(device),
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
