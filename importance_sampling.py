@@ -186,6 +186,7 @@ class BrownianMotionDiffTarget(Target):
     def bm_cdf(dim: int) -> float:
         return {
             3: {
+                0.0: 1.,
                 0.5: 0.74586752299,
                 1.: 0.37064871,
                 1.5: 0.146098491,
@@ -200,6 +201,7 @@ class BrownianMotionDiffTarget(Target):
                 6.0: 1.97317518e-09,
             },
             5: {
+                0.0: 1.,
                 0.5: 0.83965139265,
                 1.: 0.4216649,
                 1.5: 0.1655791,

@@ -187,6 +187,13 @@ class ErrorMetricType(Enum):
     SignedError = 'signed_error'
 
 
+class Integrator(Enum):
+    RK4 = 'rk4'
+    DOPRI5 = 'dopri5'
+    EULER = 'euler'
+    HEUN = 'heun'
+
+
 @dataclass
 class SampleConfig(BaseConfig):
     debug: bool = False
@@ -203,6 +210,9 @@ class SampleConfig(BaseConfig):
     num_sample_batches: int = 1
     run_histogram_convergence: bool = True
     error_metric: ErrorMetricType = ErrorMetricType.RelativeError
+    sample_integrator: Integrator = Integrator.RK4
+    density_integrator: Integrator = Integrator.RK4
+    random_seed: int = 100
 
     def get_config_file(self, save_dir, alpha, start_round):
         return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'

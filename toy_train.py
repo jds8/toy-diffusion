@@ -670,7 +670,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
 
 def train(rank, world_size, cfg):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29501"
+    os.environ["MASTER_PORT"] = "29502"
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 

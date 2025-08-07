@@ -744,7 +744,7 @@ def make_error_vs_samples(
     plt.legend()
 
     plt.ylim((0., 0.2))
-    plt.yscale('log')
+    # plt.yscale('log')
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')

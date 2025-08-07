@@ -143,7 +143,7 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
     phi_vals = normal_pdf(dx1, 0, 1) * normal_pdf(dx2, 0, 1)
     weights = phi_vals * p * (2 * np.pi / num_pts)  # arc length elements
 
-    total_weight = BrownianMotionDiffTarget.bm_pdf(3)[alpha]
+    total_weight = BrownianMotionDiffTarget.bm_cdf(3)[alpha]
     exit_weight = np.sum(weights[(np.abs(x1) > (alpha-1e-5)) | (np.abs(x2) > (alpha-1e-5))])
 
     if exit_weight == total_weight == 0.:
