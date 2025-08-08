@@ -699,7 +699,7 @@ class ContinuousEvaluator(ToyEvaluator):
         sol = torch.zeros(times.shape[:1] + x.shape, device=x.device)
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol[i] = x
-            x, _ = self.rk4_step_tensor(ode_fn, x, t, dt)
+            x = self.rk4_step_tensor(ode_fn, x, t, dt)
         sol[-1] = x
         return sol
 
@@ -710,7 +710,7 @@ class ContinuousEvaluator(ToyEvaluator):
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol0[i] = x[0]
             sol1[i] = x[1]
-            x, _ = self.rk4_step_tuple(ode_fn, x, t, dt)
+            x = self.rk4_step_tuple(ode_fn, x, t, dt)
         sol0[-1] = x[0]
         sol1[-1] = x[1]
         return (sol0, sol1)
@@ -719,7 +719,7 @@ class ContinuousEvaluator(ToyEvaluator):
     def rk4_step_tensor(
             self,
             ode_fn: Callable,
-            x: Tuple,
+            x: torch.Tensor,
             t: torch.Tensor,
             dt: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -729,6 +729,19 @@ class ContinuousEvaluator(ToyEvaluator):
         k4 = ode_fn(t+dt, x+dt*k3)
         y = x + dt*(k1+2*k2+2*k3+k4)/6
         return y
+
+    @torch.no_grad()
+    def tuple_call(self, fn: Callable, t_in: torch.Tensor, x_in: Tuple, x0_len: int):
+        out = fn(t_in, x_in)
+        return out[:x0_len].reshape(x_in[0].shape), out[x0_len:].reshape(x_in[1].shape)
+
+    @torch.no_grad()
+    def tuple_add(self, t1: Tuple, t2: Tuple):
+        return (t1[0] + t2[0], t1[1] + t2[1])
+
+    @torch.no_grad()
+    def tuple_multiply(self, t: Tuple, k):
+        return (t[0] * k, t[1] * k)
 
     @torch.no_grad()
     def rk4_step_tuple(
@@ -741,22 +754,25 @@ class ContinuousEvaluator(ToyEvaluator):
                Tuple[torch.Tensor, torch.Tensor]]:
         reshaped_x0 = x[0].reshape(-1)
         x0_len = len(reshaped_x0)
-        dx_dt = ode_fn(t, x)
-        import pdb; pdb.set_trace()
-        dx_dt0 = dx_dt[:x0_len].reshape(x[0].shape)
-        dx_dt1 = dx_dt[x0_len:].reshape(x[1].shape)
-        x = (x0, x1), (dx_dt0, dx_dt1)
-        return x
+        k1 = self.tuple_call(ode_fn, t, x, x0_len)
+        k2 = self.tuple_call(ode_fn, t+dt/2, self.tuple_add(x, self.tuple_multiply(k1, dt/2)), x0_len)
+        k3 = self.tuple_call(ode_fn, t+dt/2, self.tuple_add(x, self.tuple_multiply(k2, dt/2)), x0_len)
+        k4 = self.tuple_call(ode_fn, t+dt, self.tuple_add(x, self.tuple_multiply(k3, dt)), x0_len)
+        k12 = self.tuple_add(k1, self.tuple_multiply(k2, 2))
+        k34 = self.tuple_add(self.tuple_multiply(k3, 2), k4)
+        k1234 = self.tuple_add(k12, k34)
+        delta_x = self.tuple_multiply(k1234, dt/6)
+        y = self.tuple_add(x, delta_x)
+        return y
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
         print('evaluating likelihood...')
         fevals = 0
-        d_lls = []
         if 'num_hutchinson_samples' not in kwargs:
             kwargs['num_hutchinson_samples'] = 1
         def exact_ode_fn(t, x):
-            nonlocal fevals, d_lls
+            nonlocal fevals
             fevals += 1
             with torch.enable_grad():
                 # x is a tuple and x[0].shape is BxDx1 where B is batch size and D is dimension
@@ -768,11 +784,10 @@ class ContinuousEvaluator(ToyEvaluator):
                     v[:, i, 0] = 1.0
                     dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
                     d_ll += (vjp * v).sum([-1, -2])
-                d_lls.append(d_ll)
                 out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
                 return out
         def hutchinson_ode_fn(t, x):
-            nonlocal fevals, d_lls
+            nonlocal fevals
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
@@ -783,7 +798,6 @@ class ContinuousEvaluator(ToyEvaluator):
                     v = torch.randint_like(x, 2) * 2 - 1
                     dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
                     d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_samples']
-                d_lls.append(d_ll)
                 out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
             return out
         ll = x.new_zeros([x.shape[0]])
@@ -802,19 +816,15 @@ class ContinuousEvaluator(ToyEvaluator):
         #     device=x.device
         # )
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
-        if self.cfg.sample_integrator == Integrator.EULER:
+        if self.cfg.density_integrator == Integrator.EULER:
             sol = self.euler_integrate(ode_fn, x_min, times)
-        elif self.cfg.sample_integrator == Integrator.HEUN:
+        elif self.cfg.density_integrator == Integrator.HEUN:
             sol = self.heun_integrate(ode_fn, x_min, times)
-        elif self.cfg.sample_integrator == Integrator.RK4:
+        elif self.cfg.density_integrator == Integrator.RK4:
             sol = self.rk4_integrate(ode_fn, x_min, times)
         # else:
         #     sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method=self.cfg.density_integrator.value)
-        delta_ll = einops.einsum(
-            torch.stack(d_lls).flip(dims=[0]),
-            times.diff(),
-            'b c, b -> b c'
-        ).cumsum(dim=0)
+        delta_ll = sol[1].diff(dim=0).flip(dims=[0]).cumsum(dim=0)
         delta_ll = torch.concat([
             torch.zeros(1, delta_ll.shape[-1], device=delta_ll.device),
             delta_ll
@@ -2585,7 +2595,7 @@ def compute_analytical_ode_traj(cfg, std, x_min):
     coeff = torch.concat([torch.eye(d, device=coeff.device).unsqueeze(0), coeff])
     return torch.matmul(coeff[:, None], x_min[None])
 
-def compute_analytical_icov(cfg, std, x_min, x_final, euler_pdf):
+def compute_analytical_icov(cfg, std, x_min):
     df_dx, ts = compute_df_dx(cfg, std, x_min)
     lnx = -einops.einsum(df_dx, 'b n n -> b')[:-1]  # compute traces
     lnp = (lnx * ts.diff()).flip(dims=[0]).cumsum(dim=0)  # compute integral
@@ -2619,6 +2629,60 @@ def get_raw(cfg, data):
         print(cfg.example)
         raise NotImplementedError
 
+def compute_x_final(std, x_min: torch.Tensor):
+    dts = std.sampler.diffusion_timesteps
+    std.sampler.diffusion_timesteps = 10000
+    analytical_samples = compute_analytical_ode_traj(std.cfg, std, x_min)
+    std.sampler.diffusion_timesteps = dts
+    return analytical_samples[-1]
+
+def compute_ode_error(
+        std,
+        diffusion_timesteps: torch.Tensor,
+        integrator: Integrator,
+        x_min: torch.Tensor,
+        x_final: torch.Tensor
+):
+    std.cfg.sample_integrator = integrator
+    errors = []
+    dst = std.sampler.diffusion_timesteps
+    for time in diffusion_timesteps:
+        std.sampler.diffusion_timesteps = time
+        trajs = std.sample_trajectories(
+            cond=std.cond,
+            alpha=std.likelihood.alpha.reshape(-1, 1),
+            x_min=x_min,
+        ).samples
+        error = (trajs[-1][0] - x_final[0]).norm()
+        errors.append(error.cpu())
+        std.sampler.diffusion_timesteps = dst
+    return errors
+
+def make_ode_error_plot(std, test_type: str, x_min: torch.Tensor):
+    plt.clf()
+    std.cfg.test = test_type
+    diffusion_timesteps = torch.tensor([10, 100, 1000], device='cpu')
+    x_final = compute_x_final(std, x_min)
+    euler_errors = compute_ode_error(std, diffusion_timesteps, Integrator.EULER, x_min, x_final)
+    heun_errors = compute_ode_error(std, diffusion_timesteps, Integrator.HEUN, x_min, x_final)
+    rk4_errors = compute_ode_error(std, diffusion_timesteps, Integrator.RK4, x_min, x_final)
+    plt.scatter(diffusion_timesteps, euler_errors, label='Euler', color='blue')
+    plt.plot(diffusion_timesteps, euler_errors, color='blue', alpha=0.4)
+    plt.scatter(diffusion_timesteps, heun_errors, label='Heun', color='red')
+    plt.plot(diffusion_timesteps, heun_errors, color='red', alpha=0.4)
+    plt.scatter(diffusion_timesteps, rk4_errors, label='RK4', color='yellow')
+    plt.plot(diffusion_timesteps, rk4_errors, color='yellow', alpha=0.4)
+    plt.yscale('log')
+    plt.xscale('log')
+    plt.ylabel('L^2 Error')
+    plt.xlabel('Timesteps')
+    plt.title('Convergence Error vs. Timesteps')
+    plt.legend()
+    plt.savefig('{}/ode_error.pdf'.format(
+        HydraConfig.get().run.dir,
+    ))
+    plt.clf()
+
 def plot_ode_trajs(cfg, std, sample_trajs):
     x_min = sample_trajs.x_min
     diffusion_trajs = sample_trajs.samples
@@ -2641,6 +2705,12 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         alpha=std.likelihood.alpha.reshape(-1, 1),
         x_min=x_min,
     ).samples
+    cfg.sample_integrator = Integrator.RK4
+    rk4_trajs = std.sample_trajectories(
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        x_min=x_min,
+    ).samples
 
     euler_raw_traj = get_raw(cfg_obj, euler_trajs[-1])
     euler_cond = std.likelihood.get_condition(euler_raw_traj, euler_trajs[-1]).to(bool).squeeze()
@@ -2650,17 +2720,26 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     heun_cond = std.likelihood.get_condition(heun_raw_traj, heun_trajs[-1]).to(bool).squeeze()
     good_heun_trajs = heun_trajs[:, heun_cond]
 
+    rk4_raw_traj = get_raw(cfg_obj, rk4_trajs[-1])
+    rk4_cond = std.likelihood.get_condition(rk4_raw_traj, rk4_trajs[-1]).to(bool).squeeze()
+    good_rk4_trajs = rk4_trajs[:, rk4_cond]
+
     diffusion_samples = diffusion_trajs.squeeze()[:, euler_cond].cpu()
     analytical_euler_samples = good_euler_trajs.squeeze().cpu()
     analytical_heun_samples = good_heun_trajs.squeeze().cpu()
+    analytical_rk4_samples = good_rk4_trajs.squeeze().cpu()
     analytical_samples = compute_analytical_ode_traj(cfg, std, x_min[euler_cond]).squeeze().cpu()
 
     if not ((analytical_samples[0] - analytical_euler_samples[0]).abs() < 1e-3).all() or \
        not ((analytical_samples[0] - analytical_heun_samples[0]).abs() < 1e-3).all() or \
+       not ((analytical_samples[0] - analytical_rk4_samples[0]).abs() < 1e-3).all() or \
        not ((analytical_samples[0] - diffusion_samples[0]).abs() < 1e-3).all():
         print('uh oh analytical samples not matching!')
 
     d = get_dim(std)
+
+    # make ODE convergence plots
+    make_ode_error_plot(std, test_type, x_min)
 
     # Create figure and axis
     fig, axs = plt.subplots(d+1, 1)
@@ -2680,6 +2759,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         ax.plot(times, analytical_samples[..., i], color='gray', alpha=0.6, label='Analytical')
         ax.plot(times, analytical_euler_samples[..., i], color='red', dashes=[5, 3], alpha=0.6, label='Analytical (euler)')
         ax.plot(times, analytical_heun_samples[..., i], color='green', dashes=[3, 1], alpha=0.6, label='Analytical (heun)')
+        ax.plot(times, analytical_rk4_samples[..., i], color='yellow', dashes=[2, 7], alpha=0.6, label='Analytical (heun)')
         ax.plot(times, diffusion_samples[..., i], color='blue', dashes=[4, 4], label='Diffusion')
         ax.set_ylabel(f'State (dim {i})')
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -2697,13 +2777,12 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     )[0].exp().cpu()
     cfg.test = test_type
     cfg.density_integrator = Integrator.EULER
-    analytical_euler_pdf_t = std.ode_log_likelihood(
+    analytical_euler_pdf = std.ode_log_likelihood(
         euler_trajs[-1, euler_cond].to(device),
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
-    )#[0].exp().cpu()
-    analytical_euler_pdf = analytical_euler_pdf_t[0].exp().cpu()
+    )[0].exp().cpu()
     cfg.density_integrator = Integrator.HEUN
     analytical_heun_pdf = std.ode_log_likelihood(
         heun_trajs[-1, heun_cond].to(device),
@@ -2711,10 +2790,18 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
     )[0].exp().cpu()
-    analytical_pdf = compute_analytical_icov(cfg, std, x_min[euler_cond], euler_trajs[-1, euler_cond], analytical_euler_pdf_t).to('cpu')
+    cfg.density_integrator = Integrator.RK4
+    analytical_rk4_pdf = std.ode_log_likelihood(
+        rk4_trajs[-1, rk4_cond].to(device),
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        exact=cfg.compute_exact_trace,
+    )[0].exp().cpu()
+    analytical_pdf = compute_analytical_icov(cfg, std, x_min[euler_cond]).to('cpu')
 
     if not ((analytical_pdf[0] - analytical_euler_pdf[0]).abs() < 1e-3).all() or \
        not ((analytical_pdf[0] - analytical_heun_pdf[0]).abs() < 1e-3).all() or \
+       not ((analytical_pdf[0] - analytical_rk4_pdf[0]).abs() < 1e-3).all() or \
        not ((analytical_pdf[0] - diffusion_pdf[0]).abs() < 1e-3).all():
         print('uh oh analytical pdfs not matching!')
 
@@ -2722,6 +2809,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     axs[-1].plot(times, analytical_pdf, color='gray', alpha=0.6, label='Analytical')
     axs[-1].plot(times, analytical_euler_pdf, color='red', dashes=[5, 3], alpha=0.6, label='Analytical (euler)')
     axs[-1].plot(times, analytical_heun_pdf, color='green', dashes=[3, 1], alpha=0.6, label='Analytical (heun)')
+    axs[-1].plot(times, analytical_rk4_pdf, color='yellow', dashes=[2, 7], alpha=0.8, label='Analytical (rk4)')
     axs[-1].plot(times, diffusion_pdf, color='blue', dashes=[4, 4], label='Diffusion')
     axs[-1].scatter(times[-1], analytical_pdf[-1], marker='o', color='red')
 
