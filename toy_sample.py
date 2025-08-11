@@ -275,11 +275,7 @@ class ContinuousEvaluator(ToyEvaluator):
         if self.cfg.test == TestType.Gaussian:
             return self.analytical_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.MultivariateGaussian:
-            uncond_score = self.analytical_multivariate_gaussian_score(t=t, x=x)
-            return uncond_score
-            # mask = x.norm(dim=[1, 2]) < kwargs['alpha'].to(device).squeeze()
-            # score = uncond_score.masked_fill(mask[:, None, None], 0.0)
-            # return score
+            return self.analytical_multivariate_gaussian_score(t=t, x=x)
         elif self.cfg.test == TestType.BrownianMotionDiff:
             return self.analytical_brownian_motion_diff_score(t=t, x=x)
         elif self.cfg.test == TestType.Test:
@@ -420,12 +416,10 @@ class ContinuousEvaluator(ToyEvaluator):
 
         dt = 1. / (self.cfg.example.sde_steps-1)
 
-        # var = f ** 2 * dt + g
-        # score = -x / var
-
         d = self.cfg.example.sde_steps - 1
         ds = (dt * torch.arange(1, self.cfg.example.sde_steps, device=f.device)).diag()
-        var = f ** 2 * ds + g * torch.eye(d, d, device=g.device)
+        var = (f ** 2  + g) * torch.eye(d, device=g.device)
+        var = torch.eye(d, device=g.device)
         assert var.det() != 0
         precision = var.pinverse()
         score = -torch.matmul(precision, x)
@@ -478,9 +472,10 @@ class ContinuousEvaluator(ToyEvaluator):
             dx_dt = self.get_dx_dt(t, x, evaluate_likelihood=False, **kwargs)
             return dx_dt
 
+        end_time = self.sampler.t_eps if self.cfg.test == TestType.Test else 0.
         times = torch.linspace(
             1.,
-            self.sampler.t_eps,
+            end_time,
             self.sampler.diffusion_timesteps,
             device=x_min.device
         )
@@ -490,8 +485,8 @@ class ContinuousEvaluator(ToyEvaluator):
             sol = self.heun_integrate(ode_fn, x_min, times)
         elif self.cfg.sample_integrator == Integrator.RK4:
             sol = self.rk4_integrate(ode_fn, x_min, times)
-        # else:
-        #     sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method=self.cfg.sample_integrator.value)
+        else:
+            sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
 
         # import matplotlib.pyplot as plt
         # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
@@ -822,8 +817,8 @@ class ContinuousEvaluator(ToyEvaluator):
             sol = self.heun_integrate(ode_fn, x_min, times)
         elif self.cfg.density_integrator == Integrator.RK4:
             sol = self.rk4_integrate(ode_fn, x_min, times)
-        # else:
-        #     sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method=self.cfg.density_integrator.value)
+        else:
+            sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
         delta_ll = sol[1].diff(dim=0).flip(dims=[0]).cumsum(dim=0)
         delta_ll = torch.concat([
             torch.zeros(1, delta_ll.shape[-1], device=delta_ll.device),
@@ -1106,11 +1101,7 @@ def plot_histogram_errors(
                 color='gray'
             )
 
-    try:
-        increment_size = int(np.diff(subsample_sizes)[0])
-    except:
-        import pdb; pdb.set_trace()
-        increment_size = int(np.diff(subsample_sizes)[0])
+    increment_size = int(np.diff(subsample_sizes)[0])
     ax1.set_xlabel(f'Sample Size (increments of {increment_size})')
     ax1.set_ylabel('Error')
     ax1.set_title(f'{error_measure_label} vs. Sample Size')
@@ -2612,8 +2603,8 @@ def legend_without_duplicate_labels(ax):
 def get_raw(cfg, data):
     if isinstance(cfg.example, MultivariateGaussianExampleConfig):
         d = cfg.example.d
-        mu = torch.tensor(cfg.example.mu, device=device)
-        sigma = torch.tensor(cfg.example.sigma, device=device)
+        mu = torch.tensor(cfg.example.mu, device=data.device)
+        sigma = torch.tensor(cfg.example.sigma, device=data.device)
         L = torch.linalg.cholesky(sigma)
         raw_data = torch.matmul(L, data) + mu
         return raw_data
@@ -2621,7 +2612,7 @@ def get_raw(cfg, data):
         dt = torch.tensor(1. / (cfg.example.sde_steps-1))
         scaled_data = data * dt.sqrt()  # standardize data
         raw_data = torch.cat([
-            torch.zeros(scaled_data.shape[0], 1, 1, device=device),
+            torch.zeros(scaled_data.shape[0], 1, 1, device=scaled_data.device),
             scaled_data.cumsum(dim=1)
         ], dim=1)
         return raw_data
@@ -2629,18 +2620,42 @@ def get_raw(cfg, data):
         print(cfg.example)
         raise NotImplementedError
 
-def compute_x_final(std, x_min: torch.Tensor):
-    dts = std.sampler.diffusion_timesteps
-    std.sampler.diffusion_timesteps = 10000
-    analytical_samples = compute_analytical_ode_traj(std.cfg, std, x_min)
-    std.sampler.diffusion_timesteps = dts
-    return analytical_samples[-1]
+def rejection_sample_x_final(cfg, std):
+    """ Rejection sampling to find a conditional sample. """
+    num_samples = 10000
+    cond = torch.zeros(num_samples, dtype=bool)
+    d = get_dim(std)
+    while not cond.any():
+        samples = torch.distributions.Normal(0., 1.).sample([num_samples, d, 1]).to(device)
+        raw_samples = get_raw(cfg, samples)
+        cond = std.likelihood.get_condition(raw_samples, samples).to(bool).squeeze()
+    sample = samples[cond][0]
+    return sample
+
+def get_x_min(std, x_final):
+    times = torch.linspace(0., 1., std.sampler.diffusion_timesteps, device=x_final.device)
+    def ode_fn(t, x):
+        dx_dt = std.get_dx_dt(
+            t,
+            x,
+            evaluate_likelihood=False,
+            cond=std.cond,
+            alpha=std.likelihood.alpha.reshape(-1, 1),
+        )
+        return -dx_dt
+    unsqueezed_x_final = x_final.unsqueeze(0)
+    if std.cfg.sample_integrator == Integrator.EULER:
+        sol = std.euler_integrate(ode_fn, unsqueezed_x_final, times)
+    elif std.cfg.sample_integrator == Integrator.HEUN:
+        sol = std.heun_integrate(ode_fn, unsqueezed_x_final, times)
+    elif std.cfg.sample_integrator == Integrator.RK4:
+        sol = std.rk4_integrate(ode_fn, unsqueezed_x_final, times)
+    return sol[-1]
 
 def compute_ode_error(
         std,
         diffusion_timesteps: torch.Tensor,
         integrator: Integrator,
-        x_min: torch.Tensor,
         x_final: torch.Tensor
 ):
     std.cfg.sample_integrator = integrator
@@ -2648,24 +2663,25 @@ def compute_ode_error(
     dst = std.sampler.diffusion_timesteps
     for time in diffusion_timesteps:
         std.sampler.diffusion_timesteps = time
+        x_min = get_x_min(std, x_final)
         trajs = std.sample_trajectories(
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
             x_min=x_min,
         ).samples
-        error = (trajs[-1][0] - x_final[0]).norm()
+        error = (trajs[-1] - x_final).norm()
         errors.append(error.cpu())
-        std.sampler.diffusion_timesteps = dst
+    std.sampler.diffusion_timesteps = dst
     return errors
 
-def make_ode_error_plot(std, test_type: str, x_min: torch.Tensor):
+def make_ode_error_plot(cfg, std, test_type: TestType):
     plt.clf()
     std.cfg.test = test_type
     diffusion_timesteps = torch.tensor([10, 100, 1000], device='cpu')
-    x_final = compute_x_final(std, x_min)
-    euler_errors = compute_ode_error(std, diffusion_timesteps, Integrator.EULER, x_min, x_final)
-    heun_errors = compute_ode_error(std, diffusion_timesteps, Integrator.HEUN, x_min, x_final)
-    rk4_errors = compute_ode_error(std, diffusion_timesteps, Integrator.RK4, x_min, x_final)
+    x_final = rejection_sample_x_final(cfg, std)
+    euler_errors = compute_ode_error(std, diffusion_timesteps, Integrator.EULER, x_final)
+    heun_errors = compute_ode_error(std, diffusion_timesteps, Integrator.HEUN, x_final)
+    rk4_errors = compute_ode_error(std, diffusion_timesteps, Integrator.RK4, x_final)
     plt.scatter(diffusion_timesteps, euler_errors, label='Euler', color='blue')
     plt.plot(diffusion_timesteps, euler_errors, color='blue', alpha=0.4)
     plt.scatter(diffusion_timesteps, heun_errors, label='Heun', color='red')
@@ -2685,8 +2701,13 @@ def make_ode_error_plot(std, test_type: str, x_min: torch.Tensor):
 
 def plot_ode_trajs(cfg, std, sample_trajs):
     x_min = sample_trajs.x_min
-    diffusion_trajs = sample_trajs.samples
+    alpha = std.likelihood.alpha if std.cond == 1 else torch.tensor(0.)
     cfg_obj = OmegaConf.to_object(cfg)
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        std.likelihood.set_alpha(torch.ones_like(x_min) * alpha)
+    else:
+        std.likelihood.set_alpha(alpha)
+    diffusion_trajs = sample_trajs.samples
     test = cfg.test
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
         test_type = TestType.MultivariateGaussian
@@ -2728,18 +2749,16 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     analytical_euler_samples = good_euler_trajs.squeeze().cpu()
     analytical_heun_samples = good_heun_trajs.squeeze().cpu()
     analytical_rk4_samples = good_rk4_trajs.squeeze().cpu()
-    analytical_samples = compute_analytical_ode_traj(cfg, std, x_min[euler_cond]).squeeze().cpu()
 
-    if not ((analytical_samples[0] - analytical_euler_samples[0]).abs() < 1e-3).all() or \
-       not ((analytical_samples[0] - analytical_heun_samples[0]).abs() < 1e-3).all() or \
-       not ((analytical_samples[0] - analytical_rk4_samples[0]).abs() < 1e-3).all() or \
-       not ((analytical_samples[0] - diffusion_samples[0]).abs() < 1e-3).all():
+    if not ((analytical_euler_samples[0] - analytical_heun_samples[0]).abs() < 1e-3).all() or \
+       not ((analytical_euler_samples[0] - analytical_rk4_samples[0]).abs() < 1e-3).all() or \
+       not ((analytical_euler_samples[0] - diffusion_samples[0]).abs() < 1e-3).all():
         print('uh oh analytical samples not matching!')
 
     d = get_dim(std)
 
     # make ODE convergence plots
-    make_ode_error_plot(std, test_type, x_min)
+    make_ode_error_plot(cfg_obj, std, test_type)
 
     # Create figure and axis
     fig, axs = plt.subplots(d+1, 1)
@@ -2756,14 +2775,13 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     )
     # plot samples
     for i, ax in enumerate(axs[:-1]):
-        ax.plot(times, analytical_samples[..., i], color='gray', alpha=0.6, label='Analytical')
         ax.plot(times, analytical_euler_samples[..., i], color='red', dashes=[5, 3], alpha=0.6, label='Analytical (euler)')
         ax.plot(times, analytical_heun_samples[..., i], color='green', dashes=[3, 1], alpha=0.6, label='Analytical (heun)')
-        ax.plot(times, analytical_rk4_samples[..., i], color='yellow', dashes=[2, 7], alpha=0.6, label='Analytical (heun)')
+        ax.plot(times, analytical_rk4_samples[..., i], color='yellow', dashes=[2, 7], alpha=0.8, label='Analytical (rk4)')
         ax.plot(times, diffusion_samples[..., i], color='blue', dashes=[4, 4], label='Diffusion')
         ax.set_ylabel(f'State (dim {i})')
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.scatter(times[-1], analytical_samples[-1, :, i], marker='o', color='red')
+        ax.scatter(times[-1], analytical_rk4_samples[-1, :, i], marker='o', color='red')
 
     # legend_without_duplicate_labels(ax)
     # compute likelihoods
@@ -2797,21 +2815,18 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         alpha=std.likelihood.alpha.reshape(-1, 1),
         exact=cfg.compute_exact_trace,
     )[0].exp().cpu()
-    analytical_pdf = compute_analytical_icov(cfg, std, x_min[euler_cond]).to('cpu')
 
-    if not ((analytical_pdf[0] - analytical_euler_pdf[0]).abs() < 1e-3).all() or \
-       not ((analytical_pdf[0] - analytical_heun_pdf[0]).abs() < 1e-3).all() or \
-       not ((analytical_pdf[0] - analytical_rk4_pdf[0]).abs() < 1e-3).all() or \
-       not ((analytical_pdf[0] - diffusion_pdf[0]).abs() < 1e-3).all():
+    if not ((analytical_euler_pdf[0] - analytical_heun_pdf[0]).abs() < 1e-3).all() or \
+       not ((analytical_euler_pdf[0] - analytical_rk4_pdf[0]).abs() < 1e-3).all() or \
+       not ((analytical_euler_pdf[0] - diffusion_pdf[0]).abs() < 1e-3).all():
         print('uh oh analytical pdfs not matching!')
 
     # plot likelihoods
-    axs[-1].plot(times, analytical_pdf, color='gray', alpha=0.6, label='Analytical')
     axs[-1].plot(times, analytical_euler_pdf, color='red', dashes=[5, 3], alpha=0.6, label='Analytical (euler)')
     axs[-1].plot(times, analytical_heun_pdf, color='green', dashes=[3, 1], alpha=0.6, label='Analytical (heun)')
     axs[-1].plot(times, analytical_rk4_pdf, color='yellow', dashes=[2, 7], alpha=0.8, label='Analytical (rk4)')
     axs[-1].plot(times, diffusion_pdf, color='blue', dashes=[4, 4], label='Diffusion')
-    axs[-1].scatter(times[-1], analytical_pdf[-1], marker='o', color='red')
+    axs[-1].scatter(times[-1], analytical_rk4_pdf[-1], marker='o', color='red')
 
     axs[-1].set_xlabel('(Reverse) Diffusion Timestep')
     axs[-1].set_ylabel('PDF')
@@ -3007,7 +3022,7 @@ def sample(cfg):
         # viz_trajs(cfg, std, out_trajs, end_time)
 
         cfg_obj = OmegaConf.to_object(cfg)
-        plot_ode_trajs(cfg, std, sample_traj_out)
+        # plot_ode_trajs(cfg, std, sample_traj_out)
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()

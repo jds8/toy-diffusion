@@ -83,11 +83,7 @@ def compute_tail_estimate(
     # of being greater than alpha from the histogram
     # Freedman-Diaconis
     bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** (-1/3)
-    try:
-        num_bins = int((subsap.max()) / bin_width)
-    except:
-        import pdb; pdb.set_trace()
-        num_bins = int((subsap.max()) / bin_width)
+    num_bins = int((subsap.max()) / bin_width)
 
     # Create the histogram
     plt.clf()
@@ -134,6 +130,7 @@ def compute_sample_error_vs_samples(
     else:
         raise NotImplementedError
     sample_levels = trajs.norm(dim=[2, 3])
+
     quantiles = torch.zeros(len(subsample_sizes), 3)
     all_bins = []
     max_value = sample_levels.max()
@@ -141,7 +138,7 @@ def compute_sample_error_vs_samples(
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = std.example.d
         dd = scipy.stats.chi(dim)
-        pdf = [dd.pdf(a) for a in x]
+        pdf = [dd.pdf(a) / (1 - dd.cdf(alpha)) for a in x]
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         pdf = get_2d_pdf(std.example.sde_steps, x, alpha)
     else:
@@ -743,7 +740,8 @@ def make_error_vs_samples(
 
     plt.legend()
 
-    plt.ylim((0., 0.2))
+    ymax = min(sample_error_data.error_bars[1].max(), 0.2)
+    plt.ylim((0., ymax))
     # plt.yscale('log')
 
     _, run_type = get_run_type(cfg)
@@ -835,16 +833,12 @@ def sample(cfg):
         )
         sample_trajs = sample_traj_out.samples
         trajs = sample_trajs[-1]
+        cfg_obj = OmegaConf.to_object(cfg)
         rearranged_trajs = einops.rearrange(
             trajs,
             '(b c) h w -> b c h w',
             b=cfg.num_sample_batches
         )
-        cfg_obj = OmegaConf.to_object(cfg)
-        if cfg.test in [TestType.MultivariateGaussian, TestType.BrownianMotionDiff]:
-            trajs_raw = get_raw(cfg_obj, rearranged_trajs)
-            mask = std.likelihood.get_condition(trajs_raw, rearranged_trajs).to(bool)
-            rearranged_trajs = rearranged_trajs[:, mask]
         alpha_float = alpha.cpu().item()
         error_metric = get_error_metric(std.cfg.error_metric)
         make_plots(

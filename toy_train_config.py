@@ -189,9 +189,9 @@ class ErrorMetricType(Enum):
 
 class Integrator(Enum):
     RK4 = 'rk4'
-    DOPRI5 = 'dopri5'
     EULER = 'euler'
     HEUN = 'heun'
+    PYTORCH = 'pytorch'
 
 
 @dataclass
