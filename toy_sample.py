@@ -154,7 +154,7 @@ class ToyEvaluator:
             pseudo_example = self.cfg.example.copy()
             pseudo_example['mu'] = 0.
             pseudo_example['sigma'] = 1.
-            mean, _, var = self.sampler.analytical_marginal_prob(
+            mean, _, std = self.sampler.analytical_marginal_prob(
                 t=torch.tensor(1.),
                 example=pseudo_example,
             )
@@ -344,20 +344,22 @@ class ContinuousEvaluator(ToyEvaluator):
         pseudo_example = self.cfg.example.copy()
         pseudo_example['mu'] = 0.
         pseudo_example['sigma'] = 1.
-        mean, lmc, var = self.sampler.analytical_marginal_prob(
+        mean, lmc, std = self.sampler.analytical_marginal_prob(
             t=t,
             example=pseudo_example
         )
+        var = std ** 2
         return mean, lmc, var
 
     def get_multivariate_gaussian_marginal_prob_from_sampler(self, t, x):
         mu = torch.zeros(1, self.cfg.example.d, 1, device=device)
         sigma = torch.eye(self.cfg.example.d, device=device)
-        mean, lmc, var = self.sampler.analytical_marginal_prob_from_params(
+        mean, lmc, std = self.sampler.analytical_marginal_prob_from_params(
             t=t,
             mu=mu,
             cov_prior=sigma,
         )
+        var = std ** 2
         return mean, lmc, var
 
     def get_analytical_brownian_motion_diff_variance(self, t, x):
@@ -388,7 +390,8 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mean, lmc, var = self.get_gaussian_marginal_prob_from_sampler(t, x)
+        mean, lmc, std = self.get_gaussian_marginal_prob_from_sampler(t, x)
+        var = std ** 2
         score = (mean - x) / var
         return score
 
@@ -398,7 +401,8 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mean, lmc, var = self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
+        mean, lmc, std = self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
+        var = std ** 2
         precision = var.pinverse()
         score = torch.matmul(precision, mean - x)
         return score
@@ -414,12 +418,8 @@ class ContinuousEvaluator(ToyEvaluator):
         f = self.sampler.marginal_prob(x, t)[1].exp()[:, 0, :]
         g = self.sampler.marginal_prob(x, t)[2][:, 0, :]
 
-        dt = 1. / (self.cfg.example.sde_steps-1)
-
         d = self.cfg.example.sde_steps - 1
-        ds = (dt * torch.arange(1, self.cfg.example.sde_steps, device=f.device)).diag()
-        var = (f ** 2  + g) * torch.eye(d, device=g.device)
-        var = torch.eye(d, device=g.device)
+        var = (f ** 2 + g ** 2) * torch.eye(d, device=g.device)
         assert var.det() != 0
         precision = var.pinverse()
         score = -torch.matmul(precision, x)
@@ -435,7 +435,8 @@ class ContinuousEvaluator(ToyEvaluator):
         nabla log p(x) = -(nu + 1)(x - mu) / sigma^2(nu + (x-mu)^2 / sigma^2)
         """
 
-        mean, lmc, var = self.get_gaussian_marginal_prob_from_sampler(t, x)
+        mean, lmc, std = self.get_gaussian_marginal_prob_from_sampler(t, x)
+        var = std ** 2
         num = -(self.cfg.example.nu + 1) * (x - mean)
         denom = var * (self.cfg.example.nu + (x - mean) ** 2 / var)
         return num / denom
@@ -2746,9 +2747,9 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     good_rk4_trajs = rk4_trajs[:, rk4_cond]
 
     diffusion_samples = diffusion_trajs.squeeze()[:, euler_cond].cpu()
-    analytical_euler_samples = good_euler_trajs.squeeze().cpu()
-    analytical_heun_samples = good_heun_trajs.squeeze().cpu()
-    analytical_rk4_samples = good_rk4_trajs.squeeze().cpu()
+    analytical_euler_samples = good_euler_trajs.squeeze(-1).cpu()
+    analytical_heun_samples = good_heun_trajs.squeeze(-1).cpu()
+    analytical_rk4_samples = good_rk4_trajs.squeeze(-1).cpu()
 
     if not ((analytical_euler_samples[0] - analytical_heun_samples[0]).abs() < 1e-3).all() or \
        not ((analytical_euler_samples[0] - analytical_rk4_samples[0]).abs() < 1e-3).all() or \

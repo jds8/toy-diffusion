@@ -327,33 +327,23 @@ class VPSDESampler(AbstractContinuousSampler):
     def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
         log_mean_coeff = self.log_mean_coeff(x_shape=x.shape, t=t)
         mean = log_mean_coeff.exp() * x
-        var = 1 - (2. * log_mean_coeff).exp()
-        return mean, log_mean_coeff, var
+        std = (1 - (2. * log_mean_coeff).exp()).sqrt()
+        return mean, log_mean_coeff, std
 
     def analytical_marginal_prob(self, t: torch.Tensor, example):
         mu = torch.tensor([[[example.mu]]])
-        cov_prior = example.sigma ** 2
-        return self.analytical_marginal_prob_from_params(t, mu, cov_prior)
-
-    def analytical_marginal_prob_from_params(
-            self,
-            t: torch.Tensor,
-            mu: torch.Tensor,
-            cov_prior: torch.Tensor,
-    ):
         log_mean_coeff = self.log_mean_coeff(x_shape=mu.shape, t=t)
         mean = log_mean_coeff.exp() * mu
-        first_var_term = cov_prior * (2. * log_mean_coeff).exp()
-        second_var_term = 1 - (2. * log_mean_coeff[..., 0].diag_embed()).exp()
-        cov = first_var_term + second_var_term
-        return mean, log_mean_coeff, cov
+        first_var_term = example.sigma ** 2 * (2. * log_mean_coeff).exp()
+        second_var_term = (1 - (2. * log_mean_coeff).exp())
+        std = (first_var_term + second_var_term).sqrt()
+        return mean, log_mean_coeff, std
 
     def prior_analytic_logp(self, example, device, latent):
-        mean, _, cov = self.analytical_marginal_prob(
+        mean, _, std = self.analytical_marginal_prob(
             t=torch.tensor(1.),
             example=example,
         )
-        std = cov.sqrt()
         return torch.distributions.Normal(mean, std, device).log_prob(latent)
 
     def prior_sampling(self, device):
