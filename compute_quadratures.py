@@ -172,8 +172,9 @@ def cached(sde_steps: int, num_abscissa: int, alpha: float) -> Optional[torch.Te
 
 def get_2d_pdf(sde_steps: int, abscissa: torch.Tensor, alpha: float):
     cache = cached(sde_steps, abscissa.shape[0], alpha)
-    if cache:
-        return cache
+    # if cache:
+    #     print('WARNING: Pulling PDF from cache')
+    #     return cache
     filename = get_quadrature_filename(sde_steps, abscissa.shape[0], alpha)
     if sde_steps == 3:
         pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in abscissa]

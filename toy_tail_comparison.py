@@ -93,11 +93,6 @@ def compute_tail_estimate(
         density=True,
     )
     plt.plot(x, pdf, color='blue', label='analytical')
-    plt.savefig('{}/histogram_plot_{}'.format(
-        HydraConfig.get().run.dir,
-        subsap.nelement()
-    ))
-    plt.clf()
     smallest_idx = max((bins < alpha).sum() - 1, 0)
     # empirical_bin_width = bins[1] - bins[0]
     # tail_estimate = hist[smallest_idx:].sum() * empirical_bin_width
@@ -109,6 +104,12 @@ def compute_tail_estimate(
         hist[smallest_idx:],
         x=med_bins[smallest_idx:]
     )
+    plt.scatter(med_bins[smallest_idx:], hist[smallest_idx:], color='red', label='approximation')
+    plt.savefig('{}/histogram_plot_{}'.format(
+        HydraConfig.get().run.dir,
+        subsap.nelement()
+    ))
+    plt.clf()
     return hist, bins, tail_estimate
 
 def compute_sample_error_vs_samples(
@@ -157,6 +158,8 @@ def compute_sample_error_vs_samples(
             )
             subsample_bins.append(HistOutput(hist, bins))
             error = error_metric(tail_estimate, analytical_tail)
+            if error < 0.005:
+                import pdb; pdb.set_trace()
             errors.append(error)
         all_bins.append(subsample_bins)
         errors_tensor = torch.stack(errors)
@@ -365,14 +368,11 @@ def plot_histogram_pdf_approximation(
     total_subsaps = len(subsaps)
     for i, subsap in enumerate(subsaps):
         print('generating histogram {i} of {total_subsaps}')
-        try:
-            hist, _ = torch.histogram(
-                subsap,
-                bins=bins,
-                density=True
-            )
-        except:
-            import pdb; pdb.set_trace()
+        hist, _ = torch.histogram(
+            subsap,
+            bins=bins,
+            density=True
+        )
         hists.append(hist)
     hists_tensor = torch.stack(hists)
     quantiles = torch.quantile(
@@ -434,10 +434,7 @@ def plot_pfode_pdf_approximation(
             alpha=0.3,
             label='5%-95% Quantile'
         )
-    try:
-        plt.plot(abscissa_repeat[:, 0], analytical_pdf, color='red', label='Analytical')
-    except:
-        import pdb; pdb.set_trace()
+    plt.plot(abscissa_repeat[:, 0], analytical_pdf, color='red', label='Analytical')
     plt.xlabel('Radius')
     plt.ylabel('Density (PFODE)')
     ax = plt.gca()
@@ -488,7 +485,7 @@ def compute_pfode_error_vs_bins(
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
         leftover = 1-dd.cdf(max_sample)
-        analytical_tail = (1-dd.cdf(alpha+epsilon)) / normalizing_factor - leftover
+        analytical_tail = float((1-dd.cdf(alpha+epsilon)) / normalizing_factor - leftover)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         dt = torch.tensor(1/(dim-1))
@@ -498,7 +495,7 @@ def compute_pfode_error_vs_bins(
         idx = int((torch.tensor(bm_cdf_keys) < max_sample).sum() - 1)
         alpha_key = bm_cdf_keys[idx]
         approx_leftover = bm_cdf[alpha_key]
-        analytical_tail = 1 - approx_leftover
+        analytical_tail = float(1 - approx_leftover)
     else:
         raise NotImplementedError
 
@@ -740,7 +737,8 @@ def make_error_vs_samples(
 
     plt.legend()
 
-    ymax = min(sample_error_data.error_bars[1].max(), 0.2)
+    # ymax = min(sample_error_data.error_bars[1].max(), 0.2)
+    ymax = 0.2
     plt.ylim((0., ymax))
     # plt.yscale('log')
 
@@ -818,6 +816,8 @@ def sample(cfg):
     logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
 
     os.system('echo git commit: $(git rev-parse HEAD)')
+
+    torch.manual_seed(cfg.random_seed)
 
     omega_sampler = OmegaConf.to_object(cfg.sampler)
     if isinstance(omega_sampler, ContinuousSamplerConfig):

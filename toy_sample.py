@@ -354,12 +354,12 @@ class ContinuousEvaluator(ToyEvaluator):
     def get_multivariate_gaussian_marginal_prob_from_sampler(self, t, x):
         mu = torch.zeros(1, self.cfg.example.d, 1, device=device)
         sigma = torch.eye(self.cfg.example.d, device=device)
-        mean, lmc, std = self.sampler.analytical_marginal_prob_from_params(
-            t=t,
-            mu=mu,
-            cov_prior=sigma,
-        )
-        var = std ** 2
+        beta = self.sampler.continuous_beta_integral(t)  # int_0^t beta(s) ds
+        lmc = -0.5 * beta
+        mean = lmc.exp() * mu
+        first_var_term = sigma * (2. * lmc).exp()
+        second_var_term = (1 - (2. * lmc).exp())
+        var = first_var_term + second_var_term
         return mean, lmc, var
 
     def get_analytical_brownian_motion_diff_variance(self, t, x):
@@ -441,11 +441,11 @@ class ContinuousEvaluator(ToyEvaluator):
         denom = var * (self.cfg.example.nu + (x - mean) ** 2 / var)
         return num / denom
 
-    def sample_trajectories_euler_maruyama(self, steps=torch.tensor(1000), **kwargs):
+    def sample_trajectories_euler_maruyama(self, **kwargs):
         x_min = self.get_x_min()
         x = x_min.clone()
 
-        steps = steps.to(x.device)
+        steps = torch.tensor(self.sampler.diffusion_timesteps).to(x.device)
         for time in torch.linspace(1., self.sampler.t_eps, steps, device=x.device):
             time = time.reshape(-1)
             sf_est = self.get_score_function(
@@ -2721,7 +2721,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         alpha=std.likelihood.alpha.reshape(-1, 1),
         x_min=x_min,
     ).samples
-    cfg.sample_integrator = Integrator.EULER
+    cfg.sample_integrator = Integrator.HEUN
     heun_trajs = std.sample_trajectories(
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
@@ -2758,9 +2758,6 @@ def plot_ode_trajs(cfg, std, sample_trajs):
 
     d = get_dim(std)
 
-    # make ODE convergence plots
-    make_ode_error_plot(cfg_obj, std, test_type)
-
     # Create figure and axis
     fig, axs = plt.subplots(d+1, 1)
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
@@ -2787,7 +2784,7 @@ def plot_ode_trajs(cfg, std, sample_trajs):
     # legend_without_duplicate_labels(ax)
     # compute likelihoods
     cfg.test = test
-    cfg.density_integrator = Integrator.EULER
+    cfg.density_integrator = Integrator.HEUN
     diffusion_pdf = std.ode_log_likelihood(
         diffusion_trajs[-1, euler_cond].to(device),
         cond=std.cond,
@@ -2839,6 +2836,95 @@ def plot_ode_trajs(cfg, std, sample_trajs):
         std.sampler.t_eps,
     ))
     plt.clf()
+
+def plot_divergences(std):
+    t = torch.tensor([1.], device=device)
+    spacing = 100
+    xx = torch.linspace(-5, 5, spacing, device=device)
+    yy = torch.linspace(-5, 5, spacing, device=device)
+    X, Y = torch.meshgrid(xx, yy, indexing='xy')
+    x = torch.stack([X.reshape(-1), Y.reshape(-1)], dim=1).unsqueeze(-1)  # Nx2x1
+    mask = x.norm(dim=[1, 2]) < std.likelihood.alpha
+    dx_dt = lambda y: std.get_dx_dt(t, y, evaluate_likelihood=True, cond=std.cond, alpha=std.likelihood.alpha.reshape(-1, 1))
+    div = torch.zeros(x.shape[0], device=x.device)
+    for i in range(2):
+        v = torch.zeros_like(x)
+        v[:, i, 0] = 1.0
+        dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+        div += (vjp * v).sum([-1, -2])
+    plt.xlabel("x")
+    plt.ylabel("y")
+    # Plot heatmap
+    plt.figure(figsize=(6, 6))
+    div[mask] = torch.nan
+    div_np = div.reshape(spacing, spacing).cpu()
+    plt.imshow(div_np, extent=[
+        xx.min().cpu(),
+        xx.max().cpu(),
+        yy.min().cpu(),
+        yy.max().cpu()
+    ], origin='lower', cmap='hot', interpolation='bilinear')
+    plt.colorbar(label='Magnitude')
+    plt.title("Divergence")
+    plt.axis("equal")
+    plt.savefig('{}/divergence.pdf'.format(
+        HydraConfig.get().run.dir,
+    ))
+    plt.clf()
+
+def plot_circles(std):
+    radii = torch.linspace(0.2, 2., 6, device=device)
+    pi = torch.linspace(0., 2*torch.pi, 20, device=device)
+    unit = torch.stack([torch.cos(pi), torch.sin(pi)], dim=1).unsqueeze(-1)
+    x_min = (unit * radii).movedim(1, 2).reshape(-1, 2, 1)
+    colors = (255 / einops.repeat(torch.arange(1., 7.), 'b -> b 120')).to(int)
+    std.cfg.sample_integrator = Integrator.RK4
+    samples = std.sample_trajectories(
+        cond=std.cond,
+        alpha=std.likelihood.alpha.reshape(-1, 1),
+        x_min=x_min,
+    ).samples.squeeze().cpu()
+
+    # generate gif of samples where each index in samples represents a frame
+    # Create figure and axis
+    fig, ax = plt.subplots()
+    
+    # Set up plot limits based on data range
+    y_min, y_max = samples[..., 1].min(), samples[..., 1].max()
+    x_min, x_max = samples[..., 0].min(), samples[..., 0].max()
+    margin = 0.1 * max(x_max - x_min, y_max - y_min)
+    ax.set_xlim(x_min - margin, x_max + margin)
+    ax.set_ylim(y_min - margin, y_max + margin)
+
+    # Create color normalization based on likelihood values
+    # norm = colors.Normalize(vmin=0., vmax=6.)
+    norm = (colors - int(255 / 6)) / int(255 - 255/6)
+    
+    # Initialize scatter plot
+    scat = ax.scatter([], [], c=[], cmap='viridis', norm=norm)
+    fig.colorbar(scat, label='Meaningless')
+
+    import pdb; pdb.set_trace()
+    def update(frame):
+        # Update positions and colors for current frame
+        scat.set_offsets(samples[frame, :, :2])
+        scat.set_array(colors[frame])
+        return scat,
+    
+    # Create animation
+    frames = len(samples)
+    anim = animation.FuncAnimation(
+        fig,
+        update,
+        frames=frames,
+        interval=100,  # 100ms between frames
+        blit=True
+    )
+
+    # Save animation
+    cond = 'conditional' if std.cond else 'unconditional'
+    anim.save(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion.gif', writer='pillow')
+    plt.close()
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
@@ -3022,8 +3108,22 @@ def sample(cfg):
 
         # viz_trajs(cfg, std, out_trajs, end_time)
 
+        # ode integration error plot
         cfg_obj = OmegaConf.to_object(cfg)
-        # plot_ode_trajs(cfg, std, sample_traj_out)
+        if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+            test_type = TestType.MultivariateGaussian
+        else:
+            test_type = TestType.BrownianMotionDiff
+        make_ode_error_plot(cfg_obj, std, test_type)
+
+        # make unconditional ODE convergence plots
+        plot_ode_trajs(cfg, std, sample_traj_out)
+
+        # plot divergences
+        # plot_divergences(std)
+
+        # plot circles
+        # plot_circles(std)
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()
