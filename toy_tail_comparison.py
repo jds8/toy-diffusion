@@ -158,8 +158,6 @@ def compute_sample_error_vs_samples(
             )
             subsample_bins.append(HistOutput(hist, bins))
             error = error_metric(tail_estimate, analytical_tail)
-            if error < 0.005:
-                import pdb; pdb.set_trace()
             errors.append(error)
         all_bins.append(subsample_bins)
         errors_tensor = torch.stack(errors)
