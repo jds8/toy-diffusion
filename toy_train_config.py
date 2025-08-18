@@ -213,9 +213,16 @@ class SampleConfig(BaseConfig):
     sample_integrator: Integrator = Integrator.RK4
     density_integrator: Integrator = Integrator.RK4
     random_seed: int = 100
+    atol: float = 1e-7
+    rtol: float = 1e-7
 
     def get_config_file(self, save_dir, alpha, start_round):
         return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'
+
+
+@dataclass
+class TailComparisonConfig(SampleConfig):
+    epsilon: float = 0.
 
 
 @dataclass

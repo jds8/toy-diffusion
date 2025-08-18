@@ -458,7 +458,7 @@ class ContinuousEvaluator(ToyEvaluator):
 
         return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps, x_min=x_min)
 
-    def sample_trajectories_probability_flow(self, atol=1e-5, rtol=1e-5, **kwargs):
+    def sample_trajectories_probability_flow(self, atol=1e-7, rtol=1e-7, **kwargs):
         if 'x_min' in kwargs:
             x_min = kwargs['x_min']
         else:
@@ -762,7 +762,7 @@ class ContinuousEvaluator(ToyEvaluator):
         return y
 
     @torch.no_grad()
-    def ode_log_likelihood(self, x, atol=1e-5, rtol=1e-5, **kwargs):
+    def ode_log_likelihood(self, x, **kwargs):
         print('evaluating likelihood...')
         fevals = 0
         if 'num_hutchinson_samples' not in kwargs:
@@ -819,7 +819,7 @@ class ContinuousEvaluator(ToyEvaluator):
         elif self.cfg.density_integrator == Integrator.RK4:
             sol = self.rk4_integrate(ode_fn, x_min, times)
         else:
-            sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+            sol = odeint(ode_fn, x_min, times, atol=self.cfg.atol, rtol=self.cfg.rtol, method='dopri5')
         delta_ll = sol[1].diff(dim=0).flip(dims=[0]).cumsum(dim=0)
         delta_ll = torch.concat([
             torch.zeros(1, delta_ll.shape[-1], device=delta_ll.device),
@@ -1731,6 +1731,20 @@ def test_multivariate_gaussian(
         plot_theta_from_sample_trajs(end_time, cfg, cpu_sample_trajs, std)
         generate_diffusion_video(ode_llk[0].cpu(), all_trajs, cfg)
 
+    idx = sample_levels < sample_levels.min() + 0.2
+    edge_trajs = sample_trajs[idx].cpu()
+    edge_lk = chi_ode[idx.cpu()].numpy()
+    prob_edge = dd.pdf(alpha) / (1-dd.cdf(alpha))
+    low_idx = edge_lk < prob_edge
+    low_edges = edge_trajs[low_idx]
+    high_edges = edge_trajs[~low_idx]
+    rng = edge_lk.max() - edge_lk.min()
+    lk_color = (edge_lk - edge_lk.min()) / rng
+    plt.scatter(edge_trajs[:, 0], edge_trajs[:, 1], c=lk_color, cmap='viridis')
+    plt.colorbar(label='Likelihood')
+    plt.savefig('{}/edge_points.pdf'.format(
+        HydraConfig.get().run.dir,
+    ))
     import pdb; pdb.set_trace()
 
 def generate_pfode_hebo(
@@ -2634,7 +2648,8 @@ def rejection_sample_x_final(cfg, std):
     return sample
 
 def get_x_min(std, x_final):
-    times = torch.linspace(0., 1., std.sampler.diffusion_timesteps, device=x_final.device)
+    start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+    times = torch.linspace(start_time, 1., std.sampler.diffusion_timesteps, device=x_final.device)
     def ode_fn(t, x):
         dx_dt = std.get_dx_dt(
             t,
@@ -2643,7 +2658,7 @@ def get_x_min(std, x_final):
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
         )
-        return -dx_dt
+        return dx_dt
     unsqueezed_x_final = x_final.unsqueeze(0)
     if std.cfg.sample_integrator == Integrator.EULER:
         sol = std.euler_integrate(ode_fn, unsqueezed_x_final, times)
@@ -2677,18 +2692,21 @@ def compute_ode_error(
 
 def make_ode_error_plot(cfg, std, test_type: TestType):
     plt.clf()
-    std.cfg.test = test_type
+    std.cfg.test = test_type if std.cond == -1 else TestType.Test
     diffusion_timesteps = torch.tensor([10, 100, 1000], device='cpu')
     x_final = rejection_sample_x_final(cfg, std)
     euler_errors = compute_ode_error(std, diffusion_timesteps, Integrator.EULER, x_final)
     heun_errors = compute_ode_error(std, diffusion_timesteps, Integrator.HEUN, x_final)
     rk4_errors = compute_ode_error(std, diffusion_timesteps, Integrator.RK4, x_final)
+    dopri5_errors = compute_ode_error(std, diffusion_timesteps, Integrator.PYTORCH, x_final)
     plt.scatter(diffusion_timesteps, euler_errors, label='Euler', color='blue')
     plt.plot(diffusion_timesteps, euler_errors, color='blue', alpha=0.4)
     plt.scatter(diffusion_timesteps, heun_errors, label='Heun', color='red')
     plt.plot(diffusion_timesteps, heun_errors, color='red', alpha=0.4)
     plt.scatter(diffusion_timesteps, rk4_errors, label='RK4', color='yellow')
     plt.plot(diffusion_timesteps, rk4_errors, color='yellow', alpha=0.4)
+    plt.scatter(diffusion_timesteps, dopri5_errors, label='Dopri5', color='green')
+    plt.plot(diffusion_timesteps, dopri5_errors, color='green', alpha=0.4)
     plt.yscale('log')
     plt.xscale('log')
     plt.ylabel('L^2 Error')
@@ -2872,12 +2890,46 @@ def plot_divergences(std):
     ))
     plt.clf()
 
-def plot_circles(std):
-    radii = torch.linspace(0.2, 2., 6, device=device)
-    pi = torch.linspace(0., 2*torch.pi, 20, device=device)
+def plot_boundary(std, cfg_obj, ax):
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        plot_gaussian_boundary(std, ax)
+    else:
+        plot_brownian_motion_boundary(std, ax)
+
+def plot_gaussian_boundary(std, ax):
+    circle = plt.Circle((0,0), std.alpha, color='black', fill=False)
+    ax.add_patch(circle)
+
+def plot_brownian_motion_boundary(std, ax):
+    x = torch.linspace(-5, 5, 500)
+    t = np.sqrt(1/(std.cfg.example.sde_steps-1))
+    ax.plot(x, std.likelihood.alpha/t - x, color='black')
+    ax.plot(x, -std.likelihood.alpha/t - x, color='black')
+    ax.axvline(std.likelihood.alpha/t, color='black')
+    ax.axvline(-std.likelihood.alpha/t, color='black')
+
+def plot_circles(std, cfg_obj):
+    num_radii = 6
+    radii = torch.linspace(0.2, 2., num_radii, device=device)
+    num_angles = 20
+    pi = torch.linspace(0., 2*torch.pi, num_angles, device=device)
     unit = torch.stack([torch.cos(pi), torch.sin(pi)], dim=1).unsqueeze(-1)
     x_min = (unit * radii).movedim(1, 2).reshape(-1, 2, 1)
-    colors = (255 / einops.repeat(torch.arange(1., 7.), 'b -> b 120')).to(int)
+    roygbiv_rgb = [
+        (255,   0,   0),
+        (255, 165,   0),
+        (255, 255,   0),
+        (  0, 128,   0),
+        (  0,   0, 255),
+        ( 75,   0, 130),
+        (148,   0, 211),
+    ]
+    roygbiv = np.array([[r/255, g/255, b/255] for r, g, b in roygbiv_rgb])
+    clr = einops.repeat(np.arange(6), 'b -> (c b)', c=num_radii)
+
+    # Build colormap + normalization
+    cmap = colors.ListedColormap(roygbiv, name="ROYGBIV")
+
     std.cfg.sample_integrator = Integrator.RK4
     samples = std.sample_trajectories(
         cond=std.cond,
@@ -2895,20 +2947,19 @@ def plot_circles(std):
     margin = 0.1 * max(x_max - x_min, y_max - y_min)
     ax.set_xlim(x_min - margin, x_max + margin)
     ax.set_ylim(y_min - margin, y_max + margin)
+    plot_boundary(std, cfg_obj, ax)
 
     # Create color normalization based on likelihood values
-    # norm = colors.Normalize(vmin=0., vmax=6.)
-    norm = (colors - int(255 / 6)) / int(255 - 255/6)
-    
+    norm = colors.Normalize(vmin=0, vmax=6)
+
     # Initialize scatter plot
-    scat = ax.scatter([], [], c=[], cmap='viridis', norm=norm)
+    scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm)
     fig.colorbar(scat, label='Meaningless')
 
-    import pdb; pdb.set_trace()
     def update(frame):
         # Update positions and colors for current frame
         scat.set_offsets(samples[frame, :, :2])
-        scat.set_array(colors[frame])
+        scat.set_array(clr)
         return scat,
     
     # Create animation
@@ -2924,6 +2975,9 @@ def plot_circles(std):
     # Save animation
     cond = 'conditional' if std.cond else 'unconditional'
     anim.save(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion.gif', writer='pillow')
+    plt.savefig(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion_final_frame.pdf'.format(
+        HydraConfig.get().run.dir,
+    ))
     plt.close()
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
@@ -2951,6 +3005,13 @@ def sample(cfg):
         if isinstance(std.diffusion_model, TemporalTransformerUnet):
             test_transformer_bm(end_time, std)
             exit()
+
+        # plot divergences
+        # plot_divergences(std)
+
+        # plot circles
+        cfg_obj = OmegaConf.to_object(cfg)
+        plot_circles(std, cfg_obj)
 
         # dt = 1 / torch.tensor(cfg.example.sde_steps-1)
         # data = torch.load('bm_dataset.pt', map_location=device, weights_only=True)
@@ -3109,7 +3170,6 @@ def sample(cfg):
         # viz_trajs(cfg, std, out_trajs, end_time)
 
         # ode integration error plot
-        cfg_obj = OmegaConf.to_object(cfg)
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
             test_type = TestType.MultivariateGaussian
         else:
@@ -3117,13 +3177,7 @@ def sample(cfg):
         make_ode_error_plot(cfg_obj, std, test_type)
 
         # make unconditional ODE convergence plots
-        plot_ode_trajs(cfg, std, sample_traj_out)
-
-        # plot divergences
-        # plot_divergences(std)
-
-        # plot circles
-        # plot_circles(std)
+        # plot_ode_trajs(cfg, std, sample_traj_out)
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()
