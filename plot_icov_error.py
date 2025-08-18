@@ -67,8 +67,8 @@ def sample(cfg):
         x_steps = cfg.num_samples
         y_steps = cfg.num_samples
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        # max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.1
-        max_val = ((alpha.squeeze() + 1)/2).sqrt()
+        max_val = torch.tensor(5.).sqrt() * alpha.squeeze() / torch.tensor(1/2).sqrt() + 0.1
+        # max_val = ((alpha.squeeze() + 1)/2).sqrt()
         x = torch.linspace(-max_val, max_val, steps=x_steps)
         y = torch.linspace(-max_val, max_val, steps=y_steps)
         xx, yy = torch.meshgrid(x, y, indexing='xy')
