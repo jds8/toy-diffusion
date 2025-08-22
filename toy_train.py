@@ -104,6 +104,8 @@ class ToyTrainer:
 
         self.cfg.models_to_save = sorted(self.cfg.models_to_save)
 
+        self.set_dataset_name()
+
         if self.cfg.model_name:
             self.load_model()
 
@@ -427,48 +429,41 @@ class ToyTrainer:
             raise NotImplementedError
         return x0_raw, x0
 
-    def set_dl_iter(self):
-        dataset = None
-        dataset_name = ''
-        if isinstance(self.example, GaussianExampleConfig):
-            dataset_name = 'gaussian_dataset.pt',
-            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-        elif isinstance(self.example, MultivariateGaussianExampleConfig):
-            d = self.cfg.example.d
-            if d == 2:
-                dataset_name = 'gaussian2.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-            elif d == 4:
-                dataset_name = 'gaussian4.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-            elif d == 8:
-                dataset_name = 'gaussian8.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-            elif d == 64:
-                dataset_name = 'gaussian64.pt'
-                dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-        elif isinstance(self.example, StudentTExampleConfig):
-            dataset_name = 'student_t_dataset.pt'
-            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-        elif isinstance(self.example, BrownianMotionDiffExampleConfig):
-            if self.cfg.example.sde_steps == 3:
-                dataset_name = 'bm_dataset_3.pt'
-            elif self.cfg.example.sde_steps == 4:
-                dataset_name = 'bm_dataset_4.pt'
-            elif self.cfg.example.sde_steps == 5:
-                dataset_name = 'bm_dataset_5.pt'
-            elif self.cfg.example.sde_steps == 104:
-                dataset_name = 'bm_dataset.pt'
+    def set_dataset_name(self):
+        if self.cfg.dataset_name:
+            dataset_name = self.cfg.dataset_name
+        else:
+            if isinstance(self.example, GaussianExampleConfig):
+                dataset_name = 'gaussian_dataset.pt',
+            elif isinstance(self.example, MultivariateGaussianExampleConfig):
+                d = self.cfg.example.d
+                if d == 2:
+                    dataset_name = 'gaussian2.pt'
+                elif d == 4:
+                    dataset_name = 'gaussian4.pt'
+                elif d == 8:
+                    dataset_name = 'gaussian8.pt'
+                elif d == 64:
+                    dataset_name = 'gaussian64.pt'
+            elif isinstance(self.example, StudentTExampleConfig):
+                dataset_name = 'student_t_dataset.pt'
+            elif isinstance(self.example, BrownianMotionDiffExampleConfig):
+                if self.cfg.example.sde_steps == 3:
+                    dataset_name = 'bm_dataset_3.pt'
+                elif self.cfg.example.sde_steps == 4:
+                    dataset_name = 'bm_dataset_4.pt'
+                elif self.cfg.example.sde_steps == 5:
+                    dataset_name = 'bm_dataset_5.pt'
+                elif self.cfg.example.sde_steps == 104:
+                    dataset_name = 'bm_dataset.pt'
+                else:
+                    raise NotImplementedError
             else:
                 raise NotImplementedError
-            dataset = torch.load(dataset_name, map_location=device, weights_only=True)
-        else:
-            raise NotImplementedError
+        self.cfg.dataset_name = dataset_name
 
-        if dataset is None:
-            raise ValueError('dataset is None')
-        print(f'loaded {dataset_name}')
-
+    def set_dl_iter(self):
+        dataset = torch.load(self.cfg.dataset_name, map_location=device, weights_only=True)
         self.dataset_size = dataset.shape[0]
         self.dl = DataLoader(
             dataset,
@@ -670,7 +665,7 @@ class TrajectoryConditionTrainer(ToyTrainer):
 
 def train(rank, world_size, cfg):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29502"
+    os.environ["MASTER_PORT"] = "29519"
 
     cfg.max_gradient = cfg.max_gradient if cfg.max_gradient > 0. else float('inf')
 

@@ -119,6 +119,7 @@ class TrainConfig(BaseConfig):
     training_samples_before_save: int = 100000
     last_training_sample: int = -1
     models_to_save: List[int] = field(default_factory=list)
+    dataset_name: str = ''
 
 
 def get_path(cfg: TrainConfig, model_name):
@@ -135,11 +136,12 @@ def get_model_path(cfg: TrainConfig, dim: int):
         sampler_name = cfg_obj.sampler.name()
         diffusion_name = cfg_obj.diffusion.name()
         example_name = cfg_obj.example.name()
-        model_name = "{}_{}_dim_{}_{}".format(
+        model_name = "{}_{}_dim_{}_{}_{}".format(
             sampler_name,
             diffusion_name,
             dim,
             example_name,
+            cfg.dataset_name.split('.')[0]
         )
     return get_path(cfg, model_name)
 
@@ -213,8 +215,9 @@ class SampleConfig(BaseConfig):
     sample_integrator: Integrator = Integrator.RK4
     density_integrator: Integrator = Integrator.RK4
     random_seed: int = 100
-    atol: float = 1e-7
-    rtol: float = 1e-7
+    atol: float = 1e-5
+    rtol: float = 1e-5
+    eta: float = 0.
 
     def get_config_file(self, save_dir, alpha, start_round):
         return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'

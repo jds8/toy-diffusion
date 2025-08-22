@@ -327,7 +327,7 @@ class VPSDESampler(AbstractContinuousSampler):
     def marginal_prob(self, x: torch.Tensor, t: torch.Tensor):
         log_mean_coeff = self.log_mean_coeff(x_shape=x.shape, t=t)
         mean = log_mean_coeff.exp() * x
-        std = (1 - (2. * log_mean_coeff).exp()).sqrt()
+        std = (-torch.expm1(2. * log_mean_coeff)).sqrt()
         return mean, log_mean_coeff, std
 
     def analytical_marginal_prob(self, t: torch.Tensor, example):

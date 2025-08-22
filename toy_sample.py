@@ -813,12 +813,16 @@ class ContinuousEvaluator(ToyEvaluator):
         # )
         ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
         if self.cfg.density_integrator == Integrator.EULER:
+            print('integrating euler')
             sol = self.euler_integrate(ode_fn, x_min, times)
         elif self.cfg.density_integrator == Integrator.HEUN:
+            print('integrating heun')
             sol = self.heun_integrate(ode_fn, x_min, times)
         elif self.cfg.density_integrator == Integrator.RK4:
+            print('integrating rk4')
             sol = self.rk4_integrate(ode_fn, x_min, times)
         else:
+            print('integrating dopri5')
             sol = odeint(ode_fn, x_min, times, atol=self.cfg.atol, rtol=self.cfg.rtol, method='dopri5')
         delta_ll = sol[1].diff(dim=0).flip(dims=[0]).cumsum(dim=0)
         delta_ll = torch.concat([
@@ -2647,7 +2651,7 @@ def rejection_sample_x_final(cfg, std):
     sample = samples[cond][0]
     return sample
 
-def get_x_min(std, x_final):
+def get_x_min_from_final(std, x_final):
     start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
     times = torch.linspace(start_time, 1., std.sampler.diffusion_timesteps, device=x_final.device)
     def ode_fn(t, x):
@@ -2666,6 +2670,10 @@ def get_x_min(std, x_final):
         sol = std.heun_integrate(ode_fn, unsqueezed_x_final, times)
     elif std.cfg.sample_integrator == Integrator.RK4:
         sol = std.rk4_integrate(ode_fn, unsqueezed_x_final, times)
+    elif std.cfg.sample_integrator == Integrator.PYTORCH:
+        sol = odeint(ode_fn, unsqueezed_x_final, times, atol=std.cfg.atol, rtol=std.cfg.rtol, method='dopri5')
+    else:
+        raise NotImplementedError
     return sol[-1]
 
 def compute_ode_error(
@@ -2679,7 +2687,7 @@ def compute_ode_error(
     dst = std.sampler.diffusion_timesteps
     for time in diffusion_timesteps:
         std.sampler.diffusion_timesteps = time
-        x_min = get_x_min(std, x_final)
+        x_min = get_x_min_from_final(std, x_final)
         trajs = std.sample_trajectories(
             cond=std.cond,
             alpha=std.likelihood.alpha.reshape(-1, 1),
@@ -2897,7 +2905,7 @@ def plot_boundary(std, cfg_obj, ax):
         plot_brownian_motion_boundary(std, ax)
 
 def plot_gaussian_boundary(std, ax):
-    circle = plt.Circle((0,0), std.alpha, color='black', fill=False)
+    circle = plt.Circle((0,0), std.likelihood.alpha, color='black', fill=False)
     ax.add_patch(circle)
 
 def plot_brownian_motion_boundary(std, ax):
@@ -2909,26 +2917,62 @@ def plot_brownian_motion_boundary(std, ax):
     ax.axvline(-std.likelihood.alpha/t, color='black')
 
 def plot_circles(std, cfg_obj):
-    num_radii = 6
+    num_radii = 24
     radii = torch.linspace(0.2, 2., num_radii, device=device)
-    num_angles = 20
+    num_angles = 40
     pi = torch.linspace(0., 2*torch.pi, num_angles, device=device)
     unit = torch.stack([torch.cos(pi), torch.sin(pi)], dim=1).unsqueeze(-1)
-    x_min = (unit * radii).movedim(1, 2).reshape(-1, 2, 1)
-    roygbiv_rgb = [
-        (255,   0,   0),
-        (255, 165,   0),
-        (255, 255,   0),
-        (  0, 128,   0),
-        (  0,   0, 255),
-        ( 75,   0, 130),
-        (148,   0, 211),
-    ]
-    roygbiv = np.array([[r/255, g/255, b/255] for r, g, b in roygbiv_rgb])
-    clr = einops.repeat(np.arange(6), 'b -> (c b)', c=num_radii)
+    # radii: 24 values from 0.2 to 2.0
+    radii = torch.linspace(0.2, 2.0, 24, device=device)
+
+    # base circle: r=0.2 has 40 points
+    N0 = 40
+    r0 = radii[0]
+
+    # list to store sampled points
+    all_points = []
+    all_colors = []
+
+    # pick a continuous colormap
+    cmap = plt.get_cmap('hsv')
+
+    for i, r in enumerate(radii):
+        # number of points needed for same linear density
+        N = int(torch.floor(N0 * r / r0))
+
+        # angles from 0 to 2π
+        theta = torch.linspace(0, 2*torch.pi, N, device=device)
+
+        # convert polar → cartesian
+        x = r * torch.cos(theta)
+        y = r * torch.sin(theta)
+        points = torch.stack([x, y], dim=1)  # shape [N,2]
+        all_points.append(points)
+
+        # assign RGB color
+        color = np.array(cmap(i / (len(radii)-1))[:3])  # (R,G,B)
+        clrs = np.tile(color, (N,1))  # repeat for each point on this circle
+        all_colors.append([i] * N)
+
+    # concatenate all circles
+    x_min = torch.cat(all_points, dim=0).unsqueeze(-1)      # [total_points, 2, 1]
+    clr = torch.tensor([c for color_list in all_colors for c in color_list])
+
+    # x_min = (unit * radii).movedim(1, 2).reshape(-1, 2, 1)
+    # roygbiv_rgb = [
+    #     (255,   0,   0),
+    #     (255, 165,   0),
+    #     (255, 255,   0),
+    #     (  0, 128,   0),
+    #     (  0,   0, 255),
+    #     ( 75,   0, 130),
+    #     (148,   0, 211),
+    # ]
+    # roygbiv = np.array([[r/255, g/255, b/255] for r, g, b in roygbiv_rgb])
+    # clr = einops.repeat(np.arange(6), 'b -> (c b)', c=num_radii)
 
     # Build colormap + normalization
-    cmap = colors.ListedColormap(roygbiv, name="ROYGBIV")
+    # cmap = colors.ListedColormap(roygbiv, name="ROYGBIV")
 
     std.cfg.sample_integrator = Integrator.RK4
     samples = std.sample_trajectories(
@@ -2950,10 +2994,10 @@ def plot_circles(std, cfg_obj):
     plot_boundary(std, cfg_obj, ax)
 
     # Create color normalization based on likelihood values
-    norm = colors.Normalize(vmin=0, vmax=6)
+    norm = colors.Normalize(vmin=0, vmax=len(radii))
 
     # Initialize scatter plot
-    scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm)
+    scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=2)
     fig.colorbar(scat, label='Meaningless')
 
     def update(frame):
@@ -2979,6 +3023,49 @@ def plot_circles(std, cfg_obj):
         HydraConfig.get().run.dir,
     ))
     plt.close()
+
+def compute_fake_gaussian_trajs(
+        abscissa: torch.Tensor,
+        num_sample_batches: int,
+        dim: int
+):
+    vecs = torch.randn(1, num_sample_batches, dim, 1)
+    normed_vecs_1BD1 = vecs / vecs.norm(dim=2, keepdim=True)
+    abscissa_repeat_NBD1 = einops.repeat(
+        abscissa,
+        'n 1 -> n b d 1',
+        b=num_sample_batches,
+        d=dim
+    )
+    fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * normed_vecs_1BD1
+    flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
+    return flattened_fake_trajs_NbD1
+
+def compute_fake_bm_trajs(
+    abscissa_tensor: torch.Tensor,
+    dim: int,
+    alpha: float,
+    dt: torch.Tensor,
+    num_trajs: int
+):
+    points = []
+    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
+    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
+        top_points = get_points_along_angle(
+            angles, angle_points, 0, r, num_trajs, dim, alpha
+        )
+        bottom_points = get_points_along_angle(
+            angles, angle_points, 1, r, num_trajs, dim, alpha
+        )
+        points.append(torch.cat([top_points, bottom_points]))
+    all_points = torch.cat(points).unsqueeze(-1)
+    return all_points
+
+def diffuse_fake_trajs(std, cfg_obj):
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        compute_fake_gaussian_trajs(abscissa_tensor, dim, alpha, dt, num_trajs)
+    else:
+        compute_fake_bm_trajs(abscissa_tensor, dim, alpha, dt, num_trajs)
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
@@ -3011,7 +3098,12 @@ def sample(cfg):
 
         # plot circles
         cfg_obj = OmegaConf.to_object(cfg)
-        plot_circles(std, cfg_obj)
+        dim = get_dim(std)
+        if dim == 2:
+            plot_circles(std, cfg_obj)
+
+        # diffuse_fake_trajs
+        # diffuse_fake_trajs(std, cfg_obj)
 
         # dt = 1 / torch.tensor(cfg.example.sde_steps-1)
         # data = torch.load('bm_dataset.pt', map_location=device, weights_only=True)

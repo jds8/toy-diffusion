@@ -15,6 +15,7 @@ from hydra.core.config_store import ConfigStore
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 import torch
+import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 
@@ -38,7 +39,8 @@ def suppresswarning():
 
 def compute_tail_estimate(
         subsap: torch.Tensor,
-        alpha: float
+        alpha: float,
+        dd,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Construct a histogram from subsap data
     # and compute an estimate of the tail integral
@@ -61,83 +63,10 @@ def compute_tail_estimate(
     med_bins = (lwr_bins + upr_bins) / 2
     # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
     tail_estimate = scipy.integrate.simpson(
-        hist[smallest_idx:],
+        np.abs(hist[smallest_idx:].numpy() - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
         x=med_bins[smallest_idx:]
     )
     return hist, bins, torch.tensor(tail_estimate)
-
-def compute_pfode_tail_estimate(
-        subsap: torch.Tensor,
-        ode_llk: torch.Tensor,
-        bins: torch.Tensor,
-        alpha: float
-) -> torch.Tensor:
-    ordinates = []
-    abscissas = []
-    bin_idx = (bins < alpha).sum()
-    num_out = 0
-    while bin_idx < len(bins)-1:
-        max_idx = subsap <= bins[bin_idx+1]
-        min_idx = bins[bin_idx] <= subsap
-        and_idx = (max_idx & min_idx)
-        if and_idx.any():
-            subsap_idx = and_idx.nonzero()[0].item()
-            abscissa = subsap[subsap_idx]
-            abscissas.append(abscissa)
-            ordinate = ode_llk[subsap_idx].exp()
-            ordinates.append(ordinate)
-        else:
-            num_out += 1
-        bin_idx += 1
-    abscissas_sorted, sorted_idx = torch.stack(abscissas).sort()
-    ordinates_sorted = torch.stack(ordinates)[sorted_idx]
-    # tail_estimate = scipy.integrate.trapezoid(ordinates_sorted, abscissas_sorted)
-    # tail_estimate = (ordinates_sorted[:-1] * abscissas_sorted.diff()).sum()
-    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=abscissas_sorted)
-    return torch.tensor(tail_estimate)
-
-def compute_pfode_tail_estimate_from_bins(
-        subsap: torch.Tensor,
-        ode_llk: torch.Tensor,
-        num_bins: int,
-        alpha: float
-) -> torch.Tensor:
-    max_value = subsap.max()
-    bins = torch.linspace(alpha, max_value, num_bins+1)
-
-    bin_indices = torch.bucketize(subsap, bins, right=False) - 1  # shift so bins[i] <= x < bins[i+1]
-
-    # Initialize output
-    selected_samples_list = []
-    ordinates_list = []
-
-    # For each bin, find one sample
-    for bin_idx in range(len(bins) - 1):
-        in_bin = (bin_indices == bin_idx).nonzero(as_tuple=True)[0]
-        if len(in_bin) > 0:
-            selected_samples_list.append(subsap[in_bin[0]])
-            ordinates_list.append(ode_llk[in_bin[0]].exp())
-
-    selected_samples = torch.tensor(selected_samples_list)
-    ordinates = torch.tensor(ordinates_list)
-
-    # tail_estimate = scipy.integrate.trapezoid(ordinates, selected_samples)
-    # tail_estimate = ordinates_sorted[:-1] * selected_samples_sorted.diff()
-    selected_samples_sorted, sorted_idx = selected_samples.sort()
-    ordinates_sorted = ordinates[sorted_idx]
-    tail_estimate = scipy.integrate.simpson(ordinates_sorted, x=selected_samples_sorted)
-    tail_estimate_tensor = torch.tensor(tail_estimate)
-    # ys = [pdf_2d_quadrature_bm(a.cpu().numpy(), alpha) for a in selected_samples_sorted]
-    # plt.clf()
-    # plt.plot(selected_samples_sorted, ys)
-    # plt.scatter(selected_samples_sorted, ordinates_sorted)
-    # t = time.time()
-    # plt.savefig('{}/pfode_tail_estimate_from_bins_plot_{}'.format(
-    #     HydraConfig.get().run.dir,
-    #     int(t)
-    # ))
-    # plt.clf()
-    return tail_estimate_tensor
 
 def compute_sample_error_vs_samples(
         rearranged_trajs_list: List[torch.Tensor],
@@ -163,19 +92,19 @@ def compute_sample_error_vs_samples(
     for rearranged_traj in rearranged_trajs_list:
         sample_levels = rearranged_traj.norm(dim=[2, 3])
         subsample_bins = []
-        rel_errors = []
+        errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
-            hist, bins, tail_estimate = compute_tail_estimate(
+            hist, bins, error = compute_tail_estimate(
                 subsap.cpu(),
-                alpha
+                alpha,
+                dd,
             )
             subsample_bins.append(HistOutput(hist, bins))
-            rel_error = (tail_estimate - analytical_tail).abs() / analytical_tail
-            rel_errors.append(rel_error)
+            errors.append(error)
         all_bins.append(subsample_bins)
-        rel_errors_tensor = torch.stack(rel_errors)
-        quantile = rel_errors_tensor.quantile(
-            torch.tensor([0.05, 0.5, 0.95], dtype=rel_errors_tensor.dtype)
+        errors_tensor = torch.stack(errors)
+        quantile = errors_tensor.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=errors_tensor.dtype)
         )
         quantiles.append(quantile)
     quantiles_tensor = torch.stack(quantiles)
@@ -184,29 +113,68 @@ def compute_sample_error_vs_samples(
         training_samples,
         quantiles_tensor[:, 1],
         quantiles_tensor[:, [0, 2]].movedim(0, 1),
-        'Histogram Approximation',
+        'Histogram',
         'blue'
     )
     return error_data, all_bins
 
-def save_pfode_samples(
+def save_icov_samples(
         abscissa: torch.Tensor,
         transformed_ode_lk: torch.Tensor,
+        errors: torch.Tensor,
         equiv_saps: torch.Tensor,
         model_name: str
 ):
-    pfode_dir = 'pfode_likelihoods'
-    abs_dir = f'{HydraConfig.get().run.dir}/{pfode_dir}'
+    icov_dir = 'icov_likelihoods'
+    abs_dir = f'{HydraConfig.get().run.dir}/{icov_dir}'
     os.makedirs(abs_dir, exist_ok=True)
     abs_filename = f'{abs_dir}/{model_name}.pt'
     torch.save({
         'Abscissa': abscissa,
         'TransformedOdeLLK': transformed_ode_lk,
+        'Errors': errors,
         'EquivSaps': equiv_saps,
         'ModelName': model_name
     }, abs_filename)
 
-def compute_pfode_error_vs_bins(
+def compute_fake_gaussian_trajs(
+        abscissa: torch.Tensor,
+        num_sample_batches: int,
+        dim: int
+):
+    vecs = torch.randn(1, num_sample_batches, dim, 1)
+    normed_vecs_1BD1 = vecs / vecs.norm(dim=2, keepdim=True)
+    abscissa_repeat_NBD1 = einops.repeat(
+        abscissa,
+        'n 1 -> n b d 1',
+        b=num_sample_batches,
+        d=dim
+    )
+    fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * normed_vecs_1BD1
+    flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
+    return flattened_fake_trajs_NbD1
+
+def compute_fake_bm_trajs(
+    abscissa_tensor: torch.Tensor,
+    dim: int,
+    alpha: float,
+    dt: torch.Tensor,
+    num_trajs: int
+):
+    points = []
+    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
+    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
+        top_points = get_points_along_angle(
+            angles, angle_points, 0, r, num_trajs, dim, alpha
+        )
+        bottom_points = get_points_along_angle(
+            angles, angle_points, 1, r, num_trajs, dim, alpha
+        )
+        points.append(torch.cat([top_points, bottom_points]))
+    all_points = torch.cat(points).unsqueeze(-1)
+    return all_points
+
+def compute_icov_error_vs_bins(
         sample_trajs: torch.Tensor,
         alpha: float,
         stds: List[ContinuousEvaluator],
@@ -216,7 +184,8 @@ def compute_pfode_error_vs_bins(
     if type(stds[0].example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1.#1 - dd.cdf(alpha)
+        leftover = (1 - dd.cdf(sample_trajs.max().cpu())) / (1 - dd.cdf(alpha+cfg.eta))
+        analytical_tail = 1. - leftover #1 - dd.cdf(alpha)
     elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         # cfg_obj = OmegaConf.to_object(cfg)
@@ -226,76 +195,94 @@ def compute_pfode_error_vs_bins(
         dt = torch.tensor(1 / (dim-1))
     else:
         raise NotImplementedError
-    dd = scipy.stats.chi(dim)
-    max_sample = dd.ppf(0.99999)
-    num_bins = 1000
-    bin_width = (max_sample - alpha) / num_bins
     sample_trajs = einops.rearrange(
         sample_trajs,
         'b c h w -> (b c) h w',
         b=cfg.num_sample_batches
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
-    equiv_saps = (bin_width / (2 * IQR)) ** -3
-    abscissa = torch.linspace(alpha, max_sample, num_bins+1).reshape(-1, 1).to(device)
+    bin_width = (2 * IQR) * stds[0].cfg.num_samples ** (-1/3)
+    max_sample = sample_trajs.max()
+    num_bins = ((max_sample - (alpha+cfg.eta)) / bin_width).int()
+    abscissa_N1 = torch.linspace(alpha+cfg.eta, max_sample, num_bins+1).reshape(-1, 1).to(device)
     if type(stds[0].example) == MultivariateGaussianExampleConfig:
-        intermediate_traj_elements = (abscissa**2/dim).sqrt()
-        fake_traj = intermediate_traj_elements.repeat(1, dim).unsqueeze(-1)
-        # pdf = dd.pdf(abscissa)
+        fake_traj_NbD1 = compute_fake_gaussian_trajs(
+            abscissa_N1,
+            cfg.num_sample_batches,
+            dim
+        )
     elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-        intermediate_traj_elements = (abscissa**2/(dim-1)).sqrt()
-        fake_traj = intermediate_traj_elements.repeat(1, dim-1).unsqueeze(-1)
-        # pdf = [pdf_2d_quadrature_bm(a.cpu().item(), alpha) for a in x]
+        fake_traj_NbD1 = compute_fake_bm_trajs(
+            abscissa_N1,
+            dim,
+            alpha,
+            dt,
+            num_trajs=cfg.num_sample_batches//2
+        )
     else:
         raise NotImplementedError
     ode_lks = []
-    rel_errors = []
+    errors = []
+    quantiles_list = []
     for std in stds:
         ode_llk = std.ode_log_likelihood(
-            fake_traj,
+            fake_traj_NbD1.to(device),
             cond=torch.tensor([1.]),
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
+        ode_llk_Nb = ode_llk[0][-1]
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
-            transformed_ode_llk = ode_llk[0][-1].cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
-                (dim - 1) * abscissa.cpu().squeeze().log() - (dim / 2 - 1) * \
+            ode_llk_NB = einops.rearrange(ode_llk_Nb.cpu(), '(n b) -> n b', n=abscissa_N1.shape[0])
+            transformed_ode_llk_NB = ode_llk_NB.cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
+                (dim - 1) * abscissa_N1.cpu().log() - (dim / 2 - 1) * \
                 torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
-            transformed_ode_lk = transformed_ode_llk.exp()
+            transformed_ode_lk_NB = transformed_ode_llk_NB.exp()
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            transformed_ode_lk = compute_transformed_ode(
-                abscissa.cpu().squeeze(),
+            transformed_ode_lk_NB = compute_transformed_ode(
+                abscissa_N1.cpu().squeeze(),
                 ode_llk[0][-1],
                 alpha=alpha,
                 dt=dt
             )
         else:
             raise NotImplementedError
-        ode_lks.append(transformed_ode_lk)
-        tail_estimate = scipy.integrate.simpson(
-            transformed_ode_lk.cpu(),
-            x=abscissa.squeeze().cpu()
+        ode_lks.append(transformed_ode_lk_NB)
+        errors_B_list = []
+        for b in range(transformed_ode_lk_NB.shape[1]):
+            error_N = scipy.integrate.simpson(
+                np.abs(transformed_ode_lk_NB[:, b].cpu().numpy() - dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha))),
+                x=abscissa_N1.squeeze().cpu()
+            )
+            errors_B_list.append(torch.tensor(error_N))
+        errors_B = torch.stack(errors_B_list)
+        model_quantiles = torch.quantile(errors_B,
+                                         torch.tensor([0.05, 0.5, 0.95],
+                                                      device=errors_B.device,
+                                                      dtype=errors_B.dtype))
+        quantiles_list.append(model_quantiles)
+        save_icov_samples(
+            abscissa_N1.cpu(),
+            transformed_ode_lk_NB,
+            errors_B,
+            std.cfg.num_samples,
+            std.cfg.model_name
         )
-        rel_error = torch.tensor(tail_estimate - analytical_tail).abs() / analytical_tail
-        rel_errors.append(rel_error)
-        save_pfode_samples(abscissa.cpu(), transformed_ode_lk, equiv_saps, std.cfg.model_name)
-        # plt.plot(abscissa.cpu(), pdf, color='blue')
-        # plt.scatter(abscissa, ode_llk_subsample.cpu().exp(), color='red')
+        # plt.plot(abscissa_N1.cpu(), pdf, color='blue')
+        # plt.scatter(abscissa_N1, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
         #     HydraConfig.get().run.dir,
         #     i
         # ))
         # plt.clf()
-    median_tensor = torch.stack(rel_errors)
-    zeros_tensor = torch.zeros_like(median_tensor)
-    conf_int_tensor = torch.stack([zeros_tensor, zeros_tensor])
+    quantiles = torch.stack(quantiles_list)
 
     error_data = ErrorData(
         training_samples,
         training_samples,
-        median_tensor,
-        conf_int_tensor,
-        'PFODE Approximation',
+        quantiles[:, 1],
+        quantiles[:, [0, 2]].movedim(0, 1),
+        'ICOV',
         'orange'
     )
     return error_data
@@ -329,14 +316,16 @@ def plot_errors(error_data: ErrorData, title: str):
 
 def make_error_vs_samples(
         sample_error_data: ErrorData,
-        pfode_error_data: ErrorData,
-        alpha: float
+        icov_error_data: ErrorData,
+        alpha: float,
+        cfg: SampleConfig,
 ):
-    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Training Samples'
+    title = f'Absolute Error of Tail Integral vs. Training Samples\n(alpha={alpha}, eta={cfg.eta}, N={cfg.num_samples})'
     plot_errors(sample_error_data, title)
-    plot_errors(pfode_error_data, title)
+    plot_errors(icov_error_data, title)
     plt.xlabel('Training Samples')
-    plt.ylabel('Relative Error')
+    plt.ylabel('Absolute Error')
+    plt.legend()
     plt.title(title)
 
 def make_plots(
@@ -347,13 +336,6 @@ def make_plots(
         training_samples: torch.Tensor
 ):
     plt.clf()
-
-    subsample_sizes = torch.logspace(
-        math.log10(500),
-        math.log10(cfg.num_samples),
-        10,
-        dtype=int
-    )
 
     all_bins = make_error_vs_samples_plot(
         rearranged_trajs_list,
@@ -390,7 +372,7 @@ def make_error_vs_samples_plot(
         cfg,
     )
     dim = rearranged_trajs_list[0].shape[2]
-    pfode_error_vs_samples = compute_pfode_error_vs_bins(
+    icov_error_vs_samples = compute_icov_error_vs_bins(
         rearranged_trajs_list[0],
         alpha,
         stds,
@@ -399,8 +381,9 @@ def make_error_vs_samples_plot(
     )
     make_error_vs_samples(
         hist_error_vs_samples,
-        pfode_error_vs_samples,
-        alpha
+        icov_error_vs_samples,
+        alpha,
+        cfg
     )
     return all_bins
 
@@ -417,6 +400,8 @@ def sample(cfg):
     logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
 
     os.system('echo git commit: $(git rev-parse HEAD)')
+
+    torch.manual_seed(cfg.random_seed)
 
     omega_sampler = OmegaConf.to_object(cfg.sampler)
     if isinstance(omega_sampler, ContinuousSamplerConfig):

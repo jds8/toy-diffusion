@@ -60,10 +60,10 @@ def plot_ode_error(ode_lk_subsample, abscissa, abscissa_interp, alpha, num_bins)
     ) for abscissa_interp_values, abscissa_pdf_values in zip(abscissa_interp, abscissa_pdf)]
     ode_integrals = [scipy.integrate.trapezoid(ode_lk_subsample[i:i+2], abscissa[i:i+2]) for i in range(len(abscissa)-1)]
     errors = [ode_value - analytical_value for ode_value, analytical_value in zip(ode_integrals, analytical_integrals)]
-    plt.scatter(abscissa[:-1], errors, color='red', label='PFODE (Trapezoid) - Analytical')
+    plt.scatter(abscissa[:-1], errors, color='red', label='ICOV (Trapezoid) - Analytical')
     plt.xlabel('Radius')
     plt.ylabel('Error')
-    plt.title(f'Error between PFODE and Analytical at each Radius')
+    plt.title(f'Error between ICOV and Analytical at each Radius')
     plt.legend()
     plt.savefig('{}/pfode_error_{}'.format(
         HydraConfig.get().run.dir,
@@ -77,6 +77,7 @@ def compute_tail_estimate(
         alpha: float,
         x: torch.Tensor,
         pdf: torch.Tensor,
+        dd,
 ) -> Tuple[torch.Tensor, torch.Tensor, float]:
     # Construct a histogram from subsap data
     # and compute an estimate of the tail integral
@@ -100,8 +101,8 @@ def compute_tail_estimate(
     upr_bins = bins[1:]
     med_bins = (lwr_bins + upr_bins) / 2
     # tail_estimate = scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
-    tail_estimate = scipy.integrate.simpson(
-        hist[smallest_idx:],
+    tail_error = scipy.integrate.simpson(
+        np.abs(hist[smallest_idx:]-dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
         x=med_bins[smallest_idx:]
     )
     plt.scatter(med_bins[smallest_idx:], hist[smallest_idx:], color='red', label='approximation')
@@ -110,7 +111,7 @@ def compute_tail_estimate(
         subsap.nelement()
     ))
     plt.clf()
-    return hist, bins, tail_estimate
+    return hist, bins, tail_error
 
 def compute_sample_error_vs_samples(
         trajs: torch.Tensor,
@@ -123,7 +124,8 @@ def compute_sample_error_vs_samples(
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1#1 - dd.cdf(alpha)
+        leftover = (1 - dd.cdf(trajs.max().cpu())) / (1 - dd.cdf(alpha))
+        analytical_tail = 1 - leftover #1 - dd.cdf(alpha)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         target = get_target(cfg)
@@ -149,15 +151,17 @@ def compute_sample_error_vs_samples(
         subsample_bins = []
         errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
-            hist, bins, tail_estimate = compute_tail_estimate(
+            hist, bins, tail_error = compute_tail_estimate(
                 std,
                 subsap.cpu(),
                 alpha,
                 x,
-                pdf
+                pdf,
+                dd
             )
             subsample_bins.append(HistOutput(hist, bins))
-            error = error_metric(tail_estimate, analytical_tail)
+            # error = error_metric(tail_estimate, analytical_tail)
+            error = torch.tensor(tail_error)
             errors.append(error)
         all_bins.append(subsample_bins)
         errors_tensor = torch.stack(errors)
@@ -233,7 +237,7 @@ def plot_bin_comparison_estimates(
     plt.scatter(abscissa, ode_lk_subsample.cpu(), color='red', label='pfode')
     plt.xlabel('Radius')
     plt.ylabel('Density')
-    plt.title(f'PFODE abscissa with estimate: '
+    plt.title(f'ICOV abscissa with estimate: '
         f'{round(tail_estimate, 2)} and error: '
         f'{round(error.item(), 2)}\n'
         f'ESS: {equiv_saps}')
@@ -477,13 +481,12 @@ def compute_pfode_error_vs_bins(
     max_sample = norm_trajs.max()
     xlim = (alpha, math.ceil(max_sample))
 
-    epsilon = 0.0
     normalizing_factor = get_target(std).analytical_prob(torch.tensor(alpha))
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        leftover = 1-dd.cdf(max_sample)
-        analytical_tail = float((1-dd.cdf(alpha+epsilon)) / normalizing_factor - leftover)
+        leftover = (1-dd.cdf(max_sample)) / normalizing_factor
+        analytical_tail = float((1-dd.cdf(alpha+cfg.eta)) / normalizing_factor - leftover)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         dim = cfg.example.sde_steps
         dt = torch.tensor(1/(dim-1))
@@ -506,7 +509,7 @@ def compute_pfode_error_vs_bins(
     )[1:]]).unique()
     abscissas = []
     for num_bins in bin_sizes:
-        abscissa = torch.linspace(alpha+epsilon, max_sample, num_bins+1)
+        abscissa = torch.linspace(alpha+cfg.eta, max_sample, num_bins+1)
         abscissas.append(abscissa)
     abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
     abscissa_repeat = einops.repeat(abscissa_tensor, 'd 1 -> d n', n=cfg.num_sample_batches)
@@ -627,12 +630,23 @@ def compute_pfode_error_vs_bins(
         #         num_bins
         #     )
         local_errors = []
+        worst_error = 0
+        worst_error_idx = 0
+        worst_tail_estimate = 0
         for j in range(nsb):
-            tail_estimate = scipy.integrate.simpson(
-                ode_lk_subsample_list[j].cpu(),
+            approx = ode_lk_subsample_list[j].cpu().numpy()
+            # mask = abscissa < (alpha + 0.)
+            # approx[mask] = dd.pdf(abscissa[mask])/(1-dd.cdf(alpha))
+            tail_error = scipy.integrate.simpson(
+                np.abs(approx - dd.pdf(abscissa)/(1-dd.cdf(alpha))),
                 x=abscissa
             )
-            error = error_metric(tail_estimate, analytical_tail)
+            # error = error_metric(tail_estimate, analytical_tail)
+            error = torch.tensor(tail_error)
+            if error > worst_error:
+                worst_error = error
+                worst_error_idx = j
+                worst_tail_estimate = tail_error
             local_errors.append(error)
         local_errors_tensor = torch.stack(local_errors)
         quantiles = torch.quantile(local_errors_tensor, torch.tensor([0.05, 0.5, 0.95], 
@@ -645,9 +659,9 @@ def compute_pfode_error_vs_bins(
                 x,
                 pdf,
                 abscissa,
-                ode_lk_subsample_list[0],
-                tail_estimate,
-                error,
+                ode_lk_subsample_list[worst_error_idx],
+                worst_tail_estimate,
+                worst_error,
                 equiv_saps,
                 num_bins
             )
@@ -717,15 +731,15 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Relative Error of Tail Integral (alpha={alpha}) vs. Sample Size'
+    title = f'Absolute Error of Tail Integral vs. Sample Size\n(alpha={alpha}, eta={cfg.eta})'
     plot_errors(sample_error_data, title)
     plot_errors(pfode_error_data, title)
     plt.xlabel('Sample Size')
-    plt.ylabel('Relative Error')
+    plt.ylabel('Absolute Error')
     plt.title(title)
     plt.xscale('log')
 
-    # add PFODE bin axis
+    # add ICOV bin axis
     ax = plt.gca()
     ax_top = ax.secondary_xaxis('top')
     ticklabels, mask = find_order_of_magnitude_subtensor(pfode_error_data.bins)
@@ -735,8 +749,8 @@ def make_error_vs_samples(
 
     plt.legend()
 
-    # ymax = min(sample_error_data.error_bars[1].max(), 0.2)
-    ymax = 0.2
+    ymax = min(sample_error_data.error_bars[1].max(), 0.2)
+    # ymax = 0.2
     plt.ylim((0., ymax))
     # plt.yscale('log')
 
