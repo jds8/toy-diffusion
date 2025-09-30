@@ -20,10 +20,11 @@ import numpy as np
 from scipy.interpolate import griddata
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw
+from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
+    compute_derivatives, plot_pfode, get_points_along_angle
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
-    TestType
+    TestType, Integrator
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import get_2d_pdf, pdf_2d_quadrature_bm
 
@@ -99,12 +100,20 @@ def compute_tail_estimate(
     # tail_estimate = hist[smallest_idx:].sum() * empirical_bin_width
     lwr_bins = bins[:-1]
     upr_bins = bins[1:]
-    med_bins = (lwr_bins + upr_bins) / 2
-    # tail_estimate = scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
-    tail_error = scipy.integrate.simpson(
-        np.abs(hist[smallest_idx:]-dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
-        x=med_bins[smallest_idx:]
-    )
+    med_bins = torch.tensor((lwr_bins + upr_bins) / 2)
+    if dd is None:
+        # Brownian motion case
+        pdf = get_2d_pdf(std.example.sde_steps, med_bins[smallest_idx:], alpha)
+        tail_error = scipy.integrate.simpson(
+            np.abs(hist[smallest_idx:] - pdf),
+            x=med_bins[smallest_idx:]
+        )
+    else:
+        # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+        tail_error = scipy.integrate.simpson(
+            np.abs(hist[smallest_idx:] - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
+            x=med_bins[smallest_idx:]
+        )
     plt.scatter(med_bins[smallest_idx:], hist[smallest_idx:], color='red', label='approximation')
     plt.savefig('{}/histogram_plot_{}'.format(
         HydraConfig.get().run.dir,
@@ -143,6 +152,7 @@ def compute_sample_error_vs_samples(
         dd = scipy.stats.chi(dim)
         pdf = [dd.pdf(a) / (1 - dd.cdf(alpha)) for a in x]
     elif type(std.example) == BrownianMotionDiffExampleConfig:
+        dd = None
         pdf = get_2d_pdf(std.example.sde_steps, x, alpha)
     else:
         raise NotImplementedError
@@ -179,30 +189,6 @@ def compute_sample_error_vs_samples(
     )
     return error_data, all_bins
 
-def get_points_along_angle(
-    angles: torch.Tensor,
-    angle_points: torch.Tensor,
-    idx: int,
-    r: torch.Tensor,
-    num_trajs: int,
-    dim: int,
-    alpha: float,
-):
-    angle = angles[idx]
-    if angle > 0:
-        angle_points = angle_points[idx]
-        dangles = torch.linspace(0, angle, num_trajs)
-        x,y = angle_points[:, 0], angle_points[:, 1]
-        theta = torch.atan2(y, x)
-        complex_points = r * torch.exp(torch.complex(
-            torch.tensor(0.), 
-            theta[~idx] + dangles
-            ))
-        points = torch.stack([torch.tensor([point.real, point.imag]) for point in complex_points])
-        dt = torch.tensor(1 / 2).sqrt()
-        return points
-    return (torch.ones(num_trajs, 2) * r**2 / (dim-1)).sqrt()
-    
 def compute_fake_bm_trajs(
     abscissa_tensor: torch.Tensor, 
     dim: int, 
@@ -497,6 +483,7 @@ def compute_pfode_error_vs_bins(
         alpha_key = bm_cdf_keys[idx]
         approx_leftover = bm_cdf[alpha_key]
         analytical_tail = float(1 - approx_leftover)
+        dd = None
     else:
         raise NotImplementedError
 
@@ -569,6 +556,30 @@ def compute_pfode_error_vs_bins(
         ode_llk[0][-1].exp(),
         normalizing_factor
     )
+
+    if cfg.density_integrator == Integrator.EULER:
+        small_idx = torch.topk(fake_trajs.norm(dim=-2).squeeze(), k=7, largest=False).indices
+        sol = ode_llk[2]
+        p = sol[1]
+        start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+        times = torch.linspace(
+            start_time,
+            1.,
+            std.sampler.diffusion_timesteps,
+        )
+        dp_dt = sol[1].diff(dim=0) / times.diff()[0]
+
+        plt.clf()
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        for i in small_idx:
+            ax1.plot(times, p[:, i].to('cpu'))
+            ax2.plot(times[:-1], dp_dt[:, i].to('cpu'))
+        ax1.set_ylabel(f"log p")
+        ax2.set_ylabel(f"(log p)'")
+        ax2.set_xlabel(f'Times')
+        plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
+        plt.close()
+
     if type(std.example) == MultivariateGaussianExampleConfig:
         transformed_ode_llk = ode_llk[0][-1] + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
             (dim - 1) * abscissa_repeat.flatten().squeeze().log() - (dim / 2 - 1) * \
@@ -637,10 +648,19 @@ def compute_pfode_error_vs_bins(
             approx = ode_lk_subsample_list[j].cpu().numpy()
             # mask = abscissa < (alpha + 0.)
             # approx[mask] = dd.pdf(abscissa[mask])/(1-dd.cdf(alpha))
-            tail_error = scipy.integrate.simpson(
-                np.abs(approx - dd.pdf(abscissa)/(1-dd.cdf(alpha))),
-                x=abscissa
-            )
+            if dd is None:
+                # Brownian motion case
+                pdf = get_2d_pdf(std.example.sde_steps, abscissa, alpha)
+                tail_error = scipy.integrate.simpson(
+                    np.abs(approx - pdf),
+                    x=abscissa
+                )
+            else:
+                # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+                tail_error = scipy.integrate.simpson(
+                    np.abs(approx - dd.pdf(abscissa)/(1-dd.cdf(alpha))),
+                    x=abscissa
+                )
             # error = error_metric(tail_estimate, analytical_tail)
             error = torch.tensor(tail_error)
             if error > worst_error:
@@ -682,7 +702,7 @@ def compute_pfode_error_vs_bins(
     return error_data, ylim, xlim
 
 def save_error_data(error_data: ErrorData, title: str):
-    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
+    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_').replace('\n', '_')
     abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.pt'
     torch.save({
         'Abscissa_bins': error_data.bins,
@@ -693,23 +713,20 @@ def save_error_data(error_data: ErrorData, title: str):
     }, abs_filename)
 
 def plot_errors(error_data: ErrorData, title: str):
-    try:
-        plt.scatter(
+    plt.scatter(
+        error_data.samples,
+        error_data.median,
+        label=error_data.label,
+        color=error_data.color
+    )
+    if error_data.error_bars[0].sum() + error_data.error_bars[1].sum():
+        plt.fill_between(
             error_data.samples,
-            error_data.median,
-            label=error_data.label,
-            color=error_data.color
+            error_data.error_bars[0],
+            error_data.error_bars[1],
+            color=error_data.color,
+            alpha=0.2
         )
-        if error_data.error_bars[0].sum() + error_data.error_bars[1].sum():
-            plt.fill_between(
-                error_data.samples,
-                error_data.error_bars[0],
-                error_data.error_bars[1],
-                color=error_data.color,
-                alpha=0.2
-            )
-    except:
-        import pdb; pdb.set_trace()
 
     save_error_data(error_data, title)
 
@@ -845,6 +862,61 @@ def sample(cfg):
         )
         sample_trajs = sample_traj_out.samples
         trajs = sample_trajs[-1]
+
+        # plot pfode trajectories for 7 trajectories closest to the boundary
+        small_idx = torch.topk(trajs.norm(dim=-2).squeeze(), k=7, largest=False).indices
+        traj_subset = sample_trajs[:, small_idx, :, 0].to('cpu')
+        derivatives, times = compute_derivatives(std, traj_subset)
+        plot_pfode(traj_subset, derivatives, times, 'subset')
+
+
+
+        bad_idx = (derivatives[-1].norm(dim=-1) > 4*derivatives[-3].norm(dim=-1)).nonzero()
+        samples = trajs[bad_idx]
+
+        fig, ax = plt.subplots()
+
+        # Set up plot limits based on data range
+        ymin, ymax = samples[..., 1].min(), samples[..., 1].max()
+        xmin, xmax = samples[..., 0].min(), samples[..., 0].max()
+        margin = 0.1 * max(xmax - xmin, ymax - ymin)
+        ax.set_xlim(xmin - margin, xmax + margin)
+        ax.set_ylim(ymin - margin, ymax + margin)
+        plot_boundary(std, cfg_obj, ax)
+
+        # Create color normalization based on likelihood values
+        norm = colors.Normalize(vmin=0, vmax=len(radii))
+
+        # Initialize scatter plot
+        scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=1)
+        fig.colorbar(scat, label='Meaningless')
+
+        def update(frame):
+            # Update positions and colors for current frame
+            scat.set_offsets(samples[frame, :, :2])
+            scat.set_array(clr)
+            return scat,
+
+        # Create animation
+        frames = len(samples)
+        anim = animation.FuncAnimation(
+            fig,
+            update,
+            frames=frames,
+            interval=100,  # 100ms between frames
+            blit=True
+        )
+
+        # Save animation
+        cond = 'conditional' if std.cond else 'unconditional'
+        anim.save(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion.gif', writer='pillow')
+        plt.savefig(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion_final_frame.pdf'.format(
+            HydraConfig.get().run.dir,
+        ))
+        plt.close()
+
+
+
         cfg_obj = OmegaConf.to_object(cfg)
         rearranged_trajs = einops.rearrange(
             trajs,
