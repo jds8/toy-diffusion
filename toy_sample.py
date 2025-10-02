@@ -10,7 +10,7 @@ from pathlib import Path
 
 import matplotlib.animation as animation
 import matplotlib.colors as colors
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, FuncFormatter
 
 from collections import namedtuple
 
@@ -50,7 +50,7 @@ from compute_quadratures import pdf_2d_quadrature_bm, pdf_3d_quadrature_bm
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-SampleOutput = namedtuple('SampleOutput', 'samples fevals x_min')
+SampleOutput = namedtuple('SampleOutput', 'samples fevals x_min derivatives')
 
 SDEConfig = namedtuple('SDEConfig', 'drift diffusion sde_steps end_time')
 DiffusionConfig = namedtuple('DiffusionConfig', 'f g')
@@ -239,7 +239,7 @@ class DiscreteEvaluator(ToyEvaluator):
                     x, t.item(), posterior_mean,
                 )
             samples.append(x)
-        return SampleOutput(samples=samples, fevals=-1, x_min=x)
+        return SampleOutput(samples=samples, fevals=-1, x_min=x, derivatives=None)
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, extras=None, atol=1e-4, rtol=1e-4):
@@ -359,7 +359,7 @@ class ContinuousEvaluator(ToyEvaluator):
         mean = lmc.exp() * mu
         first_var_term = sigma * (2. * lmc).exp()
         second_var_term = (1 - (2. * lmc).exp())
-        var = first_var_term + second_var_term
+        var = first_var_term + second_var_term * torch.eye(self.cfg.example.d, device=device)
         return mean, lmc, var
 
     def get_analytical_brownian_motion_diff_variance(self, t, x):
@@ -401,8 +401,7 @@ class ContinuousEvaluator(ToyEvaluator):
         given the SDE formulation from Song et al. in the case that
         p_0 = N(mu_0, sigma_0) and p_1 = N(0, 1)
         """
-        mean, lmc, std = self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
-        var = std ** 2
+        mean, lmc, var = self.get_multivariate_gaussian_marginal_prob_from_sampler(t, x)
         precision = var.pinverse()
         score = torch.matmul(precision, mean - x)
         return score
@@ -443,20 +442,25 @@ class ContinuousEvaluator(ToyEvaluator):
 
     def sample_trajectories_euler_maruyama(self, **kwargs):
         x_min = self.get_x_min()
-        x = x_min.clone()
+        x_old = x_min.clone()
 
         steps = torch.tensor(self.sampler.diffusion_timesteps).to(x.device)
+        dt = 1 / steps
+        derivatives = []
         for time in torch.linspace(1., self.sampler.t_eps, steps, device=x.device):
             time = time.reshape(-1)
             sf_est = self.get_score_function(
                 t=time,
-                x=x,
+                x=x_old,
                 evaluate_likelihood=False,
                 **kwargs,
             )
-            x, _ = self.sampler.reverse_sde(x=x, t=time, score=sf_est, steps=steps)
+            x, x_mean = self.sampler.reverse_sde(x=x_old, t=time, score=sf_est, steps=steps)
+            dxdt = (x_mean - x_old) / dt
+            derivatives.append(dxdt)
+            x_old = x
 
-        return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps, x_min=x_min)
+        return SampleOutput(samples=torch.stack([x_min, x]), fevals=steps, x_min=x_min, derivatives=None)
 
     def sample_trajectories_probability_flow(self, atol=1e-7, rtol=1e-7, **kwargs):
         if 'x_min' in kwargs:
@@ -481,13 +485,14 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x_min.device
         )
         if self.cfg.sample_integrator == Integrator.EULER:
-            sol = self.euler_integrate(ode_fn, x_min, times)
+            sol, derivatives = self.euler_integrate(ode_fn, x_min, times)
         elif self.cfg.sample_integrator == Integrator.HEUN:
-            sol = self.heun_integrate(ode_fn, x_min, times)
+            sol, derivatives = self.heun_integrate(ode_fn, x_min, times)
         elif self.cfg.sample_integrator == Integrator.RK4:
-            sol = self.rk4_integrate(ode_fn, x_min, times)
+            sol, derivatives = self.rk4_integrate(ode_fn, x_min, times)
         else:
-            sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='rk4')
+            sol = odeint(ode_fn, x_min, times, atol=atol, rtol=rtol, method='dopri5')
+            print('sampling using PYTORCH (dopri5)')
 
         # import matplotlib.pyplot as plt
         # dt = 1 / torch.tensor(self.cfg.example.sde_steps-1)
@@ -500,7 +505,7 @@ class ContinuousEvaluator(ToyEvaluator):
         # plt.plot(torch.arange(104), gt[0].squeeze().cpu(), color='red')
         # plt.show()
 
-        return SampleOutput(samples=sol, fevals=fevals, x_min=x_min)
+        return SampleOutput(samples=sol, fevals=fevals, x_min=x_min, derivatives=derivatives)
 
     def compute_bins(
             self,
@@ -571,19 +576,21 @@ class ContinuousEvaluator(ToyEvaluator):
         return sample_out
 
     @torch.no_grad()
-    def heun_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+    def heun_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> Tuple[List, List]:
         if type(x) == tuple:
             return self.heun_integrate_tuple(ode_fn, x, times)
         return self.heun_integrate_tensor(ode_fn, x, times)
 
     @torch.no_grad()
-    def heun_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> List:
+    def heun_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> Tuple[List, List]:
         sol = torch.zeros(times.shape[:1] + x.shape, device=x.device)
+        derivatives = []
         for i, (t1, t2) in enumerate(zip(times[:-1], times[1:])):
             sol[i] = x
-            x = self.heun_step_tensor(ode_fn, x, t1, t2)
+            x, derivative = self.heun_step_tensor(ode_fn, x, t1, t2)
+            derivatives.append(derivative)
         sol[-1] = x
-        return sol
+        return sol, derivatives
 
     @torch.no_grad()
     def heun_step_tensor(
@@ -596,19 +603,23 @@ class ContinuousEvaluator(ToyEvaluator):
         dt = t2-t1
         x1, dx1_dt = self.euler_step_tensor(ode_fn, x, t1, dt)
         _, dx2_dt = self.euler_step_tensor(ode_fn, x1, t2, dt)
-        return x + (t2 - t1) * (dx2_dt + dx1_dt) / 2  # trapezoid rule
+        dx_dt = (dx2_dt + dx1_dt) / 2
+        y = x + dt * dx_dt   # trapezoid rule
+        return y, dx_dt
 
     @torch.no_grad()
-    def heun_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+    def heun_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> Tuple[List, List]:
         sol0 = torch.zeros(times.shape[:1] + x[0].shape, device=x[0].device)
         sol1 = torch.zeros(times.shape[:1] + x[1].shape, device=x[1].device)
+        derivatives = []
         for i, (t1, t2) in enumerate(zip(times[:-1], times[1:])):
             sol0[i] = x[0]
             sol1[i] = x[1]
-            x = self.heun_step_tuple(ode_fn, x, t1, t2)
+            x, derivative = self.heun_step_tuple(ode_fn, x, t1, t2)
+            derivatives.append(derivative)
         sol0[-1] = x[0]
         sol1[-1] = x[1]
-        return (sol0, sol1)
+        return (sol0, sol1), derivatives
 
     @torch.no_grad()
     def heun_step_tuple(
@@ -622,10 +633,13 @@ class ContinuousEvaluator(ToyEvaluator):
         dt = t2-t1
         x1, dx1_dt = self.euler_step_tuple(ode_fn, x, t1, dt)
         _, dx2_dt = self.euler_step_tuple(ode_fn, x1, t2, dt)
-        y0 = x[0] + (t2 - t1) * (dx2_dt[0] + dx1_dt[0]) / 2  # trapezoid rule
-        y1 = x[1] + (t2 - t1) * (dx2_dt[1] + dx1_dt[1]) / 2  # trapezoid rule
+        dy0_dt = (dx2_dt[0] + dx1_dt[0]) / 2
+        y0 = x[0] + dt * dy0_dt  # trapezoid rule
+        dy1_dt = (dx2_dt[1] + dx1_dt[1]) / 2
+        y1 = x[1] + dt * dy1_dt  # trapezoid rule
         y = (y0, y1)
-        return y
+        dy_dt = (dy0_dt, dy1_dt)
+        return y, dy_dt
 
     @torch.no_grad()
     def euler_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
@@ -634,25 +648,32 @@ class ContinuousEvaluator(ToyEvaluator):
         return self.euler_integrate_tensor(ode_fn, x, times)
 
     @torch.no_grad()
-    def euler_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> List:
+    def euler_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> Tuple[List, List]:
         sol = torch.zeros(times.shape[:1] + x.shape, device=x.device)
+        derivatives = []
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol[i] = x
-            x, _ = self.euler_step_tensor(ode_fn, x, t, dt)
+            x, derivative = self.euler_step_tensor(ode_fn, x, t, dt)
+            derivatives.append(derivative)
         sol[-1] = x
-        return sol
+        return sol, derivatives
 
     @torch.no_grad()
-    def euler_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+    def euler_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> Tuple[
+            Tuple[torch.tensor, torch.tensor],
+            List
+    ]:
         sol0 = torch.zeros(times.shape[:1] + x[0].shape, device=x[0].device)
         sol1 = torch.zeros(times.shape[:1] + x[1].shape, device=x[1].device)
+        derivatives = []
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol0[i] = x[0]
             sol1[i] = x[1]
-            x, _ = self.euler_step_tuple(ode_fn, x, t, dt)
+            x, derivative = self.euler_step_tuple(ode_fn, x, t, dt)
+            derivatives.append(derivative)
         sol0[-1] = x[0]
         sol1[-1] = x[1]
-        return (sol0, sol1)
+        return (sol0, sol1), derivatives
 
     @torch.no_grad()
     def euler_step_tensor(
@@ -681,35 +702,40 @@ class ContinuousEvaluator(ToyEvaluator):
         dx_dt1 = dx_dt[x0_len:].reshape(x[1].shape)
         x0 = x[0] + dx_dt0 * dt
         x1 = x[1] + dx_dt1 * dt
-        x = (x0, x1), (dx_dt0, dx_dt1)
-        return x
+        x = (x0, x1)
+        dx_dt (dx_dt0, dx_dt1)
+        return x, dx_dt
 
     @torch.no_grad()
-    def rk4_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+    def rk4_integrate(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> Tuple[List, List]:
         if type(x) == tuple:
             return self.rk4_integrate_tuple(ode_fn, x, times)
         return self.rk4_integrate_tensor(ode_fn, x, times)
 
     @torch.no_grad()
-    def rk4_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> List:
+    def rk4_integrate_tensor(self, ode_fn: Callable, x: torch.Tensor, times: torch.Tensor) -> Tuple[List, List]:
         sol = torch.zeros(times.shape[:1] + x.shape, device=x.device)
+        derivatives = []
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol[i] = x
-            x = self.rk4_step_tensor(ode_fn, x, t, dt)
+            x, derivative = self.rk4_step_tensor(ode_fn, x, t, dt)
+            derivatives.append(derivative)
         sol[-1] = x
-        return sol
+        return sol, derivatives
 
     @torch.no_grad()
-    def rk4_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> List:
+    def rk4_integrate_tuple(self, ode_fn: Callable, x: Tuple, times: torch.Tensor) -> [List, List]:
         sol0 = torch.zeros(times.shape[:1] + x[0].shape, device=x[0].device)
         sol1 = torch.zeros(times.shape[:1] + x[1].shape, device=x[1].device)
+        derivatives = []
         for i, (t, dt) in enumerate(zip(times[:-1], times.diff())):
             sol0[i] = x[0]
             sol1[i] = x[1]
-            x = self.rk4_step_tuple(ode_fn, x, t, dt)
+            x, derivative = self.rk4_step_tuple(ode_fn, x, t, dt)
+            derivatives.append(derivative)
         sol0[-1] = x[0]
         sol1[-1] = x[1]
-        return (sol0, sol1)
+        return (sol0, sol1), derivatives
 
     @torch.no_grad()
     def rk4_step_tensor(
@@ -723,8 +749,9 @@ class ContinuousEvaluator(ToyEvaluator):
         k2 = ode_fn(t+dt/2, x+dt*k1/2)
         k3 = ode_fn(t+dt/2, x+dt*k2/2)
         k4 = ode_fn(t+dt, x+dt*k3)
-        y = x + dt*(k1+2*k2+2*k3+k4)/6
-        return y
+        dxdt = (k1+2*k2+2*k3+k4)/6
+        y = x + dt*dxdt
+        return y, dxdt
 
     @torch.no_grad()
     def tuple_call(self, fn: Callable, t_in: torch.Tensor, x_in: Tuple, x0_len: int):
@@ -756,10 +783,10 @@ class ContinuousEvaluator(ToyEvaluator):
         k4 = self.tuple_call(ode_fn, t+dt, self.tuple_add(x, self.tuple_multiply(k3, dt)), x0_len)
         k12 = self.tuple_add(k1, self.tuple_multiply(k2, 2))
         k34 = self.tuple_add(self.tuple_multiply(k3, 2), k4)
-        k1234 = self.tuple_add(k12, k34)
-        delta_x = self.tuple_multiply(k1234, dt/6)
+        dxdt = tuple(dxdt_i / 6 for dxdt_i in self.tuple_add(k12, k34))
+        delta_x = self.tuple_multiply(dxdt, dt)
         y = self.tuple_add(x, delta_x)
-        return y
+        return y, dxdt
 
     @torch.no_grad()
     def ode_log_likelihood(self, x, **kwargs):
@@ -767,35 +794,71 @@ class ContinuousEvaluator(ToyEvaluator):
         fevals = 0
         if 'num_hutchinson_samples' not in kwargs:
             kwargs['num_hutchinson_samples'] = 1
-        def exact_ode_fn(t, x):
-            nonlocal fevals
-            fevals += 1
-            with torch.enable_grad():
-                # x is a tuple and x[0].shape is BxDx1 where B is batch size and D is dimension
-                x = x[0].detach().requires_grad_()
-                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
-                d_ll = torch.zeros(x.shape[0], device=x.device)
-                for i in range(x.shape[1]):
-                    v = torch.zeros_like(x)
-                    v[:, i, 0] = 1.0
-                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
-                    d_ll += (vjp * v).sum([-1, -2])
-                out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
-                return out
+        def exact_ode_fn(t, z):
+            def inner_exact_ode_fn(t, z):
+                nonlocal fevals
+                fevals += 1
+                with torch.enable_grad():
+                    # x is a tuple and x[0].shape is BxDx1 where B is batch size and D is dimension
+                    x = z[0].detach().requires_grad_()
+                    dx_dt_fn_of_x = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                    d_ll = torch.zeros(x.shape[0], device=x.device)
+                    for i in range(x.shape[1]):
+                        v = torch.zeros_like(x)
+                        v[:, i, 0] = 1.0
+                        dx, vjp = torch.autograd.functional.vjp(dx_dt_fn_of_x, x, v)#, create_graph=True)
+                        d_ll += (vjp * v).sum([-1, -2])
+                    # dx_dt_fn_of_t = lambda s: self.get_dx_dt(s, x, evaluate_likelihood=True, **kwargs)
+                    # dvjp_dts = torch.zeros_like(d_ll)
+                    # other_dvjp_dts = torch.zeros_like(d_ll)
+                    # for i in range(len(d_ll)):
+                    #     # sm = 0
+                    #     # for j in range(x.shape[1]):
+                    #     #     ddxdtdt = torch.autograd.grad(dx_dt_fn_of_t(t)[i, j], t, create_graph=True)[0]
+                    #     #     fdsa = torch.autograd.grad(ddxdtdt, x)[0]
+                    #     #     sm += fdsa[i, j]
+                    #     # other_dvjp_dts[i] = sm
+                    #     dvjp_dt = torch.autograd.grad(d_ll[i], t, retain_graph=True)[0]
+                    #     dvjp_dts[i] = dvjp_dt
+                    out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
+                    # out = d_ll.reshape(-1)
+                    return out
+            # shp = list(x.shape)
+            # shp[1] += 1
+            # # shp[1] = 1
+            # w_vec = torch.ones(shp, device=x.device).reshape(-1)
+            # w_vec[:x.nelement()] = 0.
+            # torch.autograd.set_detect_anomaly(True)
+            # out, dvjp_dt = torch.autograd.functional.vjp(lambda s: inner_exact_ode_fn(s, z), t, w_vec)
+            # return torch.cat([out, dvjp_dt])
+            return inner_exact_ode_fn(t, z)
         def hutchinson_ode_fn(t, x):
             nonlocal fevals
             fevals += 1
             with torch.enable_grad():
                 x = x[0].detach().requires_grad_()
-                dx_dt = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
+                dx_dt_fn_of_x = lambda y: self.get_dx_dt(t, y, evaluate_likelihood=True, **kwargs)
                 d_ll = torch.zeros(x.shape[0], device=x.device)
                 for _ in range(kwargs['num_hutchinson_samples']):
                     # hutchinson's trick
                     v = torch.randint_like(x, 2) * 2 - 1
-                    dx, vjp = torch.autograd.functional.vjp(dx_dt, x, v)
+                    dx, vjp = torch.autograd.functional.vjp(dx_dt_fn_of_x, x, v)
                     d_ll += (vjp * v).sum([-1, -2]) / kwargs['num_hutchinson_samples']
                 out = torch.cat([dx.reshape(-1), d_ll.reshape(-1)])
             return out
+
+        class WrappedDynamics(torch.nn.Module):
+            def __init__(self, func):
+                super().__init__()
+                self.func = func
+                self.calls = []   # store evaluations
+
+            def forward(self, t, y):
+                f_eval = self.func(t, y)
+                z = y[0].detach().cpu(), y[1].detach().cpu()
+                self.calls.append((t.detach().cpu(), z, f_eval.detach().cpu()))
+                return f_eval
+
         ll = x.new_zeros([x.shape[0]])
         x_min = x, ll
         start_time = self.sampler.t_eps if self.cfg.test == TestType.Test else 0.
@@ -803,7 +866,7 @@ class ContinuousEvaluator(ToyEvaluator):
             start_time,
             1.,
             self.sampler.diffusion_timesteps,
-            device=x.device
+            device=x.device,
         )
         # times = torch.linspace(
         #     self.sampler.t_eps,
@@ -811,20 +874,38 @@ class ContinuousEvaluator(ToyEvaluator):
         #     self.sampler.diffusion_timesteps,
         #     device=x.device
         # )
-        ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
-        if self.cfg.density_integrator == Integrator.EULER:
-            print('integrating euler')
-            sol = self.euler_integrate(ode_fn, x_min, times)
-        elif self.cfg.density_integrator == Integrator.HEUN:
-            print('integrating heun')
-            sol = self.heun_integrate(ode_fn, x_min, times)
-        elif self.cfg.density_integrator == Integrator.RK4:
-            print('integrating rk4')
-            sol = self.rk4_integrate(ode_fn, x_min, times)
-        else:
-            print('integrating dopri5')
-            sol = odeint(ode_fn, x_min, times, atol=self.cfg.atol, rtol=self.cfg.rtol, method='dopri5')
-        delta_ll = sol[1].diff(dim=0).flip(dims=[0]).cumsum(dim=0)
+        with torch.enable_grad():
+            ode_fn = exact_ode_fn if 'exact' in kwargs and kwargs['exact'] else hutchinson_ode_fn
+            ode_fn = WrappedDynamics(ode_fn)
+            if self.cfg.density_integrator == Integrator.EULER:
+                print('integrating euler')
+                sol, derivatives = self.euler_integrate(ode_fn, x_min, times)
+            elif self.cfg.density_integrator == Integrator.HEUN:
+                print('integrating heun')
+                sol, derivatives = self.heun_integrate(ode_fn, x_min, times)
+            elif self.cfg.density_integrator == Integrator.RK4:
+                print('integrating rk4')
+                sol, derivatives = self.rk4_integrate(ode_fn, x_min, times)
+            else:
+                print('integrating dopri5')
+                sol = odeint(ode_fn, x_min, times, atol=self.cfg.atol, rtol=self.cfg.rtol, method='dopri5')
+                derivatives = None
+        # if self.cfg.test == TestType.Test:
+        #     y = sol[0][-1]
+        #     dx_dt = lambda y: self.get_dx_dt(torch.tensor([start_time], device=device), y, evaluate_likelihood=True, **kwargs)
+        #     d_ll = torch.zeros(x.shape[0], device=x.device)
+        #     for i in range(x.shape[1]):
+        #         v = torch.zeros_like(x)
+        #         v[:, i, 0] = 1.0
+        #         dx, vjp = torch.autograd.functional.vjp(dx_dt, y, v)
+        #         d_ll += (vjp * v).sum([-1, -2])
+        #     residual1 = 2*d_ll * self.sampler.t_eps
+            # residual2 = d_ll * self.sampler.t_eps - d_eps * self.sampler.t_eps**2/2
+            # residual3 = f_0 * self.sampler.t_eps + d_zero * self.sampler.t_eps**2/2
+
+        d_lls = sol[1].diff(dim=0).flip(dims=[0])
+        # d_lls[0] += residual1
+        delta_ll = d_lls.cumsum(dim=0)
         delta_ll = torch.concat([
             torch.zeros(1, delta_ll.shape[-1], device=delta_ll.device),
             delta_ll
@@ -850,8 +931,8 @@ class ContinuousEvaluator(ToyEvaluator):
         #     ll_output = ll_prior.repeat(2) + delta_ll
         # else:
         #     ll_output = ll_prior + delta_ll
-        ll_output = ll_prior + delta_ll
-        return ll_output, {'fevals': fevals}, sol, latent, delta_ll
+        ll_output = ll_prior + delta_ll# + residual1
+        return ll_output, {'fevals': fevals}, sol, latent, delta_ll, ode_fn.calls, derivatives
 
 
 def plt_llk(traj, lik, figs_dir, plot_type='scatter', ax=None):
@@ -980,6 +1061,31 @@ def compute_ode_log_likelihood(
         f'{cfg.num_hutchinson_samples}.csv',
         index=False
     )
+
+    if cfg.density_integrator == Integrator.EULER:
+        sol = ode_llk[2]
+        p = sol[1]
+        start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+        times = torch.linspace(
+            start_time,
+            1.,
+            std.sampler.diffusion_timesteps,
+        )
+        dp_dt = sol[1].diff(dim=0) / times.diff()[0]
+
+        plt.clf()
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        for i in range(5):
+            ax1.plot(times, p[:, i].to('cpu'))
+            ax2.plot(times[:-1], dp_dt[:, i].to('cpu'))
+        ax1.set_ylabel(f"log p")
+        ax2.set_ylabel(f"(log p)'")
+        ax2.set_xlabel(f'Times')
+        plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
+        plt.close()
+
+        ode_llk[-1]
+
     return ode_llk, scaled_ode_llk
 
 def compute_histogram_errors(
@@ -1744,6 +1850,7 @@ def test_multivariate_gaussian(
     high_edges = edge_trajs[~low_idx]
     rng = edge_lk.max() - edge_lk.min()
     lk_color = (edge_lk - edge_lk.min()) / rng
+    plt.clf()
     plt.scatter(edge_trajs[:, 0], edge_trajs[:, 1], c=lk_color, cmap='viridis')
     plt.colorbar(label='Likelihood')
     plt.savefig('{}/edge_points.pdf'.format(
@@ -1862,6 +1969,7 @@ def plot_bm_pdf_histogram_estimate(
     plt.title(f'Histogram of {sample_trajs.shape[0]} Samples with Analytical Tail Density')
     plt.legend()
     plt.savefig('{}/chi_histogram_estimate.pdf'.format(HydraConfig.get().run.dir))
+
     return sample_levels, x, pdf
 
 def line_circle_intersection(r, alpha, dt):
@@ -2665,11 +2773,11 @@ def get_x_min_from_final(std, x_final):
         return dx_dt
     unsqueezed_x_final = x_final.unsqueeze(0)
     if std.cfg.sample_integrator == Integrator.EULER:
-        sol = std.euler_integrate(ode_fn, unsqueezed_x_final, times)
+        sol, derivatives = std.euler_integrate(ode_fn, unsqueezed_x_final, times)
     elif std.cfg.sample_integrator == Integrator.HEUN:
-        sol = std.heun_integrate(ode_fn, unsqueezed_x_final, times)
+        sol, derivatives = std.heun_integrate(ode_fn, unsqueezed_x_final, times)
     elif std.cfg.sample_integrator == Integrator.RK4:
-        sol = std.rk4_integrate(ode_fn, unsqueezed_x_final, times)
+        sol, derivatives = std.rk4_integrate(ode_fn, unsqueezed_x_final, times)
     elif std.cfg.sample_integrator == Integrator.PYTORCH:
         sol = odeint(ode_fn, unsqueezed_x_final, times, atol=std.cfg.atol, rtol=std.cfg.rtol, method='dopri5')
     else:
@@ -2950,8 +3058,8 @@ def plot_circles(std, cfg_obj):
         all_points.append(points)
 
         # assign RGB color
-        color = np.array(cmap(i / (len(radii)-1))[:3])  # (R,G,B)
-        clrs = np.tile(color, (N,1))  # repeat for each point on this circle
+        # color = np.array(cmap(i / (len(radii)-1))[:3])  # (R,G,B)
+        # clrs = np.tile(color, (N,1))  # repeat for each point on this circle
         all_colors.append([i] * N)
 
     # concatenate all circles
@@ -2975,29 +3083,42 @@ def plot_circles(std, cfg_obj):
     # cmap = colors.ListedColormap(roygbiv, name="ROYGBIV")
 
     std.cfg.sample_integrator = Integrator.RK4
-    samples = std.sample_trajectories(
+    sample_output = std.sample_trajectories(
         cond=std.cond,
         alpha=std.likelihood.alpha.reshape(-1, 1),
         x_min=x_min,
-    ).samples.squeeze().cpu()
+    )
+    samples = sample_output.samples.squeeze().cpu()
+
+    bad_samples_idx = torch.logical_and(
+        samples[-1][:, 0] < -2.5,
+        x_min.norm(dim=[1, 2]).cpu() <=1
+    )
+    bad_trajs = samples[:, bad_samples_idx]
+    plot_bad = True
+    if plot_bad and bad_samples_idx.any():
+        # samples = bad_trajs
+        color = clr[bad_samples_idx][0]
+        clr[~bad_samples_idx] = color
+        clr[bad_samples_idx] = 0
 
     # generate gif of samples where each index in samples represents a frame
     # Create figure and axis
     fig, ax = plt.subplots()
-    
+
     # Set up plot limits based on data range
-    y_min, y_max = samples[..., 1].min(), samples[..., 1].max()
-    x_min, x_max = samples[..., 0].min(), samples[..., 0].max()
-    margin = 0.1 * max(x_max - x_min, y_max - y_min)
-    ax.set_xlim(x_min - margin, x_max + margin)
-    ax.set_ylim(y_min - margin, y_max + margin)
+    ymin, ymax = samples[..., 1].min(), samples[..., 1].max()
+    xmin, xmax = samples[..., 0].min(), samples[..., 0].max()
+    margin = 0.1 * max(xmax - xmin, ymax - ymin)
+    ax.set_xlim(xmin - margin, xmax + margin)
+    ax.set_ylim(ymin - margin, ymax + margin)
     plot_boundary(std, cfg_obj, ax)
 
     # Create color normalization based on likelihood values
     norm = colors.Normalize(vmin=0, vmax=len(radii))
 
     # Initialize scatter plot
-    scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=2)
+    scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=1)
     fig.colorbar(scat, label='Meaningless')
 
     def update(frame):
@@ -3024,6 +3145,55 @@ def plot_circles(std, cfg_obj):
     ))
     plt.close()
 
+    bad_derivatives = torch.stack(sample_output.derivatives)[:, bad_samples_idx].squeeze()
+    end_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+    times = -torch.linspace(1., end_time, std.sampler.diffusion_timesteps, device=device)
+    # bad_derivatives, times = compute_derivatives(std, bad_trajs)
+    plot_pfode(bad_trajs, bad_derivatives, times, title='bad_trajectories')
+
+def compute_derivatives(std, trajs):
+    end_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+    times = torch.linspace(
+        1.,
+        end_time,
+        std.sampler.diffusion_timesteps,
+        device=device
+    )
+    rearranged_trajs = einops.rearrange(trajs, 't n d -> (t n) d 1').to(device)
+    num_trajs = trajs.shape[1]
+    dx_dts = []
+    for idx, time in enumerate(times):
+        selection = torch.arange(num_trajs * idx, num_trajs * (idx+1))
+        dx_dt = std.get_dx_dt(
+            time,
+            rearranged_trajs[selection],
+            evaluate_likelihood=False,
+            cond=std.cond,
+            alpha=std.likelihood.alpha.reshape(-1, 1)
+        )
+        dx_dts.append(dx_dt)
+    derivatives = torch.stack(dx_dts)
+    return derivatives.squeeze().to(trajs.device), -times.to(trajs.device)
+
+def plot_pfode(bad_trajs, bad_derivatives, times, title):
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1)
+    for i in range(bad_trajs.shape[1]):
+        ax1.scatter(times, bad_trajs[:, i, 0], s=1.5)
+        ax1.set_xticklabels([])
+        ax2.scatter(times, bad_trajs[:, i, 1], s=1.5)
+        ax2.set_xticklabels([])
+        ax3.scatter(times, bad_derivatives[:, i, 0], s=1.5)
+        ax3.set_xticklabels([])
+        ax4.scatter(times, bad_derivatives[:, i, 1], s=1.5)
+        ax4.xaxis.set_major_formatter(FuncFormatter(lambda val, _: f"{abs(val):1f}"))
+    ax1.set_ylabel(f"x-value")
+    ax2.set_ylabel(f"y-value")
+    ax3.set_ylabel(f"x'-value")
+    ax4.set_ylabel(f"y'-value")
+    ax4.set_xlabel(f'Times')
+    plt.savefig(f'{HydraConfig.get().run.dir}/{title}_pfode.pdf')
+    plt.close()
+
 def compute_fake_gaussian_trajs(
         abscissa: torch.Tensor,
         num_sample_batches: int,
@@ -3039,7 +3209,47 @@ def compute_fake_gaussian_trajs(
     )
     fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * normed_vecs_1BD1
     flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
-    return flattened_fake_trajs_NbD1
+    return flattened_fake_trajs_NbD1, vecs
+
+def compute_fake_gaussian_trajs_2D(
+        abscissa: torch.Tensor,
+        num_sample_batches: int,
+        dim: int
+):
+    angles = torch.linspace(0., 2*torch.pi*(1-1/num_sample_batches), num_sample_batches)
+    abscissa_repeat_NBD1 = einops.repeat(
+        abscissa,
+        'n 1 -> n b d 1',
+        b=num_sample_batches,
+        d=dim
+    )
+    fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * torch.stack([torch.cos(angles), torch.sin(angles)]).T.unsqueeze(-1)
+    flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
+    return flattened_fake_trajs_NbD1, [angles] * len(abscissa)
+
+def get_points_along_angle(
+    angles: torch.Tensor,
+    angle_points: torch.Tensor,
+    idx: int,
+    r: torch.Tensor,
+    num_trajs: int,
+    dim: int,
+    alpha: float,
+):
+    angle = angles[idx]
+    if angle > 0:
+        angle_points = angle_points[idx]
+        dangles = torch.linspace(0, angle, num_trajs)
+        x,y = angle_points[:, 0], angle_points[:, 1]
+        theta = torch.atan2(y, x)
+        complex_points = r * torch.exp(torch.complex(
+            torch.tensor(0.),
+            theta[~idx] + dangles
+            ))
+        points = torch.stack([torch.tensor([point.real, point.imag]) for point in complex_points])
+        dt = torch.tensor(1 / 2).sqrt()
+        return points
+    return (torch.ones(num_trajs, 2) * r**2 / (dim-1)).sqrt()
 
 def compute_fake_bm_trajs(
     abscissa_tensor: torch.Tensor,
@@ -3059,13 +3269,126 @@ def compute_fake_bm_trajs(
         )
         points.append(torch.cat([top_points, bottom_points]))
     all_points = torch.cat(points).unsqueeze(-1)
-    return all_points
+    angle_list = []
+    for angle_points_radius in angle_points_list:
+        angle_points_element = angle_points_radius[1]
+        top = torch.atan2(angle_points_element[0][:, 1], angle_points_element[0][:, 0])
+        right = torch.atan2(angle_points_element[2][:, 1], angle_points_element[2][:, 0])
+        bottom = torch.atan2(angle_points_element[1][:, 1], angle_points_element[1][:, 0])
+        bottom += 2*torch.pi * (bottom < 0)
+        left = torch.atan2(angle_points_element[3][:, 1], angle_points_element[3][:, 0])
+        left += 2*torch.pi * (left < 0)
+        all_angles = []
+        divisor = num_trajs if right.sum() == 0 else num_trajs // 2
+        for angle in [top, right, bottom, left]:
+            if angle.sum() == 0:
+                continue
+            sorted_angle = angle.sort().values
+            angles = torch.linspace(sorted_angle[0], sorted_angle[1], divisor)
+            all_angles.append(angles)
+        angle_set = torch.cat(all_angles).sort().values
+        angle_list.append(angle_set)
+    return all_points, angle_list
 
-def diffuse_fake_trajs(std, cfg_obj):
+def diffuse_fake_trajs(std, cfg_obj, abscissa_tensor_N1, num_trajs):
+    """ abscissa_tensor_N1 has shape n x 1 """
+    dim = get_dim(std)
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
-        compute_fake_gaussian_trajs(abscissa_tensor, dim, alpha, dt, num_trajs)
+        if dim == 2:
+            return compute_fake_gaussian_trajs_2D(abscissa_tensor_N1, num_trajs, dim)
+        return compute_fake_gaussian_trajs(abscissa_tensor_N1, num_trajs, dim)
     else:
-        compute_fake_bm_trajs(abscissa_tensor, dim, alpha, dt, num_trajs)
+        alpha = std.likelihood.alpha
+        dt = torch.tensor(1. / (std.cfg.example.sde_steps-1))
+        return compute_fake_bm_trajs(abscissa_tensor_N1, dim, alpha, dt, num_trajs)
+
+def get_analytical(cfg_obj, std, radius, thetas):
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        dd = stats.chi(cfg_obj.example.d)
+        density = dd.pdf(radius) / (1-dd.cdf(std.likelihood.alpha))
+        analytical_density = torch.ones(thetas.shape[0]) * density
+    else:
+        d = get_dim(std)
+        mu = np.array([0] * d)
+        sigma = np.eye(d)
+        dt = torch.tensor(1. / d)
+        normal = torch.distributions.Normal(0., 1.)
+        complex_xs = radius * (thetas * 1j).exp()
+        xs = torch.view_as_real(complex_xs)
+        unnormed_analytical = (normal.log_prob(xs[:, 0]) + normal.log_prob(xs[:, 1])).exp()
+        normalizing_factor = get_target(std).analytical_prob(std.likelihood.alpha)
+        mvn_log_density = unnormed_analytical / normalizing_factor
+        mvn_log_density_tensor = torch.ones(xs.shape[0]) * mvn_log_density.log()
+        analytical_density = compute_transformed_ode(
+            xs.norm(dim=1),
+            mvn_log_density_tensor,
+            std.likelihood.alpha,
+            dt,
+        )
+    return analytical_density
+
+def log_density_to_density(std, cfg_obj, log_density, fake_trajs):
+    if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+        return log_density.exp()
+    else:
+        d = get_dim(std)
+        dt = torch.tensor(1. / d)
+        alpha = std.likelihood.alpha
+        density = compute_transformed_ode(
+            fake_trajs.norm(dim=1),
+            log_density,
+            alpha,
+            dt,
+        )
+        return density
+
+def plot_density_vs_theta(std, cfg_obj):
+    alpha = std.likelihood.alpha
+    radii = torch.linspace(alpha+0.1, alpha+1, 8).reshape(-1, 1)
+    radii = torch.trunc(radii * 10) / 10
+    fake_trajs, angles = diffuse_fake_trajs(std, cfg_obj, radii, num_trajs=std.cfg.num_sample_batches)
+    log_density = std.ode_log_likelihood(
+        fake_trajs.to(device),
+        cond=std.cond,
+        alpha=alpha.reshape(-1, 1),
+        exact=std.cfg.compute_exact_trace,
+    )[0][-1].cpu()
+    density = log_density_to_density(std, cfg_obj, log_density, fake_trajs)
+    rearranged_density = einops.rearrange(density, '(n b) -> n b', n=len(radii))
+    all_thetas = torch.cat(angles).sort().values
+    for sample_batch_idx, sample_batch in enumerate(rearranged_density):
+        radius = radii[sample_batch_idx].item()
+        thetas = angles[sample_batch_idx]
+        plt.scatter(
+            thetas,
+            sample_batch,
+            label='r={:.1f}'.format(radius)
+        )
+        analytical_density = get_analytical(cfg_obj, std, radius, all_thetas)
+        plt.plot(
+            all_thetas,
+            analytical_density,
+        )
+    plt.xlim(0)
+    plt.xlabel('Theta')
+    plt.ylabel('Density')
+    plt.title('Density vs. Theta')
+    plt.legend(ncol=4)
+    plt.savefig('{}/density_vs_theta.pdf'.format(
+        HydraConfig.get().run.dir,
+    ))
+    plt.clf()
+
+def plot_sorted_density_vs_domain(std, radii):
+    alpha = std.likelihood.alpha
+    radii = torch.arange(alpha, alpha+4, 0.5).reshape(-1, 1)
+    fake_trajs = diffuse_fake_trajs(std, cfg_obj, radii, num_trajs=std.cfg.num_sample_batches)
+    density = std.ode_log_likelihood(
+        fake_trajs.to(device),
+        cond=std.cond,
+        alpha=alpha.reshape(-1, 1),
+        exact=std.cfg.compute_exact_trace,
+    )[0].exp().cpu()
 
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_sample_config")
 def sample(cfg):
@@ -3101,6 +3424,7 @@ def sample(cfg):
         dim = get_dim(std)
         if dim == 2:
             plot_circles(std, cfg_obj)
+            # plot_density_vs_theta(std, cfg_obj)
 
         # diffuse_fake_trajs
         # diffuse_fake_trajs(std, cfg_obj)
@@ -3266,10 +3590,19 @@ def sample(cfg):
             test_type = TestType.MultivariateGaussian
         else:
             test_type = TestType.BrownianMotionDiff
-        make_ode_error_plot(cfg_obj, std, test_type)
+        # make_ode_error_plot(cfg_obj, std, test_type)
 
         # make unconditional ODE convergence plots
         # plot_ode_trajs(cfg, std, sample_traj_out)
+
+        # plot pfode trajectories for 7 trajectories closest to the boundary
+        small_idx = torch.topk(sample_trajs[-1].norm(dim=-2).squeeze(), k=7, largest=False).indices
+        traj_subset = sample_trajs[:, small_idx, :, 0].to('cpu')
+
+        derivatives = torch.stack(sample_traj_out.derivatives)[:, small_idx].squeeze().cpu()
+        end_integration_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+        times = -torch.linspace(1., end_integration_time, std.sampler.diffusion_timesteps)
+        plot_pfode(traj_subset[:-1], derivatives, times[:-1], 'subset')
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()

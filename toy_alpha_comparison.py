@@ -279,7 +279,7 @@ def compute_icov_error_vs_bins(
     return error_data
 
 def save_error_data(error_data: ErrorData, title: str):
-    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
+    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_').replace('\n', '_')
     abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.pt'
     torch.save({
         'Abscissa_bins': error_data.bins,
@@ -332,6 +332,9 @@ def make_plots(
         stds,
         alphas
     )
+
+    plt.yscale("log")
+    plt.grid(which='both', axis='y')
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')

@@ -16,12 +16,14 @@ from omegaconf import OmegaConf
 import torch
 import scipy
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import matplotlib.colors as colors
 import numpy as np
 from scipy.interpolate import griddata
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
-    compute_derivatives, plot_pfode, get_points_along_angle
+    compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
     TestType, Integrator
@@ -871,8 +873,7 @@ def sample(cfg):
 
 
 
-        bad_idx = (derivatives[-1].norm(dim=-1) > 4*derivatives[-3].norm(dim=-1)).nonzero()
-        samples = trajs[bad_idx]
+        samples = sample_trajs.to('cpu')[:, small_idx.cpu()].squeeze()
 
         fig, ax = plt.subplots()
 
@@ -882,13 +883,16 @@ def sample(cfg):
         margin = 0.1 * max(xmax - xmin, ymax - ymin)
         ax.set_xlim(xmin - margin, xmax + margin)
         ax.set_ylim(ymin - margin, ymax + margin)
+        cfg_obj = OmegaConf.to_object(cfg)
         plot_boundary(std, cfg_obj, ax)
 
         # Create color normalization based on likelihood values
-        norm = colors.Normalize(vmin=0, vmax=len(radii))
+        norm = colors.Normalize(vmin=0, vmax=1)
 
         # Initialize scatter plot
+        cmap = plt.get_cmap('hsv')
         scat = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=1)
+        clr = torch.zeros_like(small_idx.cpu())
         fig.colorbar(scat, label='Meaningless')
 
         def update(frame):
@@ -909,8 +913,8 @@ def sample(cfg):
 
         # Save animation
         cond = 'conditional' if std.cond else 'unconditional'
-        anim.save(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion.gif', writer='pillow')
-        plt.savefig(f'{HydraConfig.get().run.dir}/{cond}_circle_diffusion_final_frame.pdf'.format(
+        anim.save(f'{HydraConfig.get().run.dir}/{cond}_large_derivative.gif', writer='pillow')
+        plt.savefig(f'{HydraConfig.get().run.dir}/{cond}_large_derivative_final_frame.pdf'.format(
             HydraConfig.get().run.dir,
         ))
         plt.close()

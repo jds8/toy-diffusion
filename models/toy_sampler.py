@@ -214,9 +214,11 @@ class AbstractContinuousSampler(AbstractSampler):
         diffusion_timesteps: int,
         guidance_coef: float,
         t_eps: float,
+        sample_time_in_logspace: bool
     ):
         super().__init__(diffusion_timesteps, guidance_coef)
         self.t_eps = t_eps
+        self.sample_time_in_logspace = sample_time_in_logspace
 
     def reverse_sde(
             self,
@@ -246,7 +248,15 @@ class AbstractContinuousSampler(AbstractSampler):
     def forward_sample(self, x_start, extras=None):
         lower = torch.tensor(self.t_eps, device=x_start.device)
         upper = torch.tensor(1., device=x_start.device)
-        t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
+        if self.sample_time_in_logspace:
+            valid_times = []
+            while len(valid_times) < x_start.shape[0]:
+                logt = torch.distributions.Uniform(-5, 0).sample([x_start.shape[0]])
+                times = logt.exp()
+                valid_times += list(times[times > self.t_eps])
+            t = torch.tensor(valid_times[:x_start.shape[0]], device=x_start.device)
+        else:
+            t = torch.distributions.Uniform(lower, upper).sample([x_start.shape[0]])
         noise = torch.randn_like(x_start)
 
         mean, log_mean_coeff, std = self.marginal_prob(x=x_start, t=t)
@@ -291,11 +301,12 @@ class VPSDESampler(AbstractContinuousSampler):
         diffusion_timesteps: int,
         guidance_coef: float,
         t_eps: float,
+        sample_time_in_logspace: bool,
         beta_schedule: BetaSchedule,
         beta0: float,
         beta1: float
     ):
-        super().__init__(diffusion_timesteps, guidance_coef, t_eps)
+        super().__init__(diffusion_timesteps, guidance_coef, t_eps, sample_time_in_logspace)
         self.beta_schedule = beta_schedule
         continuous_beta_integral = get_continuous_beta_integral(beta_schedule)
         self.beta0 = torch.tensor(beta0)

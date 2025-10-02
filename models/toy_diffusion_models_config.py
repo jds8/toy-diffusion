@@ -44,6 +44,7 @@ class DiscreteSamplerConfig(BaseSamplerConfig):
 @dataclass
 class ContinuousSamplerConfig(BaseSamplerConfig):
     t_eps: float = 1e-5
+    sample_time_in_logspace: bool = False
 
     def name(self):
         return 'ContinuousSampler'

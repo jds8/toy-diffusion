@@ -20,9 +20,9 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_transformed_ode
+from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_derivatives, plot_pfode
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig, TrainComparisonConfig
+    BrownianMotionDiffExampleConfig, TrainComparisonConfig, Integrator
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import pdf_2d_quadrature_bm
 
@@ -255,6 +255,37 @@ def compute_icov_error_vs_bins(
                 x=abscissa_N1.squeeze().cpu()
             )
             errors_B_list.append(torch.tensor(error_N))
+        plt.plot(abscissa_N1.squeeze().cpu(), dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha)))
+        plt.scatter(abscissa_N1.squeeze().cpu(), transformed_ode_lk_NB[:, b].cpu().numpy())
+        plt.savefig('{}/{}_estimates.pdf'.format(
+            HydraConfig.get().run.dir,
+            std.cfg.model_name
+        ))
+        plt.clf()
+
+        if cfg.density_integrator == Integrator.EULER:
+            small_idx = torch.topk(fake_traj_NbD1.norm(dim=-2).squeeze(), k=7, largest=False).indices
+            sol = ode_llk[2]
+            p = sol[1]
+            start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+            times = torch.linspace(
+                start_time,
+                1.,
+                std.sampler.diffusion_timesteps,
+            )
+            dp_dt = sol[1].diff(dim=0) / times.diff()[0]
+
+            plt.clf()
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+            for i in small_idx:
+                ax1.plot(times, p[:, i].to('cpu'))
+                ax2.plot(times[:-1], dp_dt[:, i].to('cpu'))
+            ax1.set_ylabel(f"log p")
+            ax2.set_ylabel(f"(log p)'")
+            ax2.set_xlabel(f'Times')
+            plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
+            plt.close()
+
         errors_B = torch.stack(errors_B_list)
         model_quantiles = torch.quantile(errors_B,
                                          torch.tensor([0.05, 0.5, 0.95],
@@ -288,7 +319,7 @@ def compute_icov_error_vs_bins(
     return error_data
 
 def save_error_data(error_data: ErrorData, title: str):
-    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_')
+    rel_filename = f'{title}_{error_data.label}'.replace(' ', '_').replace('\n', '_')
     abs_filename = f'{HydraConfig.get().run.dir}/{rel_filename}.pt'
     torch.save({
         'Abscissa_bins': error_data.bins,
@@ -345,6 +376,8 @@ def make_plots(
         training_samples
     )
     plt.xscale("log")
+    plt.yscale("log")
+    plt.grid(which='both', axis='y')
     # ax3 = ax1.twiny()
     # ax3.set_xlim(ax1.get_xlim())
     # ax3.set_xlabel('Num Bins')
@@ -431,6 +464,12 @@ def sample(cfg):
             )
             sample_trajs = sample_traj_out.samples
             trajs = sample_trajs[-1]
+
+            small_idx = torch.topk(trajs.norm(dim=-2).squeeze(), k=7, largest=False).indices
+            traj_subset = sample_trajs[:, small_idx, :, 0].to('cpu')
+            derivatives, times = compute_derivatives(std, traj_subset)
+            plot_pfode(traj_subset, derivatives, times, 'subset_{}'.format(std.cfg.model_name))
+
             rearranged_trajs = einops.rearrange(
                 trajs,
                 '(b c) h w -> b c h w',

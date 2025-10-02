@@ -134,10 +134,12 @@ def get_model_path(cfg: TrainConfig, dim: int):
     else:
         cfg_obj = OmegaConf.to_object(cfg)
         sampler_name = cfg_obj.sampler.name()
+        log_time = cfg_obj.sampler.sample_time_in_logspace
         diffusion_name = cfg_obj.diffusion.name()
         example_name = cfg_obj.example.name()
-        model_name = "{}_{}_dim_{}_{}_{}".format(
+        model_name = "{}_log_time_{}_{}_dim_{}_{}_{}".format(
             sampler_name,
+            log_time,
             diffusion_name,
             dim,
             example_name,
@@ -241,6 +243,11 @@ class AlphaComparisonConfig(SampleConfig):
 @dataclass
 class BinComparisonConfig(SampleConfig):
     histogram_bins_filename: str = 'Relative_Error_of_Tail_Integral_(alpha=0.0)_vs._Number_of_Bins_Histogram_Approximation.pt'
+
+
+@dataclass
+class EpsilonComparisonConfig(SampleConfig):
+    t_epses: List[float] = field(default_factory=list)
 
 
 @dataclass
