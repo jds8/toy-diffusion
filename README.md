@@ -12,7 +12,7 @@ training data also comprises a scalar α as well as a boolean value which
 indicates whether or not the data point ”exits” |α|. Together these features
 enable classifier-free guided training.
 
-<img src="chi_curves.pdf">
+<img src="chi_curves.jpg">
 
 1) toy_train.py
    - Trains the diffusion model on Gaussian or Brownian motion data.
