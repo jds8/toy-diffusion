@@ -23,11 +23,11 @@ sampler=vpsde_velocity_sampler   example=brownian_motion_diff_example   diffusio
  diffusion.dim_mults="[1,2]"
 
 2) toy_sample.py
-   > Samples from the diffusion model and produces probability density estimates.
-   > Contains implementations of numerical integration schemes: Euler, Heun, RK4, and uses torchdiffeq implementation of DoPri
-   > Implements Hutchinson-Skilling trace estimator for stochastic approximation of divergence term in continuity equation
-   > Implements SDE and PFODE formulations for inference-time sampling
-   > python3 toy_sample.py \                                                                                                                                   ─╯
+   - Samples from the diffusion model and produces probability density estimates.
+   - Contains implementations of numerical integration schemes: Euler, Heun, RK4, and uses torchdiffeq implementation of DoPri
+   - Implements Hutchinson-Skilling trace estimator for stochastic approximation of divergence term in continuity equation
+   - Implements SDE and PFODE formulations for inference-time sampling
+   - python3 toy_sample.py \                                                                                                                                   ─╯
   --config-name=continuous_sample_config \
   sampler=vpsde_velocity_sampler \
   example=brownian_motion_diff_example \
@@ -54,17 +54,17 @@ sampler=vpsde_velocity_sampler   example=brownian_motion_diff_example   diffusio
    b) toy_sampler.py contains implementations of \epsilon- and v-parameterization training strategies
 
 4) toy_likelihoods.py
-   > Generates labels for conditional training
+   - Generates labels for conditional training
 
 5) toy_train_config.py
-   > Configuration file
+   - Configuration file
 
 6) compute_quadratures.py
-   > Implements numerical quadrature code for Brownian motion density and tail integral computations
+   - Implements numerical quadrature code for Brownian motion density and tail integral computations
 
 7) toy_train_comparison.py
-   > Plots error versus training time across different checkpoints
-   > python toy_train_comparison.py --config-name=continuous_multivariate_8_sample_config \
+   - Plots error versus training time across different checkpoints
+   - python toy_train_comparison.py --config-name=continuous_multivariate_8_sample_config \
   sampler=vpsde_velocity_sampler example=multivariate_gaussian_example sampler.diffusion_timesteps=20 \
   sampler.beta_schedule=CosineSchedule diffusion=temporal_unet_alpha \
   model_name=VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v10240001048 \
@@ -74,4 +74,4 @@ sampler=vpsde_velocity_sampler   example=brownian_motion_diff_example   diffusio
   trained_models='[VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v102400696,VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v1024003672,VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v10240001048]'
 
 8) new_plot_conditional_bm.py
-   > Generates gif of level curves of Brownian motion density with corresponding chi-transformed density
+   - Generates gif of level curves of Brownian motion density with corresponding chi-transformed density
