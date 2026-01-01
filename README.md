@@ -13,9 +13,9 @@ indicates whether or not the data point ”exits” |α|. Together these feature
 enable classifier-free guided training.
 
 1) toy_train.py
-   > Trains the diffusion model on Gaussian or Brownian motion data.
-   > Implements classifier and classifier-free guidance
-   > python3 toy_train.py   --config-name=continuous_train_config   no_wandb=1   batch_size=4096   \
+   - Trains the diffusion model on Gaussian or Brownian motion data.
+   - Implements classifier and classifier-free guidance
+   - python3 toy_train.py   --config-name=continuous_train_config   no_wandb=1   batch_size=4096   \
 sampler=vpsde_velocity_sampler   example=brownian_motion_diff_example   diffusion=temporal_unet_alpha  \
  sampler.beta_schedule=CosineSchedule   likelihood=brownian_motion_diff_tails_likelihood   p_uncond=0.1  \
  likelihood.alpha=3.   max_alpha=4.   use_fixed_dataset=1   example.sde_steps=3   diffusion.dim=120  \
