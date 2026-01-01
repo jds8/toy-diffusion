@@ -50,8 +50,8 @@ sampler=vpsde_velocity_sampler   example=brownian_motion_diff_example   diffusio
   run_histogram_convergence=False
 
 3) models/
-   a) toy_temporal.py contains model architecture definition
-   b) toy_sampler.py contains implementations of \epsilon- and v-parameterization training strategies
+   - toy_temporal.py contains model architecture definition
+   - toy_sampler.py contains implementations of \epsilon- and v-parameterization training strategies
 
 4) toy_likelihoods.py
    - Generates labels for conditional training
