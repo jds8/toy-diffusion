@@ -47,6 +47,15 @@ def get_condition_idx(xx, yy, alpha, std):
         condition_idx = (torch.abs(x1) < alpha) & (torch.abs(x2) < alpha)
     return condition_idx
 
+def log_abs_exp_diff(a, b):
+    """
+    Computes log(abs(exp(a) - exp(b))) in a numerically stable way.
+    Works for all real a, b.
+    """
+    m = torch.maximum(a, b)
+    d = torch.abs(a - b)
+    return m + torch.log1p(-torch.exp(-d))
+
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
     logger = logging.getLogger("main")
@@ -76,9 +85,9 @@ def sample(cfg):
 
         # compute analytical likelihood
         normal = torch.distributions.Normal(0., 1.)
-        unnormed_analytical = (normal.log_prob(xx) + normal.log_prob(yy)).exp()
-        normalizing_factor = get_target(std).analytical_prob(alpha)
-        analytical = unnormed_analytical / normalizing_factor
+        unnormed_analytical_log = (normal.log_prob(xx) + normal.log_prob(yy))
+        normalizing_factor_log = get_target(std).analytical_prob(alpha).log()
+        analytical_log = unnormed_analytical_log - normalizing_factor_log
 
         # compute approximate likelihood
         ode_llk = std.ode_log_likelihood(
@@ -87,20 +96,23 @@ def sample(cfg):
             alpha=alpha,
             exact=cfg.compute_exact_trace,
         )
-        approx = einops.rearrange(ode_llk[0][-1].exp().cpu(), '(i j) -> i j', i=x_steps)
+        approx_log = einops.rearrange(ode_llk[0][-1].cpu(), '(i j) -> i j', i=x_steps)
+        approx = approx_log.exp()
 
         # compute error
-        rel_error = approx - analytical
+        rel_error_log = log_abs_exp_diff(approx_log, analytical_log) - analytical_log
+        rel_error = rel_error_log.exp()
+        # rel_error = (approx - analytical) / analytical
         approx_out = approx.clone()
-        analytical_out = analytical.clone()
+        analytical_out = analytical_log.exp().clone()
         condition_idx = get_condition_idx(xx, yy, alpha, std)
         rel_error[condition_idx] = torch.nan
         approx_out[condition_idx] = torch.nan
         analytical_out[condition_idx] = torch.nan
 
         # plot error
-        labels = ['Error', 'Value', 'Value']
-        titles = ['Relative Error', 'PFODE', 'Analytical']
+        labels = ['Relative Error', 'Value', 'Value']
+        titles = ['Relative Error', 'ICOV', 'Analytical']
         data = [rel_error, approx_out, analytical_out]
         for label, title, datum in zip(labels, titles, data):
             plt.clf()
@@ -110,6 +122,8 @@ def sample(cfg):
             plt.ylabel('y')
             plt.title(title)
             plt.tight_layout()
+            ax = plt.gca()
+            ax.set_aspect('equal', adjustable='box')
             plt.savefig('{}/{}_alpha={}_{}_error_heatmap.pdf'.format(
                 HydraConfig.get().run.dir,
                 cfg.model_name,

@@ -20,11 +20,13 @@ import scipy
 import matplotlib.pyplot as plt
 
 from toy_configs import register_configs
-from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_derivatives, plot_pfode
+from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_derivatives, plot_pfode, \
+    compute_fake_bm_trajs_random, compute_fake_gaussian_trajs, \
+    line_circle_intersection, vertical_line_circle_intersection, plot_boundary
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, TrainComparisonConfig, Integrator
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
-from compute_quadratures import pdf_2d_quadrature_bm
+from compute_quadratures import pdf_2d_quadrature_bm, get_2d_pdf
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -37,16 +39,18 @@ HistOutput = namedtuple('HistOutput', 'hist bins')
 def suppresswarning():
     warnings.warn("user", UserWarning)
 
-def compute_tail_estimate(
+def compute_tail_error(
+        std: ContinuousEvaluator,
         subsap: torch.Tensor,
         alpha: float,
         dd,
+        dim: int,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     # Construct a histogram from subsap data
     # and compute an estimate of the tail integral
     # of being greater than alpha from the histogram
     # Freedman-Diaconis
-    bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** (-1/3)
+    bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** std.cfg.histogram_bin_factor
     num_bins = int((subsap.max()) / bin_width)
 
     # Create the histogram
@@ -61,12 +65,32 @@ def compute_tail_estimate(
     lwr_bins = bins[:-1]
     upr_bins = bins[1:]
     med_bins = (lwr_bins + upr_bins) / 2
-    # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
-    tail_estimate = scipy.integrate.simpson(
-        np.abs(hist[smallest_idx:].numpy() - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
-        x=med_bins[smallest_idx:]
-    )
-    return hist, bins, torch.tensor(tail_estimate)
+    if dd is None:
+        # Brownian motion case
+        sde_steps = dim+1
+        # pdf = get_2d_pdf(sde_steps, med_bins[smallest_idx:], alpha)
+        # tail_error = scipy.integrate.simpson(
+        #     np.abs(hist[smallest_idx:] - pdf),
+        #     x=med_bins[smallest_idx:]
+        # )
+        pdf = get_2d_pdf(sde_steps, med_bins[smallest_idx:], alpha)
+        pdf = np.concat([np.zeros(smallest_idx), pdf])
+        tail_error = scipy.integrate.simpson(
+            np.abs(hist.numpy() - pdf),
+            x=med_bins,
+        )
+    else:
+        # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+        # tail_estimate = scipy.integrate.simpson(
+        #     np.abs(hist[smallest_idx:].numpy() - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
+        #     x=med_bins[smallest_idx:]
+        # )
+        pdf = dd.pdf(med_bins)/(1-dd.cdf(alpha)) * (med_bins > alpha).numpy()
+        tail_error = scipy.integrate.simpson(
+            np.abs(hist.numpy() - pdf),
+            x=med_bins
+        )
+    return hist, bins, torch.tensor(tail_error)
 
 def compute_sample_error_vs_samples(
         rearranged_trajs_list: List[torch.Tensor],
@@ -78,15 +102,9 @@ def compute_sample_error_vs_samples(
     if type(std.example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        analytical_tail = 1.#1 - dd.cdf(alpha)
-    elif type(std.example) == BrownianMotionDiffExampleConfig:
-        dim = cfg.example.sde_steps
-        # cfg_obj = OmegaConf.to_object(cfg)
-        # target = get_target(cfg_obj)
-        # analytical_tail = target.analytical_prob(alpha)
-        analytical_tail = 1.
     else:
-        raise NotImplementedError
+        dim = std.example.sde_steps-1
+        dd = None
     quantiles = []
     all_bins = []
     for rearranged_traj in rearranged_trajs_list:
@@ -94,10 +112,12 @@ def compute_sample_error_vs_samples(
         subsample_bins = []
         errors = []
         for subsap_idx, subsap in enumerate(sample_levels):
-            hist, bins, error = compute_tail_estimate(
+            hist, bins, error = compute_tail_error(
+                std,
                 subsap.cpu(),
                 alpha,
                 dd,
+                dim,
             )
             subsample_bins.append(HistOutput(hist, bins))
             errors.append(error)
@@ -137,42 +157,21 @@ def save_icov_samples(
         'ModelName': model_name
     }, abs_filename)
 
-def compute_fake_gaussian_trajs(
-        abscissa: torch.Tensor,
-        num_sample_batches: int,
-        dim: int
+def compute_fake_bm_arcs(
+        r,
+        alpha,
+        dt,
+        num_angles,
 ):
-    vecs = torch.randn(1, num_sample_batches, dim, 1)
-    normed_vecs_1BD1 = vecs / vecs.norm(dim=2, keepdim=True)
-    abscissa_repeat_NBD1 = einops.repeat(
-        abscissa,
-        'n 1 -> n b d 1',
-        b=num_sample_batches,
-        d=dim
-    )
-    fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * normed_vecs_1BD1
-    flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
-    return flattened_fake_trajs_NbD1
-
-def compute_fake_bm_trajs(
-    abscissa_tensor: torch.Tensor,
-    dim: int,
-    alpha: float,
-    dt: torch.Tensor,
-    num_trajs: int
-):
-    points = []
-    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
-    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
-        top_points = get_points_along_angle(
-            angles, angle_points, 0, r, num_trajs, dim, alpha
-        )
-        bottom_points = get_points_along_angle(
-            angles, angle_points, 1, r, num_trajs, dim, alpha
-        )
-        points.append(torch.cat([top_points, bottom_points]))
-    all_points = torch.cat(points).unsqueeze(-1)
-    return all_points
+    dt_sqrt = dt.sqrt()
+    output_diagonal = line_circle_intersection(r, alpha, dt_sqrt)
+    output_right = vertical_line_circle_intersection(r, alpha, dt_sqrt)
+    output = torch.concat([output_diagonal, output_right])
+    angle_bounds = torch.atan2(output[:, 1], output[:, 0]).sort().values
+    angle_min, angle_max = angle_bounds[0], angle_bounds[-1]
+    angles = torch.linspace(angle_min, angle_max, num_angles)
+    values = r * (angles * 1j).exp()
+    return torch.stack([values.real, values.imag]).T.unsqueeze(-1)
 
 def compute_icov_error_vs_bins(
         sample_trajs: torch.Tensor,
@@ -180,19 +179,21 @@ def compute_icov_error_vs_bins(
         stds: List[ContinuousEvaluator],
         cfg: SampleConfig,
         training_samples: torch.Tensor,
+        all_bins: List[List[torch.Tensor]]
 ) -> ErrorData:
     if type(stds[0].example) == MultivariateGaussianExampleConfig:
         dim = cfg.example.d
         dd = scipy.stats.chi(dim)
-        leftover = (1 - dd.cdf(sample_trajs.max().cpu())) / (1 - dd.cdf(alpha+cfg.eta))
+        leftover = (1 - dd.cdf(sample_trajs.max().cpu())) / (1 - dd.cdf(alpha))
         analytical_tail = 1. - leftover #1 - dd.cdf(alpha)
     elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-        dim = cfg.example.sde_steps
+        dim = cfg.example.sde_steps-1
         # cfg_obj = OmegaConf.to_object(cfg)
         # target = get_target(cfg_obj)
         # analytical_tail = target.analytical_prob(alpha)
-        analytical_tail = 1.
-        dt = torch.tensor(1 / (dim-1))
+        dim = cfg.example.sde_steps-1
+        dd = None
+        dt = torch.tensor(1 / dim)
     else:
         raise NotImplementedError
     sample_trajs = einops.rearrange(
@@ -201,30 +202,32 @@ def compute_icov_error_vs_bins(
         b=cfg.num_sample_batches
     ).norm(dim=[1, 2])
     IQR = scipy.stats.iqr(sample_trajs.cpu())
-    bin_width = (2 * IQR) * stds[0].cfg.num_samples ** (-1/3)
+    bin_width = (2 * IQR) * stds[0].cfg.num_samples ** stds[0].cfg.histogram_bin_factor
     max_sample = sample_trajs.max()
-    num_bins = ((max_sample - (alpha+cfg.eta)) / bin_width).int()
-    abscissa_N1 = torch.linspace(alpha+cfg.eta, max_sample, num_bins+1).reshape(-1, 1).to(device)
-    if type(stds[0].example) == MultivariateGaussianExampleConfig:
-        fake_traj_NbD1 = compute_fake_gaussian_trajs(
-            abscissa_N1,
-            cfg.num_sample_batches,
-            dim
-        )
-    elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-        fake_traj_NbD1 = compute_fake_bm_trajs(
-            abscissa_N1,
-            dim,
-            alpha,
-            dt,
-            num_trajs=cfg.num_sample_batches//2
-        )
-    else:
-        raise NotImplementedError
+    num_bins = ((max_sample - (alpha)) / bin_width).int()
+    abscissa_N1 = torch.linspace(alpha, max_sample, num_bins+1).reshape(-1, 1).to(device)
     ode_lks = []
     errors = []
     quantiles_list = []
-    for std in stds:
+    for idx, std in enumerate(stds):
+        abscissa_N1 = all_bins[idx][0].bins.unsqueeze(-1)
+        if type(stds[0].example) == MultivariateGaussianExampleConfig:
+            fake_traj_NbD1, _ = compute_fake_gaussian_trajs(
+                abscissa_N1,
+                cfg.num_sample_batches,
+                dim
+            )
+        elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
+            fake_traj_NbD1, _ = compute_fake_bm_trajs_random(
+                abscissa_N1,
+                dim,
+                alpha,
+                dt,
+                num_trajs=cfg.num_sample_batches//2,
+                num_samples=cfg.num_icov_samples,
+            )
+        else:
+            raise NotImplementedError
         ode_llk = std.ode_log_likelihood(
             fake_traj_NbD1.to(device),
             cond=torch.tensor([1.]),
@@ -249,10 +252,16 @@ def compute_icov_error_vs_bins(
             raise NotImplementedError
         ode_lks.append(transformed_ode_lk_NB)
         errors_B_list = []
+        xs = abscissa_N1.squeeze().cpu()
+        if dd is None:
+            sde_steps = dim + 1
+            pdf = get_2d_pdf(sde_steps=sde_steps, abscissa=xs, alpha=alpha)
+        else:
+            pdf = dd.pdf(xs)/(1-dd.cdf(alpha))
         for b in range(transformed_ode_lk_NB.shape[1]):
             error_N = scipy.integrate.simpson(
-                np.abs(transformed_ode_lk_NB[:, b].cpu().numpy() - dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha))),
-                x=abscissa_N1.squeeze().cpu()
+                np.abs(transformed_ode_lk_NB[:, b].cpu().numpy() - pdf),
+                x=xs,
             )
             errors_B_list.append(torch.tensor(error_N))
         plt.plot(abscissa_N1.squeeze().cpu(), dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha)))
@@ -308,8 +317,14 @@ def compute_icov_error_vs_bins(
         # plt.clf()
     quantiles = torch.stack(quantiles_list)
 
+    all_bins_flattened = torch.tensor([bins for all_bins_lst in all_bins for bins in all_bins_lst])
+    bins_quantiles = torch.quantile(all_bins_flattened,
+                                    torch.tensor([0.0, 0.5, 1.0],
+                                                 device=errors_B.device,
+                                                 dtype=errors_B.dtype))
+
     error_data = ErrorData(
-        training_samples,
+        bins_quantiles,
         training_samples,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
@@ -329,11 +344,11 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(error_data: ErrorData, title: str):
+def plot_errors(error_data: ErrorData, title: str, label: str):
     plt.scatter(
         error_data.samples,
         error_data.median,
-        label=error_data.label,
+        label=error_data.label + f'({label})',
         color=error_data.color
     )
     plt.fill_between(
@@ -351,9 +366,10 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Absolute Error of Tail Integral vs. Training Samples\n(alpha={alpha}, eta={cfg.eta}, N={cfg.num_samples})'
-    plot_errors(sample_error_data, title)
-    plot_errors(icov_error_data, title)
+    title = f'Absolute Error of Tail Integral vs. Training Samples\n(alpha={alpha})'
+    plot_errors(sample_error_data, title, f"N={cfg.num_samples}")
+    max_bin_diff = max(icov_error_data.bins.diff())
+    plot_errors(icov_error_data, title, f"bins={icov_error_data.bins[1]} +/- {max_bin_diff}")
     plt.xlabel('Training Samples')
     plt.ylabel('Absolute Error')
     plt.legend()
@@ -406,11 +422,12 @@ def make_error_vs_samples_plot(
     )
     dim = rearranged_trajs_list[0].shape[2]
     icov_error_vs_samples = compute_icov_error_vs_bins(
-        rearranged_trajs_list[0],
+        rearranged_trajs_list[-1],
         alpha,
         stds,
         cfg,
-        training_samples
+        training_samples,
+        all_bins
     )
     make_error_vs_samples(
         hist_error_vs_samples,
@@ -448,12 +465,6 @@ def sample(cfg):
         raise NotImplementedError
 
     cfg_obj = OmegaConf.to_object(cfg)
-    if type(std.example) == MultivariateGaussianExampleConfig:
-        dim = cfg.example.d
-    elif type(std.example) == BrownianMotionDiffExampleConfig:
-        dim = cfg.example.sde_steps
-    else:
-        raise NotImplementedError
     with torch.no_grad():
         rearranged_trajs_list = []
         for std in stds:

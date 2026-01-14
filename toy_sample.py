@@ -703,7 +703,7 @@ class ContinuousEvaluator(ToyEvaluator):
         x0 = x[0] + dx_dt0 * dt
         x1 = x[1] + dx_dt1 * dt
         x = (x0, x1)
-        dx_dt (dx_dt0, dx_dt1)
+        dx_dt = (dx_dt0, dx_dt1)
         return x, dx_dt
 
     @torch.no_grad()
@@ -869,6 +869,12 @@ class ContinuousEvaluator(ToyEvaluator):
             device=x.device,
         )
         # times = torch.linspace(
+        #     start_time,
+        #     1.,
+        #     int((1-start_time) / 1e-6),
+        #     device=x.device,
+        # )
+        # times = torch.linspace(
         #     self.sampler.t_eps,
         #     1.-self.sampler.t_eps,
         #     self.sampler.diffusion_timesteps,
@@ -889,7 +895,7 @@ class ContinuousEvaluator(ToyEvaluator):
             else:
                 print('integrating dopri5')
                 sol = odeint(ode_fn, x_min, times, atol=self.cfg.atol, rtol=self.cfg.rtol, method='dopri5')
-                derivatives = None
+                derivatives = ode_fn.calls
         # if self.cfg.test == TestType.Test:
         #     y = sol[0][-1]
         #     dx_dt = lambda y: self.get_dx_dt(torch.tensor([start_time], device=device), y, evaluate_likelihood=True, **kwargs)
@@ -932,7 +938,7 @@ class ContinuousEvaluator(ToyEvaluator):
         # else:
         #     ll_output = ll_prior + delta_ll
         ll_output = ll_prior + delta_ll# + residual1
-        return ll_output, {'fevals': fevals}, sol, latent, delta_ll, ode_fn.calls, derivatives
+        return ll_output, {'fevals': fevals}, sol, latent, delta_ll, ode_fn.calls, derivatives, start_time
 
 
 def plt_llk(traj, lik, figs_dir, plot_type='scatter', ax=None):
@@ -1415,7 +1421,7 @@ def plot_hist_w_analytical(
         x = np.array(list(pdf_map.keys()))
         pdf = np.array(list(pdf_map.values()))
     elif isinstance(pdf_map, Callable):
-        x = np.linspace(alpha.item(), sample_max)
+        x = np.linspace(alpha.item(), sample_max, 400)
         pdf = np.zeros_like(x)
         for i, p in enumerate(x):
             pdf[i] = pdf_map(p, alpha.item())
@@ -1972,46 +1978,6 @@ def plot_bm_pdf_histogram_estimate(
 
     return sample_levels, x, pdf
 
-def line_circle_intersection(r, alpha, dt):
-    """
-    Computes the intersection points of the line y = alpha/dt - x
-    with the circle x^2 + y^2 = r^2
-
-    Inputs:
-        r     : scalar or tensor, radius of circle
-        alpha : scalar or tensor
-        dt    : scalar or tensor
-
-    Returns:
-        A tensor of shape (N, 2) where N is the number of real intersection points (0, 1, or 2).
-    """
-    C = alpha / dt  # constant term in y = C - x
-
-    # Substitute y = C - x into x^2 + y^2 = r^2
-    # Gives: x^2 + (C - x)^2 = r^2
-    # => x^2 + C^2 - 2Cx + x^2 = r^2
-    # => 2x^2 - 2C x + C^2 - r^2 = 0
-
-    a = 2.0
-    b = -2.0 * C
-    c = C**2 - r**2
-
-    discriminant = b**2 - 4 * a * c
-
-    if discriminant < 0:
-        return torch.empty(0, 2)  # No real intersection
-    elif discriminant == 0:
-        x = -b / (2 * a)
-        y = C - x
-        return torch.stack([x, y], dim=-1).unsqueeze(0)  # One intersection
-    else:
-        sqrt_disc = torch.sqrt(discriminant)
-        x1 = (-b + sqrt_disc) / (2 * a)
-        x2 = (-b - sqrt_disc) / (2 * a)
-        y1 = C - x1
-        y2 = C - x2
-        return torch.stack([[x1, y1], [x2, y2]])
-
 def shortest_arc_length(p1: torch.Tensor, p2: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
     """
     Computes the shortest arc length between two points on a circle.
@@ -2160,7 +2126,15 @@ def compute_perimeter(
     if r <= alpha:
         output = torch.tensor([0.])
     elif r >= torch.tensor(5.).sqrt()*alpha/dt_sqrt:
-        output = torch.tensor([2 * torch.pi * r])
+        top_points_left = vertical_line_circle_intersection(r, -alpha, dt_sqrt)[0]
+        top_points_right = line_circle_intersection(r, alpha, dt_sqrt)[0]
+        top_points = torch.stack([top_points_left, top_points_right])
+        bottom_points_right = vertical_line_circle_intersection(r, alpha, dt_sqrt)[1]
+        bottom_points_left = line_circle_intersection(r, -alpha, dt_sqrt)[1]
+        bottom_points = torch.stack([bottom_points_left, bottom_points_right])
+        right_points = vertical_line_circle_intersection(r, alpha, dt_sqrt)
+        left_points = vertical_line_circle_intersection(r, -alpha, dt_sqrt)
+        output, angles, angle_points = compute_lengths(r, top_points, bottom_points, right_points, left_points)
     else:
         top_points = line_circle_intersection(r, alpha, dt_sqrt)
         bottom_points = line_circle_intersection(r, -alpha, dt_sqrt)
@@ -2190,14 +2164,23 @@ def plot_bm_pdf_pfode_estimate(sample_trajs, ode_llk, cfg, tail, alpha, dt, x, p
     transformed_ode = compute_transformed_ode(sample_levels, ode_llk, alpha, dt)
 
     plt.scatter(sample_levels, transformed_ode, label='Density Estimates')
-    plt.scatter(x, pdf, color='r', label='Analytical PDF')
-    plt.plot(x, pdf, color='r', linestyle='-')
+    # plt.scatter(x, pdf, color='r', label='Quadrature-Based PDF')
+    plt.plot(x, pdf, color='r', linestyle='-', label='Quadrature-Based PDF')
     plt.legend()
     plt.xlabel('Radius')
     plt.ylabel('Probability Density')
     plt.title(f'Density Estimate with Analytical {cfg.example.sde_steps} Step BM Tail Density')
     num_hutchinson_samples = -1 if cfg.compute_exact_trace else cfg.num_hutchinson_samples
     plt.ylim((0., pdf.max()*1.2))
+
+    ax = plt.gca()
+    min_radius = alpha
+    mid_radius = alpha / dt.sqrt()
+    max_radius = np.sqrt(10) * alpha
+    ax.axvline(x=min_radius, linestyle='--', color='red')
+    ax.axvline(x=mid_radius, linestyle='--', color='darkgreen')
+    ax.axvline(x=max_radius, linestyle='--', color='lightgreen')
+
     plt.savefig('{}/bm_pfode_estimate_{}.pdf'.format(
         HydraConfig.get().run.dir,
         num_hutchinson_samples
@@ -3090,10 +3073,11 @@ def plot_circles(std, cfg_obj):
     )
     samples = sample_output.samples.squeeze().cpu()
 
-    bad_samples_idx = torch.logical_and(
-        samples[-1][:, 0] < -2.5,
-        x_min.norm(dim=[1, 2]).cpu() <=1
-    )
+    # bad_samples_idx = torch.logical_and(
+    #     samples[-1][:, 0] < -2.5,
+    #     x_min.norm(dim=[1, 2]).cpu() <=1
+    # )
+    bad_samples_idx = torch.topk(torch.stack(sample_output.derivatives).cpu()[-1].norm(dim=[-2,-1]), k=7, largest=False).indices
     bad_trajs = samples[:, bad_samples_idx]
     plot_bad = True
     if plot_bad and bad_samples_idx.any():
@@ -3145,11 +3129,11 @@ def plot_circles(std, cfg_obj):
     ))
     plt.close()
 
-    bad_derivatives = torch.stack(sample_output.derivatives)[:, bad_samples_idx].squeeze()
+    bad_derivatives = torch.stack(sample_output.derivatives)[:, bad_samples_idx].squeeze().cpu()
     end_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
-    times = -torch.linspace(1., end_time, std.sampler.diffusion_timesteps, device=device)
+    times = -torch.linspace(1., end_time, std.sampler.diffusion_timesteps)
     # bad_derivatives, times = compute_derivatives(std, bad_trajs)
-    plot_pfode(bad_trajs, bad_derivatives, times, title='bad_trajectories')
+    plot_pfode(bad_trajs[:-1], bad_derivatives, times[:-1], 'bad_trajectories')
 
 def compute_derivatives(std, trajs):
     end_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
@@ -3175,7 +3159,7 @@ def compute_derivatives(std, trajs):
     derivatives = torch.stack(dx_dts)
     return derivatives.squeeze().to(trajs.device), -times.to(trajs.device)
 
-def plot_pfode(bad_trajs, bad_derivatives, times, title):
+def plot_pfode(bad_trajs, bad_derivatives, times, title, plot_title=""):
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1)
     for i in range(bad_trajs.shape[1]):
         ax1.scatter(times, bad_trajs[:, i, 0], s=1.5)
@@ -3191,6 +3175,7 @@ def plot_pfode(bad_trajs, bad_derivatives, times, title):
     ax3.set_ylabel(f"x'-value")
     ax4.set_ylabel(f"y'-value")
     ax4.set_xlabel(f'Times')
+    ax1.set_title(plot_title)
     plt.savefig(f'{HydraConfig.get().run.dir}/{title}_pfode.pdf')
     plt.close()
 
@@ -3227,6 +3212,12 @@ def compute_fake_gaussian_trajs_2D(
     flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
     return flattened_fake_trajs_NbD1, [angles] * len(abscissa)
 
+def random_dangle_fn(angle, num_trajs):
+    return torch.distributions.Uniform(0, angle).sample([num_trajs])
+
+def deterministic_dangle_fn(angle, num_trajs):
+    return torch.linspace(0, angle, num_trajs)
+
 def get_points_along_angle(
     angles: torch.Tensor,
     angle_points: torch.Tensor,
@@ -3235,11 +3226,12 @@ def get_points_along_angle(
     num_trajs: int,
     dim: int,
     alpha: float,
+    dangle_fn: Callable,
 ):
     angle = angles[idx]
     if angle > 0:
         angle_points = angle_points[idx]
-        dangles = torch.linspace(0, angle, num_trajs)
+        dangles = dangle_fn(angle, num_trajs)
         x,y = angle_points[:, 0], angle_points[:, 1]
         theta = torch.atan2(y, x)
         complex_points = r * torch.exp(torch.complex(
@@ -3247,9 +3239,29 @@ def get_points_along_angle(
             theta[~idx] + dangles
             ))
         points = torch.stack([torch.tensor([point.real, point.imag]) for point in complex_points])
-        dt = torch.tensor(1 / 2).sqrt()
         return points
-    return (torch.ones(num_trajs, 2) * r**2 / (dim-1)).sqrt()
+    return (torch.ones(num_trajs, 2) * r**2 / dim).sqrt()
+
+def compute_fake_bm_trajs_points(
+    abscissa_tensor: torch.Tensor,
+    dim: int,
+    alpha: float,
+    dt: torch.Tensor,
+    num_trajs: int,
+    dangle_fn: Callable,
+):
+    points = []
+    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
+    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
+        top_points = get_points_along_angle(
+            angles, angle_points, 0, r, num_trajs, dim, alpha, dangle_fn
+        )
+        bottom_points = get_points_along_angle(
+            angles, angle_points, 1, r, num_trajs, dim, alpha, dangle_fn
+        )
+        points.append(torch.cat([top_points, bottom_points]))
+    all_points = torch.cat(points).unsqueeze(-1)
+    return all_points, angle_points_list
 
 def compute_fake_bm_trajs(
     abscissa_tensor: torch.Tensor,
@@ -3258,26 +3270,31 @@ def compute_fake_bm_trajs(
     dt: torch.Tensor,
     num_trajs: int
 ):
-    points = []
-    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
-    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
-        top_points = get_points_along_angle(
-            angles, angle_points, 0, r, num_trajs, dim, alpha
-        )
-        bottom_points = get_points_along_angle(
-            angles, angle_points, 1, r, num_trajs, dim, alpha
-        )
-        points.append(torch.cat([top_points, bottom_points]))
-    all_points = torch.cat(points).unsqueeze(-1)
+    all_points, angle_points_list = compute_fake_bm_trajs_points(
+        abscissa_tensor,
+        dim,
+        alpha,
+        dt,
+        num_trajs,
+        deterministic_dangle_fn,
+    )
     angle_list = []
     for angle_points_radius in angle_points_list:
         angle_points_element = angle_points_radius[1]
-        top = torch.atan2(angle_points_element[0][:, 1], angle_points_element[0][:, 0])
+        if (angle_points_element == 0).all():
+            continue
+        top = torch.atan2(angle_points_element[0][:, 1], angle_points_element[0][:, 0]).sort().values
         right = torch.atan2(angle_points_element[2][:, 1], angle_points_element[2][:, 0])
-        bottom = torch.atan2(angle_points_element[1][:, 1], angle_points_element[1][:, 0])
+        if right.min() < top.min() < 0.:
+            top = torch.tensor([right.min(), top.max()])
+        bottom = torch.atan2(angle_points_element[1][:, 1], angle_points_element[1][:, 0]).sort().values
         bottom += 2*torch.pi * (bottom < 0)
         left = torch.atan2(angle_points_element[3][:, 1], angle_points_element[3][:, 0])
         left += 2*torch.pi * (left < 0)
+        if bottom.min() > left.min() > 0.:
+            # one entry of bottom is positive, i.e. the y component is positive
+            # and one entry is negative, i.e. its y component is negative
+            bottom = torch.tensor([left.min(), bottom.max()])
         all_angles = []
         divisor = num_trajs if right.sum() == 0 else num_trajs // 2
         for angle in [top, right, bottom, left]:
@@ -3286,6 +3303,56 @@ def compute_fake_bm_trajs(
             sorted_angle = angle.sort().values
             angles = torch.linspace(sorted_angle[0], sorted_angle[1], divisor)
             all_angles.append(angles)
+        angle_set = torch.cat(all_angles).sort().values
+        angle_list.append(angle_set)
+    return all_points, angle_list
+
+def compute_fake_bm_trajs_random(
+    abscissa_tensor: torch.Tensor,
+    dim: int,
+    alpha: float,
+    dt: torch.Tensor,
+    num_trajs: int,
+    num_samples: int,
+):
+    all_points, angle_points_list = compute_fake_bm_trajs_points(
+        abscissa_tensor,
+        dim,
+        alpha,
+        dt,
+        num_samples * num_trajs,
+        random_dangle_fn
+    )
+    angle_list = []
+    for angle_points_radius in angle_points_list:
+        angle_points_element = angle_points_radius[1]
+        if (angle_points_element == 0).all():
+            continue
+        top = torch.atan2(angle_points_element[0][:, 1], angle_points_element[0][:, 0]).sort().values
+        right = torch.atan2(angle_points_element[2][:, 1], angle_points_element[2][:, 0]).sort().values
+        if right.min() < top.min() < 0.:
+            top = torch.tensor([right.min(), top.max()])
+        bottom = torch.atan2(angle_points_element[1][:, 1], angle_points_element[1][:, 0]).sort().values
+        bottom += 2*torch.pi * (bottom < 0)
+        left = torch.atan2(angle_points_element[3][:, 1], angle_points_element[3][:, 0]).sort().values
+        left += 2*torch.pi * (left < 0)
+        if bottom.min() > left.min() > 0.:
+            # one entry of bottom is positive, i.e. the y component is positive
+            # and one entry is negative, i.e. its y component is negative
+            bottom = torch.tensor([left.min(), bottom.max()])
+        all_angles = []
+        if right[0] == right[1] == 0.:
+            divisor = 2
+        else:
+            divisor = 4
+            right_saps = torch.distributions.Uniform(*right).sample([num_samples * num_trajs // divisor])
+            left_saps = torch.distributions.Uniform(*left).sample([num_samples * num_trajs // divisor])
+            all_angles.append(right_saps)
+            all_angles.append(left_saps)
+        top_saps = torch.distributions.Uniform(*top).sample([num_samples * num_trajs // divisor])
+        bottom_saps = torch.distributions.Uniform(*bottom).sample([num_samples * num_trajs // divisor])
+        all_angles.append(top_saps)
+        all_angles.append(bottom_saps)
         angle_set = torch.cat(all_angles).sort().values
         angle_list.append(angle_set)
     return all_points, angle_list
@@ -3299,7 +3366,7 @@ def diffuse_fake_trajs(std, cfg_obj, abscissa_tensor_N1, num_trajs):
         return compute_fake_gaussian_trajs(abscissa_tensor_N1, num_trajs, dim)
     else:
         alpha = std.likelihood.alpha
-        dt = torch.tensor(1. / (std.cfg.example.sde_steps-1))
+        dt = torch.tensor(1. / dim)
         return compute_fake_bm_trajs(abscissa_tensor_N1, dim, alpha, dt, num_trajs)
 
 def get_analytical(cfg_obj, std, radius, thetas):
@@ -3359,11 +3426,15 @@ def plot_density_vs_theta(std, cfg_obj):
     for sample_batch_idx, sample_batch in enumerate(rearranged_density):
         radius = radii[sample_batch_idx].item()
         thetas = angles[sample_batch_idx]
-        plt.scatter(
-            thetas,
-            sample_batch,
-            label='r={:.1f}'.format(radius)
-        )
+        try:
+            plt.scatter(
+                thetas,
+                sample_batch,
+                label='r={:.1f}'.format(radius)
+            )
+        except:
+            print('ERROR plotting density_s_theta: is angles empty? ', angles)
+            return
         analytical_density = get_analytical(cfg_obj, std, radius, all_thetas)
         plt.plot(
             all_thetas,
@@ -3424,7 +3495,7 @@ def sample(cfg):
         dim = get_dim(std)
         if dim == 2:
             plot_circles(std, cfg_obj)
-            # plot_density_vs_theta(std, cfg_obj)
+            plot_density_vs_theta(std, cfg_obj)
 
         # diffuse_fake_trajs
         # diffuse_fake_trajs(std, cfg_obj)

@@ -93,7 +93,7 @@ def old_pdf_2d_quadrature_bm(p: np.ndarray, alpha: np.ndarray):
     result, _ = integrate.quad(integrand_dx1, 0., boundary)
     return result
 
-def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000):
+def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000) -> np.ndarray:
     dt = 1/3
     thetas = np.linspace(0, np.pi, num_pts).reshape(-1, 1)
     phis = np.linspace(0, 2 * np.pi, num_pts).reshape(1, -1)
@@ -131,7 +131,7 @@ def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000):
         result = exit_weight / total_weight
     return result
 
-def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
+def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000) -> np.ndarray:
     dt = 0.5
     thetas = np.linspace(0, 2 * np.pi, num_pts)
     dx1 = p * np.cos(thetas)
@@ -165,12 +165,12 @@ def get_quadrature_filename(sde_steps: int, num_abscissa: int, alpha: float) -> 
 def cached(sde_steps: int, num_abscissa: int, alpha: float) -> Optional[torch.Tensor]:
     filename = get_quadrature_filename(sde_steps, num_abscissa, alpha)
     if os.path.isfile(filename):
-        print('loading pdf from cache')
-        return torch.load(filename)
-    print('computing pdf using quadrature')
+        # print('loading pdf from cache')
+        return torch.load(filename, weights_only=False)
+    # print('computing pdf using quadrature')
     return None
 
-def get_2d_pdf(sde_steps: int, abscissa: torch.Tensor, alpha: float):
+def get_2d_pdf(sde_steps: int, abscissa: torch.Tensor, alpha: float) -> np.ndarray:
     cache = cached(sde_steps, abscissa.shape[0], alpha)
     # if cache:
     #     print('WARNING: Pulling PDF from cache')
@@ -184,7 +184,7 @@ def get_2d_pdf(sde_steps: int, abscissa: torch.Tensor, alpha: float):
         torch.save(pdf, filename)
     else:
         raise NotImplementedError
-    return pdf
+    return np.array(pdf)
 
 def estimate_integral(
     max_sample: np.ndarray,

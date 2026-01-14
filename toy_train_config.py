@@ -198,6 +198,21 @@ class Integrator(Enum):
     PYTORCH = 'pytorch'
 
 
+def median(x, dims):
+    # dims can be a tuple, but torch.median only accepts one at a time
+    # so we iteratively reduce over all requested dims
+    for d in sorted(dims, reverse=True):
+        x = x.quantile(dim=d, q=0.5, keepdim=False)
+    return x
+
+def get_reduction_op(cfg):
+    if cfg.reduction_op == 'mean':
+        return torch.mean
+    elif cfg.reduction_op == 'median':
+        return median
+    else:
+        raise NotImplementedError
+
 @dataclass
 class SampleConfig(BaseConfig):
     debug: bool = False
@@ -215,11 +230,14 @@ class SampleConfig(BaseConfig):
     run_histogram_convergence: bool = True
     error_metric: ErrorMetricType = ErrorMetricType.RelativeError
     sample_integrator: Integrator = Integrator.RK4
-    density_integrator: Integrator = Integrator.RK4
+    density_integrator: Integrator = Integrator.PYTORCH
     random_seed: int = 100
     atol: float = 1e-5
     rtol: float = 1e-5
     eta: float = 0.
+    num_icov_samples: int = 1
+    reduction_op: str = 'median'
+    histogram_bin_factor: float = -1/3
 
     def get_config_file(self, save_dir, alpha, start_round):
         return f'{save_dir}/alpha={alpha}_round_{start_round}_config.txt'
@@ -248,6 +266,11 @@ class BinComparisonConfig(SampleConfig):
 @dataclass
 class EpsilonComparisonConfig(SampleConfig):
     t_epses: List[float] = field(default_factory=list)
+
+
+@dataclass
+class IntegratorComparisonConfig(SampleConfig):
+    timesteps: List[int] = field(default_factory=list)
 
 
 @dataclass

@@ -23,10 +23,11 @@ from scipy.interpolate import griddata
 
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
-    compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary
+    compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary, \
+    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random, \
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
-    TestType, Integrator
+    TestType, Integrator, get_reduction_op
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import get_2d_pdf, pdf_2d_quadrature_bm
 
@@ -74,7 +75,7 @@ def plot_ode_error(ode_lk_subsample, abscissa, abscissa_interp, alpha, num_bins)
     ))
     plt.clf()
 
-def compute_tail_estimate(
+def compute_tail_error(
         std: ContinuousEvaluator,
         subsap: torch.Tensor,
         alpha: float,
@@ -86,7 +87,7 @@ def compute_tail_estimate(
     # and compute an estimate of the tail integral
     # of being greater than alpha from the histogram
     # Freedman-Diaconis
-    bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** (-1/3)
+    bin_width = 2. * scipy.stats.iqr(subsap) * subsap.shape[0] ** std.cfg.histogram_bin_factor
     num_bins = int((subsap.max()) / bin_width)
 
     # Create the histogram
@@ -105,16 +106,27 @@ def compute_tail_estimate(
     med_bins = torch.tensor((lwr_bins + upr_bins) / 2)
     if dd is None:
         # Brownian motion case
-        pdf = get_2d_pdf(std.example.sde_steps, med_bins[smallest_idx:], alpha)
+        # pdf = get_2d_pdf(std.example.sde_steps, med_bins[smallest_idx:], alpha)
+        # tail_error = scipy.integrate.simpson(
+        #     np.abs(hist[smallest_idx:] - pdf),
+        #     x=med_bins[smallest_idx:]
+        # )
+        pdf = get_2d_pdf(sde_steps, med_bins[smallest_idx:], alpha.item())
+        pdf = np.concat([np.zeros(smallest_idx), pdf])
         tail_error = scipy.integrate.simpson(
-            np.abs(hist[smallest_idx:] - pdf),
-            x=med_bins[smallest_idx:]
+            np.abs(hist.numpy() - pdf),
+            x=med_bins,
         )
     else:
         # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+        # tail_error = scipy.integrate.simpson(
+        #     np.abs(hist[smallest_idx:] - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
+        #     x=med_bins[smallest_idx:]
+        # )
+        pdf = dd.pdf(med_bins)/(1-dd.cdf(alpha)) * (med_bins > alpha).numpy()
         tail_error = scipy.integrate.simpson(
-            np.abs(hist[smallest_idx:] - dd.pdf(med_bins[smallest_idx:])/(1-dd.cdf(alpha))),
-            x=med_bins[smallest_idx:]
+            np.abs(hist.numpy() - pdf),
+            x=med_bins
         )
     plt.scatter(med_bins[smallest_idx:], hist[smallest_idx:], color='red', label='approximation')
     plt.savefig('{}/histogram_plot_{}'.format(
@@ -163,7 +175,7 @@ def compute_sample_error_vs_samples(
         subsample_bins = []
         errors = []
         for subsap_idx, subsap in enumerate(all_subsaps):
-            hist, bins, tail_error = compute_tail_estimate(
+            hist, bins, tail_error = compute_tail_error(
                 std,
                 subsap.cpu(),
                 alpha,
@@ -190,26 +202,6 @@ def compute_sample_error_vs_samples(
         'blue'
     )
     return error_data, all_bins
-
-def compute_fake_bm_trajs(
-    abscissa_tensor: torch.Tensor, 
-    dim: int, 
-    alpha: float,
-    dt: torch.Tensor,
-    num_trajs: int
-):
-    points = []
-    angle_points_list = [compute_perimeter(r, alpha, dt.sqrt())[1:] for r in abscissa_tensor]
-    for (angles, angle_points), r in zip(angle_points_list, abscissa_tensor.cpu()):
-        top_points = get_points_along_angle(
-            angles, angle_points, 0, r, num_trajs, dim, alpha
-        )
-        bottom_points = get_points_along_angle(
-            angles, angle_points, 1, r, num_trajs, dim, alpha
-        )
-        points.append(torch.cat([top_points, bottom_points]))
-    all_points = torch.cat(points).unsqueeze(-1)
-    return all_points
 
 def plot_bin_comparison_estimates(
     x: torch.Tensor,
@@ -306,7 +298,11 @@ def plot_fake_trajs(fake_trajs, num_trajs, alpha, prob, subtitle, normalizing_fa
     bins_repeat = einops.repeat(bins, 'd -> n d', n=normalized_prob.shape[0])
     bin_idx = (normalized_prob_repeat >= bins_repeat).sum(dim=1) - 1
     print('scattering')
-    plt.scatter(fake_trajs[:, 0], fake_trajs[:, 1], c=torch.tensor(colors)[bin_idx])
+    try:
+        plt.scatter(fake_trajs[:, 0], fake_trajs[:, 1], c=torch.tensor(colors)[bin_idx])
+    except:
+        import pdb; pdb.set_trace()
+        plt.scatter(fake_trajs[:, 0], fake_trajs[:, 1], c=torch.tensor(colors)[bin_idx])
     print('plotting circles')
     r = alpha
     plot_circle_from_prob(r, prob.min(), prob_denom, bins, colors, normalizing_factor)
@@ -439,23 +435,6 @@ def plot_pfode_pdf_approximation(
     ))
     plt.clf()
 
-def compute_fake_gaussian_trajs(
-    abscissa: torch.Tensor,
-    num_sample_batches: int,
-    dim: int
-):
-    vecs = torch.randn(1, num_sample_batches, dim, 1)
-    normed_vecs = vecs / vecs.norm(dim=2, keepdim=True)
-    abscissa_repeat = einops.repeat(
-        abscissa, 
-        'n 1 -> n b d 1',
-        b=num_sample_batches,
-        d=dim
-    )
-    fake_trajs = abscissa_repeat.cpu() * normed_vecs
-    flattened_fake_trajs = einops.rearrange(fake_trajs, 'a n d 1 -> (a n) d 1')
-    return flattened_fake_trajs
-    
 def compute_pfode_error_vs_bins(
         trajs: torch.Tensor,
         all_bins: List,
@@ -476,10 +455,10 @@ def compute_pfode_error_vs_bins(
         leftover = (1-dd.cdf(max_sample)) / normalizing_factor
         analytical_tail = float((1-dd.cdf(alpha+cfg.eta)) / normalizing_factor - leftover)
     elif type(std.example) == BrownianMotionDiffExampleConfig:
-        dim = cfg.example.sde_steps
-        dt = torch.tensor(1/(dim-1))
+        dim = cfg.example.sde_steps-1
+        dt = torch.tensor(1 / dim)
         target = get_target(cfg)
-        bm_cdf = target.bm_cdf(dim)
+        bm_cdf = target.bm_cdf(dim+1)
         bm_cdf_keys = list(bm_cdf.keys())
         idx = int((torch.tensor(bm_cdf_keys) < max_sample).sum() - 1)
         alpha_key = bm_cdf_keys[idx]
@@ -503,19 +482,29 @@ def compute_pfode_error_vs_bins(
     abscissa_tensor = torch.cat(abscissas).reshape(-1, 1).to(device)
     abscissa_repeat = einops.repeat(abscissa_tensor, 'd 1 -> d n', n=cfg.num_sample_batches)
     if type(std.example) == MultivariateGaussianExampleConfig:
-        fake_trajs = compute_fake_gaussian_trajs(
+        fake_trajs, _ = compute_fake_gaussian_trajs(
             abscissa_tensor,
             cfg.num_sample_batches,
             dim
         )
     elif type(std.example) == BrownianMotionDiffExampleConfig:
-        fake_trajs = compute_fake_bm_trajs(
-            abscissa_tensor, 
-            dim,
-            alpha,
-            dt,
-            num_trajs=cfg.num_sample_batches//2
-        )
+        if cfg.num_icov_samples == 1:
+            fake_trajs, _ = compute_fake_bm_trajs(
+                abscissa_tensor,
+                dim,
+                alpha,
+                dt,
+                num_trajs=cfg.num_sample_batches//2,
+            )
+        else:
+            fake_trajs, _ = compute_fake_bm_trajs_random(
+                abscissa_tensor,
+                dim,
+                alpha,
+                dt,
+                num_trajs=cfg.num_sample_batches//2,
+                num_samples=cfg.num_icov_samples,
+            )
     else:
         raise NotImplementedError
     flattened_trajs = fake_trajs.squeeze()
@@ -533,7 +522,7 @@ def compute_pfode_error_vs_bins(
         pdf = get_2d_pdf(cfg.example.sde_steps, x, alpha)
     else:
         raise NotImplementedError
-    bin_width = 2. * IQR * norm_trajs.shape[1] ** (-1/3)  # Freedman-Diaconis
+    bin_width = 2. * IQR * norm_trajs.shape[1] ** std.cfg.histogram_bin_factor  # Freedman-Diaconis
     num_bins = int((norm_trajs.max() - alpha) / bin_width)
     print('plotting histogram pdf')
     ylim = (0, max(pdf)+0.1)
@@ -544,20 +533,25 @@ def compute_pfode_error_vs_bins(
     #     abscissa,
     #     pdf,
     # )
-    ode_llk = std.ode_log_likelihood(
+    old_ode_llk = std.ode_log_likelihood(
         fake_trajs.to(device),
         cond=torch.tensor([1.]),
         alpha=torch.tensor([alpha]),
         exact=cfg.compute_exact_trace,
     )
+    # new_llk = einops.reduce(old_ode_llk[0], 'c (b n) -> c b', torch.logsumexp, n=cfg.num_icov_samples)
+    # new_llk -= torch.log(torch.tensor(cfg.num_icov_samples))
+    reduction_op = get_reduction_op(cfg)
+    new_llk = einops.reduce(old_ode_llk[0], 'c (b n) -> c b', reduction_op, n=cfg.num_icov_samples)
+    ode_llk = (new_llk, *old_ode_llk[1:])
     torch.save(ode_llk[0][-1].cpu(), f'{HydraConfig.get().run.dir}/ode_llk.pt')
-    plot_fake_trajs_with_pfode(
-        flattened_trajs,
-        cfg.num_sample_batches,
-        alpha,
-        ode_llk[0][-1].exp(),
-        normalizing_factor
-    )
+    # plot_fake_trajs_with_pfode(
+    #     flattened_trajs,
+    #     cfg.num_sample_batches,
+    #     alpha,
+    #     ode_llk[0][-1].exp(),
+    #     normalizing_factor
+    # )
 
     if cfg.density_integrator == Integrator.EULER:
         small_idx = torch.topk(fake_trajs.norm(dim=-2).squeeze(), k=7, largest=False).indices
@@ -597,7 +591,7 @@ def compute_pfode_error_vs_bins(
             dt=dt
         ).cpu()
         if cfg.test == TestType.BrownianMotionDiff:
-            bm_cdf = target.bm_cdf(dim)
+            bm_cdf = target.bm_cdf(dim+1)
             cdf = bm_cdf[alpha]
             normalizing_constant = torch.tensor(
                 1-cdf,
