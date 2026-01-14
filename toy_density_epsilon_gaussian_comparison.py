@@ -73,15 +73,16 @@ def compute_fake_bm_arcs(
     angle_min, angle_max = angle_bounds[0], angle_bounds[-1]
     angles = torch.linspace(angle_min, angle_max, num_angles)
     values = r * (angles * 1j).exp()
-    return torch.stack([values.real, values.imag]).T.unsqueeze(-1)
+    return torch.stack([values.real, values.imag]).movedim(0, -1).unsqueeze(-1)
 
 def compute_fake_gaussian_arcs(
         r,
         num_angles,
 ):
     angles = torch.linspace(0, 2*torch.pi, num_angles)
-    values = r * (angles * 1j).exp()
-    return torch.stack([values.real, values.imag]).T.unsqueeze(-1)
+    values = r.reshape(-1, 1) * (angles.reshape(1, -1) * 1j).exp()
+    values = einops.rearrange(values, 'r t -> (r t)')
+    return torch.stack([values.real, values.imag]).movedim(0, -1).unsqueeze(-1)
 
 def compute_icov_error_vs_bins(
         stds: List[ContinuousEvaluator],
@@ -130,6 +131,7 @@ def compute_icov_error_vs_bins(
             rs,
             num_angles=cfg.num_icov_samples,
         )
+    pdf_tensor = einops.repeat(torch.tensor(pdf), 'r -> (r t)', t=cfg.num_icov_samples)
     smallest_t_eps = 1.
     for std in stds:
         if std.sampler.t_eps < smallest_t_eps:
@@ -165,18 +167,28 @@ def compute_icov_error_vs_bins(
         if first_transformed_ode_lk_N is None:
             first_transformed_ode_lk_N = transformed_ode_lk_N
         ode_lks.append(transformed_ode_lk_N)
-        error_N = (transformed_ode_lk_N - torch.tensor(pdf)) / torch.tensor(pdf)
+        error_N = (transformed_ode_lk_N - pdf_tensor) / pdf_tensor
         errors.append(error_N)
         epsilon_abscissas.append(1 - integrator_dt * (ode_llk[0].shape[0] - curr_num_to_subtract))
         curr_num_to_subtract *= 10
 
-    colors = ['red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet', 'black']
-    for point, clr in zip(fake_traj_ND1, colors):
+    colors1='red'
+    colors2='orange'
+    colors3='yellow'
+    colors4='green'
+    colors5='blue'
+    colors6='indigo'
+    colors7='violet'
+    colors8='black'
+    color_list = [colors1, colors2, colors3, colors4, colors5, colors6, colors7, colors8]
+    for i, point in enumerate(fake_traj_ND1):
+        idx = i // cfg.num_icov_samples
+        clr = color_list[idx]
         plt.scatter(point[0], point[1], color=clr)
     if isinstance(stds[0].example, BrownianMotionDiffExampleConfig):
         lim = torch.sqrt(torch.tensor(5.)) * alpha / dt.sqrt()
     else:
-        lim = alpha * 2
+        lim = rs.max() + 0.1
     plt.ylim((-lim, lim))
     plt.xlim((-lim, lim))
     plt.gca().set_aspect('equal')
@@ -189,56 +201,43 @@ def compute_icov_error_vs_bins(
         plt.ylabel(r'$X_2$')
     plt.savefig(f'{HydraConfig.get().run.dir}/angles.pdf')
 
-    plt.clf()
-    plt.axhline(y=pdf, color='r', linestyle='-', label='True PDF')
-    plt.ylim((0., pdf+0.05))
-    for lk, line in zip(first_transformed_ode_lk_N, fake_traj_ND1):
-        angle = torch.atan2(line[1], line[0]).item()
-        plt.axhline(y=lk, label='{:.2f}'.format(angle))
-    plt.xlabel('Radius')
-    plt.ylabel('Density')
-    plt.title('Densities')
-    plt.savefig(f'{HydraConfig.get().run.dir}/densities.pdf')
+    # plt.clf()
+    # plt.axhline(y=pdf, color='r', linestyle='-', label='True PDF')
+    # plt.ylim((0., pdf+0.05))
+    # for lk, line in zip(first_transformed_ode_lk_N, fake_traj_ND1):
+    #     angle = torch.atan2(line[1], line[0]).item()
+    #     plt.axhline(y=lk, label='{:.2f}'.format(angle))
+    # plt.xlabel('Radius')
+    # plt.ylabel('Density')
+    # plt.title('Densities')
+    # plt.savefig(f'{HydraConfig.get().run.dir}/densities.pdf')
 
     epsilons = torch.tensor(epsilon_abscissas)
     all_epsilons = einops.repeat(epsilons, 'b -> (n b)', n=error_N.shape[0])
     all_errors = torch.cat(errors)
-    colors1=['red'] * len(epsilons)
-    colors2=['orange'] *  len(epsilons)
-    colors3=['yellow'] *  len(epsilons)
-    colors4=['green'] *  len(epsilons)
-    colors5=['blue'] *  len(epsilons)
-    colors6=['indigo'] *  len(epsilons)
-    colors7=['violet'] *  len(epsilons)
-    colors8=['black'] *  len(epsilons)
-    # colors = colors1 + colors2 + colors3 + colors4 + colors5 + colors6 + colors7
-    color_list = [colors1, colors2, colors3, colors4, colors5, colors6, colors7, colors8]
-    error_data = ErrorData(
-        all_epsilons,
-        all_epsilons,
-        all_errors,
-        torch.zeros(len(errors)),
-        'ICOV',
-        colors,
-    )
-    title = r"Signed Relative Error of Density vs. $\epsilon$" + "\n(r={0:.2f})".format(r)
+    title = r"Signed Relative Error of Density vs. $\epsilon$"
     plt.clf()
     angles = torch.atan2(fake_traj_ND1[:, 1], fake_traj_ND1[:, 0])
     errors_NE = torch.stack(errors).T  # N is number of radii; E is number of epsilons
     for i in range(errors_NE.shape[0]):
+        idx = i // cfg.num_icov_samples
         plt.scatter(
             epsilons,
             errors_NE[i],
-            label='{:.2f}'.format(angles[i].item()),
-            color=color_list[i]
+            label='radius={:.2f}'.format(rs[idx]),
+            color=color_list[idx],
+            s=10,
         )
     plt.xlabel(r'$\epsilon$')
     plt.ylabel('Signed Relative Error')
-    plt.legend()
     plt.title(title)
     plt.xscale("log")
     plt.ylim((-1, 1))
     plt.grid(which='both', axis='y')
+    ax = plt.gca()
+    handles, labels = ax.get_legend_handles_labels()
+    unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
+    ax.legend(*zip(*unique))
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')

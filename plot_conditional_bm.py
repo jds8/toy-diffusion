@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import imageio
 import os
 
@@ -29,10 +30,10 @@ def generate_growing_circle_gif(alpha):
         fig, ax = plt.subplots(figsize=(6, 6))
 
         # Plot the four lines
-        ax.plot(x, alpha/t - x, label=r'$\alpha/t - x$', color='blue')
-        ax.plot(x, -alpha/t - x, label=r'$-\alpha/t - x$', color='blue')
-        ax.axvline(alpha/t, color='blue', label=r'$x = \alpha/t$')
-        ax.axvline(-alpha/t, color='blue', label=r'$x = -\alpha/t$')
+        ax.plot(x, alpha/t - x, label=r'$\alpha/\sqrt{\Delta t} - x$', color='blue')
+        ax.plot(x, -alpha/t - x, label=r'$-\alpha/\sqrt{\Delta t} - x$', color='blue')
+        ax.axvline(alpha/t, color='blue', label=r'$x = \alpha/\sqrt{\Delta t}$')
+        ax.axvline(-alpha/t, color='blue', label=r'$x = -\alpha/\sqrt{\Delta t}$')
 
         # Circle coordinates
         theta = np.linspace(0, 2*np.pi, 1000)
@@ -64,10 +65,34 @@ def generate_growing_circle_gif(alpha):
         ax.set_xlim(-x_lim, x_lim)
         ax.set_ylim(-y_lim, y_lim)
         ax.set_aspect('equal')
-        ax.legend(loc='upper right')
         ax.set_title(f"Radius = {radius:.2f}")
+        ax.legend(loc='upper right')
+        ax.set_xlabel(r"$\Delta X_1/\sqrt{\Delta t}$")
+        ax.set_ylabel(r"$\Delta X_2/\sqrt{\Delta t}$")
 
-        filename = os.path.join(frame_dir, f"frame_{frame_idx:03d}.png")
+        # === Shade the parallelogram ===
+        a = alpha / t
+
+        corner_height = max_radius-0.15
+        parallelogram_vertices = np.array([
+            [-a,  corner_height],
+            [ a,  0.0],
+            [ a,  -corner_height],
+            [-a,  0.0],
+        ])
+
+        par_patch = Polygon(
+            parallelogram_vertices,
+            closed=True,
+            facecolor='lightblue',
+            edgecolor='none',
+            alpha=0.3,
+            zorder=0
+        )
+
+        ax.add_patch(par_patch)
+        # note that the frames should be pngs rather than pdfs in order to generate a gif
+        filename = os.path.join(frame_dir, f"frame_{frame_idx:03d}.pdf")
         plt.savefig(filename)
         plt.close()
         filenames.append(filename)
@@ -95,17 +120,18 @@ def generate_growing_circle_gif(alpha):
         plot_frame(r, len(frame_data))
 
     # Create gif
+    # note that the frames should be pngs rather than pdfs in order to generate a gif
     with imageio.get_writer("growing_circle.gif", mode='I') as writer:
         for filename, duration in frame_data:
             image = imageio.imread(filename)
             writer.append_data(image, {"duration": duration})
 
-    # Cleanup
+    # # Cleanup
     for fname in filenames:
         os.remove(fname)
     os.rmdir(frame_dir)
 
 # Run the animation generator
-generate_growing_circle_gif(alpha=1.0)
+generate_growing_circle_gif(alpha=0.5)
 
 

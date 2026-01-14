@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 import imageio
 import os
 from scipy.stats import norm
@@ -44,7 +45,7 @@ def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000):
 # === Animation Generator ===
 def generate_growing_circle_with_pdf(alpha):
     t = np.sqrt(0.5)
-    max_radius = np.sqrt(5) * alpha / t
+    max_radius = np.sqrt(10) * alpha
     x_lim = y_lim = 1.2 * max_radius
     x = np.linspace(-x_lim, x_lim, 500)
 
@@ -66,10 +67,10 @@ def generate_growing_circle_with_pdf(alpha):
         ax2 = axs[1]
 
         # === Top Plot: Circle + Lines ===
-        ax.plot(x, alpha/t - x, label=r'$\alpha/t - x$', color='blue')
-        ax.plot(x, -alpha/t - x, label=r'$-\alpha/t - x$', color='blue')
-        ax.axvline(alpha/t, color='blue', label=r'$x = \alpha/t$')
-        ax.axvline(-alpha/t, color='blue', label=r'$x = -\alpha/t$')
+        ax.plot(x, alpha/t - x, label=r'$\alpha/\sqrt{\Delta t} - x$', color='blue')
+        ax.plot(x, -alpha/t - x, label=r'$-\alpha/\sqrt{\Delta t} - x$', color='blue')
+        ax.axvline(alpha/t, color='blue', label=r'$x = \alpha/\sqrt{\Delta t}$')
+        ax.axvline(-alpha/t, color='blue', label=r'$x = -\alpha/\sqrt{\Delta t}$')
 
         # Circle
         theta = np.linspace(0, 2*np.pi, 1000)
@@ -96,6 +97,30 @@ def generate_growing_circle_with_pdf(alpha):
         ax.set_aspect('equal')
         ax.set_title(f"Radius = {radius:.2f}")
         ax.legend(loc='upper right')
+        ax.set_xlabel(r"$\Delta X_1/\sqrt{\Delta t}$")
+        ax.set_ylabel(r"$\Delta X_2/\sqrt{\Delta t}$")
+
+        # === Shade the parallelogram ===
+        a = alpha / t
+
+        corner_height = max_radius-0.3
+        parallelogram_vertices = np.array([
+            [-a,  corner_height],
+            [ a,  0.0],
+            [ a,  -corner_height],
+            [-a,  0.0],
+        ])
+
+        par_patch = Polygon(
+            parallelogram_vertices,
+            closed=True,
+            facecolor='lightblue',
+            edgecolor='none',
+            alpha=0.3,
+            zorder=0
+        )
+
+        ax.add_patch(par_patch)
 
         # === Bottom Plot: PDF vs Radius ===
         pdf_val = pdf_2d_quadrature_bm(radius, alpha)
@@ -106,9 +131,10 @@ def generate_growing_circle_with_pdf(alpha):
         ax2.set_xlim(0, max_radius)
         ax2.set_ylim(0, 1)
         ax2.set_xlabel("Radius")
-        ax2.set_ylabel("Escape Probability")
+        ax2.set_ylabel("Exit Probability")
         ax2.set_title("Probability Density vs Radius")
 
+        # note that the frames should be pngs rather than pdfs in order to generate a gif
         filename = os.path.join(frame_dir, f"frame_{frame_idx:03d}.png")
         plt.tight_layout()
         plt.savefig(filename)
@@ -132,12 +158,13 @@ def generate_growing_circle_with_pdf(alpha):
         plot_frame(r, len(frame_data), pdf_data)
 
     # === Save GIF ===
+    # note that the frames should be pngs rather than pdfs in order to generate a gif
     with imageio.get_writer("growing_circle_with_pdf.gif", mode='I') as writer:
         for filename, duration in frame_data:
             image = imageio.imread(filename)
             writer.append_data(image, {"duration": duration})
 
-    # === Clean Up ===
+    # # === Clean Up ===
     for fname, _ in frame_data:
         os.remove(fname)
     os.rmdir(frame_dir)
