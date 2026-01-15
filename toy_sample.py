@@ -1068,31 +1068,72 @@ def compute_ode_log_likelihood(
         index=False
     )
 
-    if cfg.density_integrator == Integrator.EULER:
-        sol = ode_llk[2]
-        p = sol[1]
-        start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
-        times = torch.linspace(
-            start_time,
-            1.,
-            std.sampler.diffusion_timesteps,
-        )
-        dp_dt = sol[1].diff(dim=0) / times.diff()[0]
+    # Plot ICOV trajectory
+    sol = ode_llk[2]
+    p = sol[1].to('cpu')
+    dp_dt = torch.stack([derivative[1] for derivative in ode_llk[6]]).to('cpu')
+    start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+    times = torch.linspace(
+        start_time,
+        1.,
+        std.sampler.diffusion_timesteps,
+    )
+    states = sol[0]
+    radii = states[0].norm(dim=[1,2]).to('cpu')
 
-        plt.clf()
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        for i in range(5):
-            ax1.plot(times, p[:, i].to('cpu'))
-            ax2.plot(times[:-1], dp_dt[:, i].to('cpu'))
-        ax1.set_ylabel(f"log p")
-        ax2.set_ylabel(f"(log p)'")
-        ax2.set_xlabel(f'Times')
-        plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
-        plt.close()
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-        ode_llk[-1]
+    lc = plot_icov(p, times, radii, ax1)
+    cbar = fig.colorbar(lc, ax=ax1)
+    cbar.set_label("radius")
+
+    lc = plot_icov(dp_dt, times[:-1], radii, ax2)
+    cbar = fig.colorbar(lc, ax=ax2)
+    cbar.set_label("radius")
+
+    # plt.clf()
+    # fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    # ax1.plot(times, p.to('cpu'))
+    # ax2.plot(times[:-1], dp_dt.to('cpu'))
+    ax1.set_ylabel(f"log p")
+    ax2.set_ylabel(f"(log p)'")
+    ax2.set_xlabel(f'Times')
+    plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
+    plt.close()
+    print(p.shape)
 
     return ode_llk, scaled_ode_llk
+
+def plot_icov(p, times, radii, ax):
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    from matplotlib.colors import Normalize
+
+    # x, y: (T, N)
+    T, D = p.shape
+
+    x = einops.repeat(times, 't -> t d', d=D)
+    y = p
+
+    # Stack into line segments: (N, T, 2)
+    segments = torch.stack([x.T, y.T], axis=-1)
+
+    # Normalize radii for colormap
+    norm = Normalize(vmin=radii.min(), vmax=radii.max())
+    cmap = plt.cm.viridis   # or magma / plasma for heavy-tailed χ
+
+    lc = LineCollection(
+        segments,
+        array=radii,
+        cmap=cmap,
+        norm=norm,
+        linewidths=0.8,
+        alpha=0.8
+    )
+    ax.add_collection(lc)
+    ax.autoscale()
+
+    return lc
 
 def compute_histogram_errors(
         sample_trajs: torch.Tensor,
