@@ -266,6 +266,7 @@ class BinComparisonConfig(SampleConfig):
 @dataclass
 class EpsilonComparisonConfig(SampleConfig):
     t_epses: List[float] = field(default_factory=list)
+    r_delta: float = 0.01
 
 
 @dataclass

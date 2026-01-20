@@ -107,8 +107,7 @@ def compute_icov_error_vs_bins(
 
     alpha = stds[0].likelihood.alpha
     num_bins = 5
-    r = alpha + .13
-    rs = alpha + torch.arange(0.05, 0.2, 0.05)
+    r = alpha + cfg.r_delta
     if type(stds[0].example) == BrownianMotionDiffExampleConfig:
         pdf_array = get_2d_pdf(stds[0].example.sde_steps, torch.tensor([r]), alpha.item())
         pdf = pdf_array.item()
@@ -171,9 +170,12 @@ def compute_icov_error_vs_bins(
         epsilon_abscissas.append(1 - integrator_dt * (ode_llk[0].shape[0] - curr_num_to_subtract))
         curr_num_to_subtract *= 10
 
-    colors = ['red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet', 'black']
+    # cmap = plt.cm.viridis   # or magma / plasma for heavy-tailed χ
+    cmap = plt.get_cmap("hsv")
+    colors = cmap(np.linspace(0, 1., cfg.num_icov_samples))
     for point, clr in zip(fake_traj_ND1, colors):
-        plt.scatter(point[0], point[1], color=clr)
+        angle = torch.atan2(point[1], point[0]).item()
+        plt.scatter(point[0], point[1], color=clr, label='{:.2f}'.format(angle), alpha=0.3)
     if isinstance(stds[0].example, BrownianMotionDiffExampleConfig):
         lim = torch.sqrt(torch.tensor(5.)) * alpha / dt.sqrt()
     else:
@@ -182,6 +184,7 @@ def compute_icov_error_vs_bins(
     plt.xlim((-lim, lim))
     plt.gca().set_aspect('equal')
     plt.title(r'$\theta$ Values Along Level Curve')
+    plt.legend()
     if type(stds[0].example) == BrownianMotionDiffExampleConfig:
         plt.xlabel(r'$\Delta X1/\sqrt{\Delta t}$')
         plt.ylabel(r'$\Delta X2/\sqrt{\Delta t}$')
@@ -193,8 +196,10 @@ def compute_icov_error_vs_bins(
     plt.clf()
     plt.axhline(y=pdf, color='r', linestyle='-', label='True PDF')
     plt.ylim((0., pdf+0.05))
+    angles = []
     for lk, line in zip(first_transformed_ode_lk_N, fake_traj_ND1):
         angle = torch.atan2(line[1], line[0]).item()
+        angles.append(angle)
         plt.axhline(y=lk, label='{:.2f}'.format(angle))
     plt.xlabel('Radius')
     plt.ylabel('Density')
@@ -204,16 +209,21 @@ def compute_icov_error_vs_bins(
     epsilons = torch.tensor(epsilon_abscissas)
     all_epsilons = einops.repeat(epsilons, 'b -> (n b)', n=error_N.shape[0])
     all_errors = torch.cat(errors)
-    colors1=['red'] * len(epsilons)
-    colors2=['orange'] *  len(epsilons)
-    colors3=['yellow'] *  len(epsilons)
-    colors4=['green'] *  len(epsilons)
-    colors5=['blue'] *  len(epsilons)
-    colors6=['indigo'] *  len(epsilons)
-    colors7=['violet'] *  len(epsilons)
-    colors8=['black'] *  len(epsilons)
-    # colors = colors1 + colors2 + colors3 + colors4 + colors5 + colors6 + colors7
-    color_list = [colors1, colors2, colors3, colors4, colors5, colors6, colors7, colors8]
+    # colors1=['red'] * len(epsilons)
+    # colors2=['orange'] *  len(epsilons)
+    # colors3=['yellow'] *  len(epsilons)
+    # colors4=['green'] *  len(epsilons)
+    # colors5=['blue'] *  len(epsilons)
+    # colors6=['indigo'] *  len(epsilons)
+    # colors7=['violet'] *  len(epsilons)
+    # colors8=['black'] *  len(epsilons)
+    # # colors = colors1 + colors2 + colors3 + colors4 + colors5 + colors6 + colors7
+    # color_list = [colors1, colors2, colors3, colors4, colors5, colors6, colors7, colors8]
+
+    angles_tensor = torch.tensor(angles)
+    plt.clf()
+    ax = plt.gca()
+
     error_data = ErrorData(
         all_epsilons,
         all_epsilons,
@@ -223,7 +233,6 @@ def compute_icov_error_vs_bins(
         colors,
     )
     title = r"Signed Relative Error of Density vs. $\epsilon$" + "\n(r={0:.2f})".format(r)
-    plt.clf()
     angles = torch.atan2(fake_traj_ND1[:, 1], fake_traj_ND1[:, 0])
     errors_NE = torch.stack(errors).T  # N is number of radii; E is number of epsilons
     for i in range(errors_NE.shape[0]):
@@ -231,14 +240,14 @@ def compute_icov_error_vs_bins(
             epsilons,
             errors_NE[i],
             label='{:.2f}'.format(angles[i].item()),
-            color=color_list[i]
+            color=colors[i],
+            alpha=0.3
         )
-    plt.xlabel(r'$\epsilon$')
-    plt.ylabel('Signed Relative Error')
-    plt.legend()
-    plt.title(title)
-    plt.xscale("log")
-    plt.ylim((-1, 1))
+    ax.set_xlabel(r'$\epsilon$')
+    ax.set_ylabel('Signed Relative Error')
+    ax.set_title(title)
+    ax.set_xscale("log")
+    ax.set_ylim((-1, 1))
     plt.grid(which='both', axis='y')
 
     _, run_type = get_run_type(cfg)

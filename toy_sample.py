@@ -1098,6 +1098,10 @@ def compute_ode_log_likelihood(
     ax1.set_ylabel(f"log p")
     ax2.set_ylabel(f"(log p)'")
     ax2.set_xlabel(f'Times')
+    lwr, _ = ax2.get_ylim()
+    lowest_dp_dt = dp_dt.min()
+    lwr = (lwr + lowest_dp_dt) / 2
+    ax2.set_ylim((lwr, 9.))
     plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
     plt.close()
     print(p.shape)

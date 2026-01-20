@@ -108,7 +108,7 @@ def compute_icov_error_vs_bins(
 
     alpha = stds[0].likelihood.alpha
     num_bins = 5
-    rs = alpha + torch.tensor([0.001, 0.02, 0.13])
+    rs = alpha + torch.tensor([0.001, 0.02, 0.21])
     if type(stds[0].example) == BrownianMotionDiffExampleConfig:
         pdf_array = get_2d_pdf(stds[0].example.sde_steps, torch.tensor([rs]), alpha.item())
         pdf = pdf_array.item()

@@ -132,7 +132,7 @@ def compute_sample_error_vs_samples(
         stds[0].cfg.timesteps,
         quantiles_tensor[:, 1],
         quantiles_tensor[:, [0, 2]].movedim(0, 1),
-        'Histogram',
+        f'Histogram (N={cfg.num_samples})',
         'blue'
     )
     return error_data, all_bins
@@ -188,6 +188,7 @@ def compute_icov_error_vs_bins(
     errors = []
     quantiles_list = []
     reduction_op = get_reduction_op(cfg)
+    num_bins = []
     for idx, std in enumerate(stds):
         abscissa_N1 = all_bins[idx][0].bins.unsqueeze(-1)
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
@@ -261,8 +262,9 @@ def compute_icov_error_vs_bins(
         plt.scatter(xs, transformed_ode_lk_NB[:, b].cpu().numpy(), label='Estimate')
         plt.plot(xs, pdf, label='Analytical')
         plt.legend()
-        plt.savefig('{}/{}_estimates.pdf'.format(
+        plt.savefig('{}/estimates_{}_{}.pdf'.format(
             HydraConfig.get().run.dir,
+            std.sampler.diffusion_timesteps,
             std.cfg.model_name
         ))
         plt.clf()
@@ -280,6 +282,7 @@ def compute_icov_error_vs_bins(
             std.cfg.num_samples,
             std.cfg.model_name
         )
+        num_bins.append(xs.nelement())
         # plt.plot(abscissa_N1.cpu(), pdf, color='blue')
         # plt.scatter(abscissa_N1, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -289,12 +292,18 @@ def compute_icov_error_vs_bins(
         # plt.clf()
     quantiles = torch.stack(quantiles_list)
 
+    min_bins = min(num_bins)
+    max_bins = max(num_bins)
+    if min_bins < max_bins:
+        label = f'bins=[{min_bins}, {max_bins}]'
+    else:
+        label = f'bins={min_bins}'
     error_data = ErrorData(
         stds[0].cfg.timesteps,
         stds[0].cfg.timesteps,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'ICOV',
+        f'ICOV ({label})',
         'orange'
     )
     return error_data
@@ -332,7 +341,7 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Absolute Error of Tail Integral vs. Num. Diffusion Steps\n(alpha={alpha}, N={cfg.num_samples})'
+    title = f'Integrated Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
     plot_errors(sample_error_data, title)
     plot_errors(icov_error_data, title)
     plt.xlabel('Diffusion Steps')
