@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_derivatives, plot_pfode, \
     compute_fake_bm_trajs, compute_fake_gaussian_trajs, line_circle_intersection, vertical_line_circle_intersection
-from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, get_reduction_op, \
+from toy_train_config import PlotSamplesConfig, get_run_type, MultivariateGaussianExampleConfig, get_reduction_op, \
     BrownianMotionDiffExampleConfig, IntegratorComparisonConfig, Integrator
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import get_2d_pdf, pdf_2d_quadrature_bm
@@ -87,7 +87,7 @@ def sample(cfg):
         alpha = std.likelihood.alpha.reshape(-1, 1)
         minimum_radius = cfg.minimum_radius if cfg.minimum_radius >= 0 else alpha
         maximum_radius = cfg.maximum_radius if cfg.maximum_radius >= 0 else alpha+0.2
-        r = torch.arange(minimum_radius.item(), maximum_radius.item(), cfg.increment).unsqueeze(-1)
+        r = torch.arange(minimum_radius, maximum_radius, cfg.increment).unsqueeze(-1)
         analytic_radii = torch.arange(r[0].item(), r[-1].item(), cfg.increment/cfg.density_factor)
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
             dim = cfg.example.d
