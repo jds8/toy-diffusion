@@ -85,8 +85,8 @@ def sample(cfg):
     if isinstance(omega_sampler, ContinuousSamplerConfig):
         std = ContinuousEvaluator(cfg=cfg)
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        minimum_radius = cfg.minimum_radius if cfg.minimum_radius >= 0 else alpha
-        maximum_radius = cfg.maximum_radius if cfg.maximum_radius >= 0 else alpha+0.2
+        minimum_radius = cfg.minimum_radius if cfg.minimum_radius >= 0 else alpha.item()
+        maximum_radius = cfg.maximum_radius if cfg.maximum_radius >= 0 else alpha.item()+0.2
         r = torch.arange(minimum_radius, maximum_radius, cfg.increment).unsqueeze(-1)
         analytic_radii = torch.arange(r[0].item(), r[-1].item(), cfg.increment/cfg.density_factor)
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
