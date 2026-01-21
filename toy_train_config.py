@@ -280,6 +280,14 @@ class SMCSampleConfig(SampleConfig):
 
 
 @dataclass
+class PlotSamplesConfig(SampleConfig):
+    increment: float = 0.005
+    density_factor: int = 1
+    minimum_radius: float = -1.
+    maximum_radius: float = -1.
+
+
+@dataclass
 class ISConfig(SampleConfig):
     likelihood: LikelihoodConfig = field(default_factory=LikelihoodConfig)
     example: ExampleConfig = field(default_factory=ExampleConfig)

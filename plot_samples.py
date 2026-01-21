@@ -70,7 +70,7 @@ def compute_fake_gaussian_arcs(
 @hydra.main(version_base=None, config_path="conf", config_name="continuous_is_config")
 def sample(cfg):
     logger = logging.getLogger("main")
-    logger.info('run type: plot_bad_sample_proportion')
+    logger.info('run type: plot_samples')
     cfg_str = OmegaConf.to_yaml(cfg)
     logger.info(f"CONFIG\n{cfg_str}")
     logger.info(f'OUTPUT\n{HydraConfig.get().run.dir}\n')
@@ -85,11 +85,10 @@ def sample(cfg):
     if isinstance(omega_sampler, ContinuousSamplerConfig):
         std = ContinuousEvaluator(cfg=cfg)
         alpha = std.likelihood.alpha.reshape(-1, 1)
-        smallest_radius = torch.maximum(alpha - 0.05, torch.tensor(0.1))
-        increment = 0.005
-        density_factor = 10
-        r = torch.arange(smallest_radius.item(), alpha.item()+0.2, increment).unsqueeze(-1)
-        analytic_radii = torch.arange(r[0].item(), r[-1].item(), increment/density_factor)
+        minimum_radius = cfg.minimum_radius if cfg.minimum_radius >= 0 else alpha
+        maximum_radius = cfg.maximum_radius if cfg.maximum_radius >= 0 else alpha+0.2
+        r = torch.arange(minimum_radius.item(), maximum_radius.item(), cfg.increment).unsqueeze(-1)
+        analytic_radii = torch.arange(r[0].item(), r[-1].item(), cfg.increment/cfg.density_factor)
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
             dim = cfg.example.d
             dd = scipy.stats.chi(dim)
@@ -138,7 +137,7 @@ def sample(cfg):
         dense_r = analytic_radii.squeeze()
         pdf = pdf.squeeze()
         plt.plot(dense_r, pdf, label=label, color='orange')
-        plt.scatter(dense_r[::density_factor], pdf[::density_factor], marker='x', color='orange')
+        plt.scatter(dense_r[::cfg.density_factor], pdf[::cfg.density_factor], marker='x', color='orange')
         plt.scatter(r, transformed_ode, label='Estimate')
         plt.xlabel('Radius')
         plt.ylabel(f'Density')

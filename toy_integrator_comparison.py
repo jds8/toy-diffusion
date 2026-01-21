@@ -341,7 +341,7 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Integrated Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
+    title = f'Integrated ({cfg.density_integrator}) Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
     plot_errors(sample_error_data, title)
     plot_errors(icov_error_data, title)
     plt.xlabel('Diffusion Steps')
@@ -367,7 +367,9 @@ def make_plots(
     plt.yscale("log")
     # bottom, top = plt.ylim()
     # new_top = min(top, 10**4)
-    plt.ylim((1e-2, 1e4))
+    lwr, upr = plt.get_ylim()
+    lwr = min(lwr, 1e-2)
+    plt.ylim((lwr, 1e4))
     # plt.grid(which='both', axis='y')
     # ax3 = ax1.twiny()
     # ax3.set_xlim(ax1.get_xlim())
@@ -423,6 +425,12 @@ def sample(cfg):
 
     os.system('echo git commit: $(git rev-parse HEAD)')
 
+    # Here I set the random seed so that, for the same sample size,
+    # the same histogram is generated.
+    # Also note that the histogram is generated before the ICOV,
+    # so any random in constructing the ICOV, namely due to the
+    # aggregation (e.g. mean, median) happens after the histogram
+    # has already been constructed.
     torch.manual_seed(cfg.random_seed)
 
     omega_sampler = OmegaConf.to_object(cfg.sampler)

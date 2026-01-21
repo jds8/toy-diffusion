@@ -34,6 +34,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ErrorData = namedtuple('ErrorData', 'bins samples median error_bars label color')
 HistOutput = namedtuple('HistOutput', 'hist bins')
 
+TITLE = 'Integrated Absolute Error of Tail Integral vs. Training Samples\n(alpha={})'
+
 #########################
 #########################
 def suppresswarning():
@@ -127,6 +129,12 @@ def compute_sample_error_vs_samples(
             torch.tensor([0.05, 0.5, 0.95], dtype=errors_tensor.dtype)
         )
         quantiles.append(quantile)
+
+        save_histogram_samples(
+            errors,
+            std.cfg.model_name,
+            subsample_bins
+        )
     quantiles_tensor = torch.stack(quantiles)
     error_data = ErrorData(
         training_samples,
@@ -136,7 +144,25 @@ def compute_sample_error_vs_samples(
         'Histogram',
         'blue'
     )
+    title = TITLE.format(alpha)
+    save_error_data(error_data, title)
     return error_data, all_bins
+
+def save_histogram_samples(
+        errors: torch.Tensor,
+        model_name: str,
+        subsample_bins: List[HistOutput],
+):
+    hist_dir = 'histogram'
+    abs_dir = f'{HydraConfig.get().run.dir}/{hist_dir}'
+    os.makedirs(abs_dir, exist_ok=True)
+    abs_filename = f'{abs_dir}/{model_name}.pt'
+    torch.save({
+        'Errors': errors,
+        'ModelName': model_name,
+        'Hist': torch.stack([hist.hist for hist in subsample_bins]),
+        'Bins': torch.stack([hist.bins for hist in subsample_bins]),
+    }, abs_filename)
 
 def save_icov_samples(
         abscissa: torch.Tensor,
@@ -316,8 +342,11 @@ def compute_icov_error_vs_bins(
         # ))
         # plt.clf()
     quantiles = torch.stack(quantiles_list)
-
-    all_bins_flattened = torch.tensor([bins for all_bins_lst in all_bins for bins in all_bins_lst])
+    # import pdb; pdb.set_trace()
+    all_bins_flattened = torch.cat(
+        [bins.bins for all_bins_lst in all_bins for bins in all_bins_lst],
+        dim=0
+    )
     bins_quantiles = torch.quantile(all_bins_flattened,
                                     torch.tensor([0.0, 0.5, 1.0],
                                                  device=errors_B.device,
@@ -331,6 +360,8 @@ def compute_icov_error_vs_bins(
         'ICOV',
         'orange'
     )
+    title = TITLE.format(alpha)
+    save_error_data(error_data, title)
     return error_data
 
 def save_error_data(error_data: ErrorData, title: str):
@@ -344,7 +375,7 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(error_data: ErrorData, title: str, label: str):
+def plot_errors(error_data: ErrorData, label: str):
     plt.scatter(
         error_data.samples,
         error_data.median,
@@ -358,7 +389,6 @@ def plot_errors(error_data: ErrorData, title: str, label: str):
         color=error_data.color,
         alpha=0.2
     )
-    save_error_data(error_data, title)
 
 def make_error_vs_samples(
         sample_error_data: ErrorData,
@@ -366,10 +396,9 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Absolute Error of Tail Integral vs. Training Samples\n(alpha={alpha})'
-    plot_errors(sample_error_data, title, f"N={cfg.num_samples}")
+    plot_errors(sample_error_data, f"N={cfg.num_samples}")
     max_bin_diff = max(icov_error_data.bins.diff())
-    plot_errors(icov_error_data, title, f"bins={icov_error_data.bins[1]} +/- {max_bin_diff}")
+    plot_errors(icov_error_data, f"bins={icov_error_data.bins[1]} +/- {max_bin_diff}")
     plt.xlabel('Training Samples')
     plt.ylabel('Absolute Error')
     plt.legend()
@@ -455,7 +484,7 @@ def sample(cfg):
 
     omega_sampler = OmegaConf.to_object(cfg.sampler)
     if isinstance(omega_sampler, ContinuousSamplerConfig):
-        stds = []  
+        stds = []
         for trained_model in cfg.trained_models:
             new_cfg = deepcopy(cfg)
             new_cfg.model_name = trained_model
