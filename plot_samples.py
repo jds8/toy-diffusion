@@ -156,7 +156,7 @@ if __name__ == "__main__":
         suppresswarning()
 
     cs = ConfigStore.instance()
-    cs.store(name="vpsde_sample_config", node=SampleConfig)
+    cs.store(name="vpsde_sample_config", node=PlotSamplesConfig)
     register_configs()
 
     with torch.no_grad():
