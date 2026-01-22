@@ -160,8 +160,8 @@ def save_histogram_samples(
     torch.save({
         'Errors': errors,
         'ModelName': model_name,
-        'Hist': torch.stack([hist.hist for hist in subsample_bins]),
-        'Bins': torch.stack([hist.bins for hist in subsample_bins]),
+        'Hist': [hist.hist for hist in subsample_bins],
+        'Bins': [hist.bins for hist in subsample_bins],
     }, abs_filename)
 
 def save_icov_samples(
