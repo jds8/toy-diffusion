@@ -349,8 +349,8 @@ def compute_icov_error_vs_bins(
     )
     bins_quantiles = torch.quantile(all_bins_flattened,
                                     torch.tensor([0.0, 0.5, 1.0],
-                                                 device=errors_B.device,
-                                                 dtype=errors_B.dtype))
+                                                 device=all_bins_flattened.device,
+                                                 dtype=all_bins_flattened.dtype))
 
     error_data = ErrorData(
         bins_quantiles,
