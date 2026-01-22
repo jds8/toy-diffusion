@@ -151,7 +151,11 @@ def sample(cfg):
         plt.fill_between(r.squeeze(), quantiles[0], quantiles[2], color='blue', alpha=0.2)
         plt.xlabel('Radius')
         plt.ylabel(f'Density')
-        plt.title('Density vs. Radius')
+        if cfg.num_icov_samples == 1:
+            suffix = '1 Sample'
+        else:
+            suffix = f'{reduction_op.capitalize()} of {} Sample(s)'
+        plt.title(f'Density vs. Radius Using {suffix}'
         plt.legend()
         plt.savefig('{}/density.pdf'.format(HydraConfig.get().run.dir,))
     else:
