@@ -120,7 +120,7 @@ def sample(cfg):
             exact=cfg.compute_exact_trace,
         )
         reduction_op = get_reduction_op(cfg)
-        new_llk = einops.reduce(old_ode_llk[0], 'diff_steps (rb i) -> diff_steps rb', reduction_op, n=cfg.num_icov_samples)
+        new_llk = einops.reduce(old_ode_llk[0], 'diff_steps (rb i) -> diff_steps rb', reduction_op, i=cfg.num_icov_samples)
         ode_llk = (new_llk, *old_ode_llk[1:])
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
             transformed_ode_llk = ode_llk[0][-1].to('cpu') + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
@@ -141,19 +141,14 @@ def sample(cfg):
         pdf = pdf.squeeze()
         plt.plot(dense_r, pdf, label=label, color='orange')
         plt.scatter(dense_r[::cfg.density_factor], pdf[::cfg.density_factor], marker='x', color='orange')
-        quantiles = transformed_ode.quantile(
+        reshaped_ode = einops.rearrange(transformed_ode, '(r b) -> r b', b=cfg.num_sample_batches)
+        quantiles = reshaped_ode.quantile(
             torch.tensor([0.05, 0.5, 0.95], dtype=transformed_ode.dtype),
             dim=1
         )
         # quantiles is of shape 3xr
         plt.scatter(r, quantiles[1], label='Estimate')
-        plt.fill_between(
-            r,
-            quantiles[0],
-            quantiles[2],
-            color='orange',
-            alpha=0.2
-        )
+        plt.fill_between(r.squeeze(), quantiles[0], quantiles[2], color='blue', alpha=0.2)
         plt.xlabel('Radius')
         plt.ylabel(f'Density')
         plt.title('Density vs. Radius')
