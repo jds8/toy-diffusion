@@ -42,12 +42,13 @@ def compute_fake_bm_arcs(
         num_angles=8,
 ):
     dt_sqrt = dt.sqrt()
-    output_diagonal = line_circle_intersection(r, alpha, dt_sqrt)
-    output_right = vertical_line_circle_intersection(r, alpha, dt_sqrt)
-    output = torch.concat([output_diagonal, output_right])
-    angle_bounds = torch.atan2(output[:, 1], output[:, 0]).sort().values
-    angle_min, angle_max = angle_bounds[0], angle_bounds[-1]
-    angles = torch.linspace(angle_min, angle_max, num_angles)
+    output_diagonals = [line_circle_intersection(ri, alpha, dt_sqrt) for ri in r]
+    output_right = [vertical_line_circle_intersection(ri, alpha, dt_sqrt) for ri in r]
+    outputs = [torch.concat([output_diagonal, output_right]) for output_diagonal, output_right in zip(output_diagonals, output_right)]
+    angle_bounds = [torch.atan2(output[:, 1], output[:, 0]).sort().values for output in outputs]
+    angle_mins = [angle_bound[0] for angle_bound in angle_bounds]
+    angle_maxs = [angle_bound[-1] for angle_bound in angle_bounds]
+    angles = torch.stack([torch.linspace(angle_min, angle_max, num_angles) for angle_min, angle_max in zip(angle_mins, angle_maxs)])
     values = r * (angles * 1j).exp()
     fake_trajsBnD1 = torch.stack([values.real, values.imag], dim=-1).unsqueeze(-1)
     return fake_trajsBnD1
@@ -105,9 +106,10 @@ def sample(cfg):
                 r,
                 alpha,
                 dt,
-                num_angles=cfg.num_icov_samples,
+                num_angles=cfg.num_sample_batches * cfg.num_icov_samples,
             )
-            pdf = get_2d_pdf(cfg.example.sde_steps, analyic_radii.squeeze(), alpha.item()) * (analytic_radii > alpha).numpy()
+            fake_trajs = einops.rearrange(fake_trajs, 'r (b i) d 1 -> (r b i) d 1', b=cfg.num_sample_batches)
+            pdf = get_2d_pdf(cfg.example.sde_steps, analytic_radii.squeeze(), alpha.item()) * (analytic_radii > alpha).numpy()
             label = 'Quadrature'
         else:
             raise NotImplementedError
@@ -118,7 +120,7 @@ def sample(cfg):
             exact=cfg.compute_exact_trace,
         )
         reduction_op = get_reduction_op(cfg)
-        new_llk = einops.reduce(old_ode_llk[0], 'c (b n) -> c b', reduction_op, n=cfg.num_icov_samples)
+        new_llk = einops.reduce(old_ode_llk[0], 'diff_steps (rb i) -> diff_steps rb', reduction_op, n=cfg.num_icov_samples)
         ode_llk = (new_llk, *old_ode_llk[1:])
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
             transformed_ode_llk = ode_llk[0][-1].to('cpu') + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
@@ -126,8 +128,9 @@ def sample(cfg):
                 torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
             transformed_ode = transformed_ode_llk.exp()
         elif isinstance(cfg_obj.example, BrownianMotionDiffExampleConfig):
+            expanded_rs = einops.repeat(r.flatten(), 'r -> (r b)', b=cfg.num_sample_batches)
             transformed_ode = compute_transformed_ode(
-                r.flatten(),
+                expanded_rs,
                 ode_llk[0][-1],
                 alpha=alpha,
                 dt=dt
@@ -138,14 +141,24 @@ def sample(cfg):
         pdf = pdf.squeeze()
         plt.plot(dense_r, pdf, label=label, color='orange')
         plt.scatter(dense_r[::cfg.density_factor], pdf[::cfg.density_factor], marker='x', color='orange')
-        plt.scatter(r, transformed_ode, label='Estimate')
+        quantiles = transformed_ode.quantile(
+            torch.tensor([0.05, 0.5, 0.95], dtype=transformed_ode.dtype),
+            dim=1
+        )
+        # quantiles is of shape 3xr
+        plt.scatter(r, quantiles[1], label='Estimate')
+        plt.fill_between(
+            r,
+            quantiles[0],
+            quantiles[2],
+            color='orange',
+            alpha=0.2
+        )
         plt.xlabel('Radius')
         plt.ylabel(f'Density')
         plt.title('Density vs. Radius')
         plt.legend()
-        plt.savefig('{}/density.pdf'.format(
-            HydraConfig.get().run.dir,
-        ))
+        plt.savefig('{}/density.pdf'.format(HydraConfig.get().run.dir,))
     else:
         raise NotImplementedError
 
