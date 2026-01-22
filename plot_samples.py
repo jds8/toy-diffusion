@@ -154,7 +154,7 @@ def sample(cfg):
         if cfg.num_icov_samples == 1:
             suffix = '1 Sample'
         else:
-            suffix = f'{reduction_op.capitalize()} of {cfg.num_icov_samples} Samples'
+            suffix = f'{cfg.reduction_op.capitalize()} of {cfg.num_icov_samples} Samples'
         plt.title(f'Density vs. Radius Using {suffix}')
         plt.legend()
         plt.savefig('{}/density.pdf'.format(HydraConfig.get().run.dir,))
