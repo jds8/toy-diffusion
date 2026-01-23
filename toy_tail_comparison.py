@@ -692,7 +692,7 @@ def compute_pfode_error_vs_bins(
         equivalents,
         median_tensor,
         conf_int_tensor.T,
-        'Density Approximation',
+        f'ICOV',
         'orange'
     )
     return error_data, ylim, xlim
@@ -744,11 +744,11 @@ def make_error_vs_samples(
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Absolute Error of Tail Integral vs. Sample Size\n(alpha={alpha}, eta={cfg.eta})'
+    title = f'Integrated Absolute Error vs. Sample Size\n(alpha={alpha})'
     plot_errors(sample_error_data, title)
     plot_errors(pfode_error_data, title)
     plt.xlabel('Sample Size')
-    plt.ylabel('Absolute Error')
+    plt.ylabel('Integrated Absolute Error')
     plt.title(title)
     plt.xscale('log')
 

@@ -24,7 +24,8 @@ from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_der
     compute_fake_bm_trajs_random, compute_fake_gaussian_trajs, \
     line_circle_intersection, vertical_line_circle_intersection, plot_boundary
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
-    BrownianMotionDiffExampleConfig, TrainComparisonConfig, Integrator
+    BrownianMotionDiffExampleConfig, TrainComparisonConfig, Integrator, \
+    get_reduction_op
 from models.toy_diffusion_models_config import ContinuousSamplerConfig
 from compute_quadratures import pdf_2d_quadrature_bm, get_2d_pdf
 
@@ -34,7 +35,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ErrorData = namedtuple('ErrorData', 'bins samples median error_bars label color')
 HistOutput = namedtuple('HistOutput', 'hist bins')
 
-TITLE = 'Integrated Absolute Error of Tail Integral vs. Training Samples\n(alpha={})'
+TITLE = 'Integrated Absolute Error vs. Training Samples\n(alpha={})'
 
 #########################
 #########################
@@ -141,7 +142,7 @@ def compute_sample_error_vs_samples(
         training_samples,
         quantiles_tensor[:, 1],
         quantiles_tensor[:, [0, 2]].movedim(0, 1),
-        'Histogram',
+        f'Histogram (N={cfg.num_samples})',
         'blue'
     )
     title = TITLE.format(alpha)
@@ -235,6 +236,8 @@ def compute_icov_error_vs_bins(
     ode_lks = []
     errors = []
     quantiles_list = []
+    reduction_op = get_reduction_op(cfg)
+    num_bins = []
     for idx, std in enumerate(stds):
         abscissa_N1 = all_bins[idx][0].bins.unsqueeze(-1)
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
@@ -260,6 +263,10 @@ def compute_icov_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
+        if type(stds[0].example) == BrownianMotionDiffExampleConfig:
+            reduction_op = get_reduction_op(cfg)
+            new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
+            ode_llk = (new_llk, *ode_llk[1:])
         ode_llk_Nb = ode_llk[0][-1]
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
             ode_llk_NB = einops.rearrange(ode_llk_Nb.cpu(), '(n b) -> n b', n=abscissa_N1.shape[0])
@@ -334,6 +341,7 @@ def compute_icov_error_vs_bins(
             std.cfg.num_samples,
             std.cfg.model_name
         )
+        num_bins.append(xs.nelement())
         # plt.plot(abscissa_N1.cpu(), pdf, color='blue')
         # plt.scatter(abscissa_N1, ode_llk_subsample.cpu().exp(), color='red')
         # plt.savefig('{}/bin_comparison_density_estimates_{}'.format(
@@ -342,7 +350,13 @@ def compute_icov_error_vs_bins(
         # ))
         # plt.clf()
     quantiles = torch.stack(quantiles_list)
-    # import pdb; pdb.set_trace()
+
+    min_bins = min(num_bins)
+    max_bins = max(num_bins)
+    if min_bins < max_bins:
+        label = f'bins=[{min_bins}, {max_bins}]'
+    else:
+        label = f'bins={min_bins}'
     all_bins_flattened = torch.cat(
         [bins.bins for all_bins_lst in all_bins for bins in all_bins_lst],
         dim=0
@@ -357,7 +371,7 @@ def compute_icov_error_vs_bins(
         training_samples,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'ICOV',
+        f'ICOV ({label})',
         'orange'
     )
     title = TITLE.format(alpha)
@@ -375,11 +389,11 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(error_data: ErrorData, label: str):
+def plot_errors(error_data: ErrorData):
     plt.scatter(
         error_data.samples,
         error_data.median,
-        label=error_data.label + f'({label})',
+        label=error_data.label,
         color=error_data.color
     )
     plt.fill_between(
@@ -395,12 +409,12 @@ def make_error_vs_samples(
         icov_error_data: ErrorData,
         alpha: float,
         cfg: SampleConfig,
+        title: str,
 ):
-    plot_errors(sample_error_data, f"N={cfg.num_samples}")
-    max_bin_diff = max(icov_error_data.bins.diff())
-    plot_errors(icov_error_data, f"bins={icov_error_data.bins[1]} +/- {max_bin_diff}")
+    plot_errors(sample_error_data)
+    plot_errors(icov_error_data)
     plt.xlabel('Training Samples')
-    plt.ylabel('Absolute Error')
+    plt.ylabel('Integrated Absolute Error')
     plt.legend()
     plt.title(title)
 
@@ -458,11 +472,13 @@ def make_error_vs_samples_plot(
         training_samples,
         all_bins
     )
+    title = TITLE.format(alpha)
     make_error_vs_samples(
         hist_error_vs_samples,
         icov_error_vs_samples,
         alpha,
-        cfg
+        cfg,
+        title
     )
     return all_bins
 

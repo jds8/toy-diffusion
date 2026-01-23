@@ -319,7 +319,7 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(error_data: ErrorData, title: str):
+def plot_errors(error_data: ErrorData):
     plt.scatter(
         error_data.samples,
         error_data.median,
@@ -333,7 +333,6 @@ def plot_errors(error_data: ErrorData, title: str):
         color=error_data.color,
         alpha=0.2
     )
-    save_error_data(error_data, title)
 
 def make_error_vs_samples(
         sample_error_data: ErrorData,
@@ -342,10 +341,10 @@ def make_error_vs_samples(
         cfg: SampleConfig,
 ):
     title = f'Integrated ({cfg.density_integrator}) Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
-    plot_errors(sample_error_data, title)
-    plot_errors(icov_error_data, title)
+    plot_errors(sample_error_data)
+    plot_errors(icov_error_data)
     plt.xlabel('Diffusion Steps')
-    plt.ylabel('Absolute Error')
+    plt.ylabel('Integrated Absolute Error')
     plt.legend()
     plt.title(title)
 
