@@ -24,7 +24,7 @@ from scipy.interpolate import griddata
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
     compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary, \
-    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random, \
+    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random \
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
     TestType, Integrator, get_reduction_op
@@ -198,7 +198,7 @@ def compute_sample_error_vs_samples(
         subsample_sizes,
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
-        'Histogram Approximation',
+        'Histogram',
         'blue'
     )
     return error_data, all_bins
@@ -381,7 +381,7 @@ def plot_histogram_pdf_approximation(
     )
     plt.plot(abscissa, analytical_pdf, color='red', label='Analytical')
     plt.xlabel('Radius')
-    plt.ylabel('Density (Histogram)')
+    plt.ylabel('Histogram')
     plt.legend()
     plt.savefig('{}/histogram_pdf_approximation.pdf'.format(
         HydraConfig.get().run.dir,

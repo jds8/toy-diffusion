@@ -3227,19 +3227,20 @@ def plot_pfode(bad_trajs, bad_derivatives, times, title, plot_title=""):
 def compute_fake_gaussian_trajs(
         abscissa: torch.Tensor,
         num_sample_batches: int,
-        dim: int
+        dim: int,
+        num_icov_samples: int
 ):
-    vecs = torch.randn(1, num_sample_batches, dim, 1)
-    normed_vecs_1BD1 = vecs / vecs.norm(dim=2, keepdim=True)
-    abscissa_repeat_NBD1 = einops.repeat(
+    vecs = torch.randn(1, num_sample_batches, num_icov_samples, dim, 1)
+    normed_vecs_1BID1 = vecs / vecs.norm(dim=2, keepdim=True)
+    abscissa_repeat_NBID1 = einops.repeat(
         abscissa,
-        'n 1 -> n b d 1',
+        'n 1 -> n b i d 1',
         b=num_sample_batches,
         d=dim
     )
-    fake_trajs_NBD1 = abscissa_repeat_NBD1.cpu() * normed_vecs_1BD1
-    flattened_fake_trajs_NbD1 = einops.rearrange(fake_trajs_NBD1, 'n b d 1 -> (n b) d 1')
-    return flattened_fake_trajs_NbD1, vecs
+    fake_trajs_NBID1 = abscissa_repeat_NBID1.cpu() * normed_vecs_1BID1
+    flattened_fake_trajs_NbiD1 = einops.rearrange(fake_trajs_NBID1, 'n b i d 1 -> (n b i) d 1')
+    return flattened_fake_trajs_NbiD1, vecs
 
 def compute_fake_gaussian_trajs_2D(
         abscissa: torch.Tensor,
@@ -3408,7 +3409,7 @@ def diffuse_fake_trajs(std, cfg_obj, abscissa_tensor_N1, num_trajs):
     if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
         if dim == 2:
             return compute_fake_gaussian_trajs_2D(abscissa_tensor_N1, num_trajs, dim)
-        return compute_fake_gaussian_trajs(abscissa_tensor_N1, num_trajs, dim)
+        return compute_fake_gaussian_trajs(abscissa_tensor_N1, num_trajs, dim, 1)
     else:
         alpha = std.likelihood.alpha
         dt = torch.tensor(1. / dim)
