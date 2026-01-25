@@ -3236,6 +3236,7 @@ def compute_fake_gaussian_trajs(
         abscissa,
         'n 1 -> n b i d 1',
         b=num_sample_batches,
+        i=num_icov_samples,
         d=dim
     )
     fake_trajs_NBID1 = abscissa_repeat_NBID1.cpu() * normed_vecs_1BID1
