@@ -24,7 +24,7 @@ from scipy.interpolate import griddata
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
     compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary, \
-    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random \
+    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
     TestType, Integrator, get_reduction_op
@@ -45,7 +45,7 @@ def suppresswarning():
 def interp(tensor: torch.Tensor, num_points: int=20):
     start = tensor[:-1]
     end = tensor[1:]
-    
+
     # Linearly interpolate between each pair
     # Shape will be (len-1, num_points)
     interp_output = torch.stack([
@@ -235,7 +235,7 @@ def plot_vertical_line(ax, r: float, alpha: float, dt: torch.Tensor):
     x_val = (alpha / dt).item()
     y_vals = torch.linspace(-r*1.2, r*1.2, 200)
     ax.plot([x_val]*len(y_vals), y_vals, color='red')
-    
+
 def generate_color_gradient(N, cmap_name='viridis'):
     cmap = plt.get_cmap(cmap_name)  # e.g., 'viridis', 'plasma', 'inferno', etc.
     colors = [cmap(i / (N - 1)) for i in range(N)]
@@ -268,16 +268,16 @@ def plot_fake_trajs(fake_trajs, num_trajs, alpha, prob, subtitle, normalizing_fa
     x_np = fake_trajs[:, 0].numpy()
     y_np = fake_trajs[:, 1].numpy()
     z_np = prob.cpu().numpy()
-    
+
     # 1. Create a regular grid to interpolate onto
     xi = np.linspace(x_np.min(), x_np.max(), 100)
     yi = np.linspace(y_np.min(), y_np.max(), 100)
     print('making meshgrid')
     X, Y = np.meshgrid(xi, yi)
-    
+
     # 2. Interpolate the scattered data onto the grid
     # Z = griddata((x_np, y_np), z_np, (X, Y), method='cubic')
-    
+
     # 3. Plot
     plt.figure(figsize=(6, 5))
     # cp = plt.contourf(X, Y, Z, levels=50, cmap='viridis')
@@ -358,9 +358,9 @@ def plot_histogram_pdf_approximation(
         hists.append(hist)
     hists_tensor = torch.stack(hists)
     quantiles = torch.quantile(
-        hists_tensor, 
-        torch.tensor([0.05, 0.5, 0.95], 
-                     device=hists_tensor.device, 
+        hists_tensor,
+        torch.tensor([0.05, 0.5, 0.95],
+                     device=hists_tensor.device,
                      dtype=hists_tensor.dtype),
         dim=0,
     )
@@ -587,14 +587,14 @@ def compute_pfode_error_vs_bins(
             alpha=alpha,
             dt=dt
         ).cpu()
-        if cfg.test == TestType.BrownianMotionDiff:
-            bm_cdf = target.bm_cdf(dim+1)
-            cdf = bm_cdf[alpha]
-            normalizing_constant = torch.tensor(
-                1-cdf,
-                device=transformed_ode.device
-            )
-            transformed_ode /= normalizing_constant
+        # if cfg.test == TestType.BrownianMotionDiff:
+        #     bm_cdf = target.bm_cdf(dim+1)
+        #     cdf = bm_cdf[alpha]
+        #     normalizing_constant = torch.tensor(
+        #         1-cdf,
+        #         device=transformed_ode.device
+        #     )
+        #     transformed_ode /= normalizing_constant
     errors = []
     augmented_all_num_bins = torch.cat([torch.tensor([0]), bin_sizes+1])
     augmented_cumsum = augmented_all_num_bins.cumsum(dim=0)
@@ -606,7 +606,6 @@ def compute_pfode_error_vs_bins(
         ylim,
         xlim,
     )
-    # import pdb; pdb.set_trace()
     torch.save(abscissa_repeat.flatten(), f'{HydraConfig.get().run.dir}/abscissa_repeat.pt')
     torch.save(transformed_ode, f'{HydraConfig.get().run.dir}/transformed_ode.pt')
     equivalents = []
@@ -637,23 +636,16 @@ def compute_pfode_error_vs_bins(
         worst_error = 0
         worst_error_idx = 0
         worst_tail_estimate = 0
+        if dd is None:
+            pdf = get_2d_pdf(std.example.sde_steps, abscissa, alpha)
+        else:
+            pdf = dd.pdf(abscissa)/(1-dd.cdf(alpha))
         for j in range(nsb):
             approx = ode_lk_subsample_list[j].cpu().numpy()
             # mask = abscissa < (alpha + 0.)
             # approx[mask] = dd.pdf(abscissa[mask])/(1-dd.cdf(alpha))
-            if dd is None:
-                # Brownian motion case
-                pdf = get_2d_pdf(std.example.sde_steps, abscissa, alpha)
-                tail_error = scipy.integrate.simpson(
-                    np.abs(approx - pdf),
-                    x=abscissa
-                )
-            else:
-                # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
-                tail_error = scipy.integrate.simpson(
-                    np.abs(approx - dd.pdf(abscissa)/(1-dd.cdf(alpha))),
-                    x=abscissa
-                )
+            # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
+            tail_error = scipy.integrate.simpson(np.abs(approx - pdf), x=abscissa)
             # error = error_metric(tail_estimate, analytical_tail)
             error = torch.tensor(tail_error)
             if error > worst_error:
@@ -692,6 +684,8 @@ def compute_pfode_error_vs_bins(
         f'ICOV',
         'orange'
     )
+    print("median: ", median_tensor)
+    print('conf: ', conf_int_tensor.T)
     return error_data, ylim, xlim
 
 def save_error_data(error_data: ErrorData, title: str):
@@ -755,7 +749,7 @@ def make_error_vs_samples(
     ticklabels, mask = find_order_of_magnitude_subtensor(pfode_error_data.bins)
     ax_top.set_xticks(torch.stack(pfode_error_data.samples)[mask])
     ax_top.set_xticklabels(ticklabels)
-    ax_top.set_xlabel(title + '\nNumber of Bins')
+    ax_top.set_xlabel('Number of Bins')
 
     plt.legend()
 
@@ -771,6 +765,33 @@ def make_error_vs_samples(
         run_type,
         alpha
     ))
+
+def plot_from_data(icov_file, hist_file):
+    icov = torch.load(icov_file)
+    hist = torch.load(hist_file)
+
+    plt.xlabel('Sample Size')
+    plt.ylabel('Integrated Absolute Error')
+    plt.xscale('log')
+
+    # add ICOV bin axis
+    ax = plt.gca()
+    ax_top = ax.secondary_xaxis('top')
+    ticklabels, mask = find_order_of_magnitude_subtensor(icov['Abscissa_bins'])
+    ax_top.set_xticks(torch.stack(icov['Abscissa_samples'])[mask])
+    ax_top.set_xticklabels(ticklabels)
+    ax_top.set_xlabel('Number of Bins')
+
+    ymax = min(hist['Abscissa_samples'].max(), 0.2)
+    plt.ylim((0., ymax))
+
+    plt.scatter(icov['Abscissa_samples'], icov['Median'], label='ICOV', color='orange',)
+    plt.fill_between(icov['Abscissa_samples'], icov['5%'], icov['95%'], color='orange', alpha=0.2)
+    plt.scatter(hist['Abscissa_samples'], hist['Median'], label='Histogram', color='blue',)
+    plt.fill_between(hist['Abscissa_samples'], hist['5%'], hist['95%'], color='blue', alpha=0.2)
+    plt.legend()
+
+    plt.savefig('tail_integral_error_vs_sample_size.pdf')
 
 def make_plots(
         trajs: torch.Tensor,

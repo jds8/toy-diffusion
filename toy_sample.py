@@ -3231,7 +3231,7 @@ def compute_fake_gaussian_trajs(
         num_icov_samples: int
 ):
     vecs = torch.randn(1, num_sample_batches, num_icov_samples, dim, 1)
-    normed_vecs_1BID1 = vecs / vecs.norm(dim=2, keepdim=True)
+    normed_vecs_1BID1 = vecs / vecs.norm(dim=3, keepdim=True)
     abscissa_repeat_NBID1 = einops.repeat(
         abscissa,
         'n 1 -> n b i d 1',
