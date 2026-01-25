@@ -188,7 +188,8 @@ def compute_icov_error_vs_bins(
             fake_traj_NbD1, _ = compute_fake_gaussian_trajs(
                 abscissa_N1,
                 cfg.num_sample_batches,
-                dim
+                dim,
+                cfg.num_icov_samples,
             )
             sample_levels = fake_traj_NbD1.norm(dim=1).squeeze()
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
@@ -209,10 +210,9 @@ def compute_icov_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        if type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            reduction_op = get_reduction_op(cfg)
-            new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
-            ode_llk = (new_llk, *ode_llk[1:])
+        reduction_op = get_reduction_op(cfg)
+        new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
+        ode_llk = (new_llk, *ode_llk[1:])
         ode_llk_Nb = ode_llk[0][-1]
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
             transformed_ode_llk_Nb = ode_llk_Nb.cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \

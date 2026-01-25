@@ -195,7 +195,8 @@ def compute_icov_error_vs_bins(
             fake_traj_NbD1, _ = compute_fake_gaussian_trajs(
                 abscissa_N1,
                 cfg.num_sample_batches,
-                dim
+                dim,
+                cfg.num_icov_samples,
             )
             sample_levels = fake_traj_NbD1.norm(dim=1).squeeze()
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
@@ -216,10 +217,9 @@ def compute_icov_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        if type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            reduction_op = get_reduction_op(cfg)
-            new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
-            ode_llk = (new_llk, *ode_llk[1:])
+        reduction_op = get_reduction_op(cfg)
+        new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
+        ode_llk = (new_llk, *ode_llk[1:])
         ode_llk_Nb = ode_llk[0][-1]
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
             transformed_ode_llk_Nb = ode_llk_Nb.cpu() + (dim / 2) * torch.tensor(2 * torch.pi).log() + \
@@ -319,7 +319,7 @@ def save_error_data(error_data: ErrorData, title: str):
         '95%': error_data.error_bars[1]
     }, abs_filename)
 
-def plot_errors(error_data: ErrorData):
+def plot_errors(error_data: ErrorData, title: str):
     plt.scatter(
         error_data.samples,
         error_data.median,
@@ -333,6 +333,7 @@ def plot_errors(error_data: ErrorData):
         color=error_data.color,
         alpha=0.2
     )
+    save_error_data(error_data, title)
 
 def make_error_vs_samples(
         sample_error_data: ErrorData,
@@ -341,10 +342,10 @@ def make_error_vs_samples(
         cfg: SampleConfig,
 ):
     title = f'Integrated ({cfg.density_integrator}) Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
-    plot_errors(sample_error_data)
-    plot_errors(icov_error_data)
+    plot_errors(sample_error_data, title)
+    plot_errors(icov_error_data, title)
     plt.xlabel('Diffusion Steps')
-    plt.ylabel('Integrated Absolute Error')
+    plt.ylabel('Absolute Error')
     plt.legend()
     plt.title(title)
 
@@ -366,7 +367,7 @@ def make_plots(
     plt.yscale("log")
     # bottom, top = plt.ylim()
     # new_top = min(top, 10**4)
-    lwr, upr = plt.get_ylim()
+    lwr, upr = plt.ylim()
     lwr = min(lwr, 1e-2)
     plt.ylim((lwr, 1e4))
     # plt.grid(which='both', axis='y')

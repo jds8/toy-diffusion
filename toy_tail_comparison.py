@@ -24,7 +24,7 @@ from scipy.interpolate import griddata
 from toy_configs import register_configs
 from toy_sample import ContinuousEvaluator, compute_transformed_ode, compute_perimeter, get_raw, \
     compute_derivatives, plot_pfode, get_points_along_angle, plot_boundary, \
-    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random, \
+    compute_fake_gaussian_trajs, compute_fake_bm_trajs, compute_fake_bm_trajs_random
 from toy_train_config import SampleConfig, get_run_type, MultivariateGaussianExampleConfig, \
     BrownianMotionDiffExampleConfig, get_target, get_error_metric, ErrorMetric, \
     TestType, Integrator, get_reduction_op
@@ -111,12 +111,8 @@ def compute_tail_error(
         #     np.abs(hist[smallest_idx:] - pdf),
         #     x=med_bins[smallest_idx:]
         # )
-        pdf = get_2d_pdf(sde_steps, med_bins[smallest_idx:], alpha.item())
+        pdf = get_2d_pdf(std.cfg.example.sde_steps, med_bins[smallest_idx:], alpha)
         pdf = np.concat([np.zeros(smallest_idx), pdf])
-        tail_error = scipy.integrate.simpson(
-            np.abs(hist.numpy() - pdf),
-            x=med_bins,
-        )
     else:
         # scipy.integrate.trapezoid(hist[smallest_idx:], med_bins[smallest_idx:])
         # tail_error = scipy.integrate.simpson(
@@ -124,10 +120,10 @@ def compute_tail_error(
         #     x=med_bins[smallest_idx:]
         # )
         pdf = dd.pdf(med_bins)/(1-dd.cdf(alpha)) * (med_bins > alpha).numpy()
-        tail_error = scipy.integrate.simpson(
-            np.abs(hist.numpy() - pdf),
-            x=med_bins
-        )
+    tail_error = scipy.integrate.simpson(
+        np.abs(hist - pdf),
+        x=med_bins,
+    )
     plt.scatter(med_bins[smallest_idx:], hist[smallest_idx:], color='red', label='approximation')
     plt.savefig('{}/histogram_plot_{}'.format(
         HydraConfig.get().run.dir,
@@ -485,7 +481,8 @@ def compute_pfode_error_vs_bins(
         fake_trajs, _ = compute_fake_gaussian_trajs(
             abscissa_tensor,
             cfg.num_sample_batches,
-            dim
+            dim,
+            cfg.num_icov_samples
         )
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         if cfg.num_icov_samples == 1:
@@ -533,7 +530,7 @@ def compute_pfode_error_vs_bins(
     #     abscissa,
     #     pdf,
     # )
-    old_ode_llk = std.ode_log_likelihood(
+    ode_llk = std.ode_log_likelihood(
         fake_trajs.to(device),
         cond=torch.tensor([1.]),
         alpha=torch.tensor([alpha]),
@@ -542,8 +539,8 @@ def compute_pfode_error_vs_bins(
     # new_llk = einops.reduce(old_ode_llk[0], 'c (b n) -> c b', torch.logsumexp, n=cfg.num_icov_samples)
     # new_llk -= torch.log(torch.tensor(cfg.num_icov_samples))
     reduction_op = get_reduction_op(cfg)
-    new_llk = einops.reduce(old_ode_llk[0], 'c (b n) -> c b', reduction_op, n=cfg.num_icov_samples)
-    ode_llk = (new_llk, *old_ode_llk[1:])
+    new_llk = einops.reduce(ode_llk[0], 'c (b i) -> c b', reduction_op, i=cfg.num_icov_samples)
+    ode_llk = (new_llk, *ode_llk[1:])
     torch.save(ode_llk[0][-1].cpu(), f'{HydraConfig.get().run.dir}/ode_llk.pt')
     # plot_fake_trajs_with_pfode(
     #     flattened_trajs,
@@ -581,8 +578,8 @@ def compute_pfode_error_vs_bins(
             (dim - 1) * abscissa_repeat.flatten().squeeze().log() - (dim / 2 - 1) * \
             torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
         transformed_ode = transformed_ode_llk.exp().cpu()
-        if cfg.test == TestType.MultivariateGaussian:
-            transformed_ode /= normalizing_factor
+        # if cfg.test == TestType.MultivariateGaussian:
+        #     transformed_ode /= normalizing_factor
     elif type(std.example) == BrownianMotionDiffExampleConfig:
         transformed_ode = compute_transformed_ode(
             abscissa_repeat.flatten(),
@@ -749,7 +746,7 @@ def make_error_vs_samples(
     plot_errors(pfode_error_data, title)
     plt.xlabel('Sample Size')
     plt.ylabel('Integrated Absolute Error')
-    plt.title(title)
+    # plt.title(title)
     plt.xscale('log')
 
     # add ICOV bin axis
@@ -758,7 +755,7 @@ def make_error_vs_samples(
     ticklabels, mask = find_order_of_magnitude_subtensor(pfode_error_data.bins)
     ax_top.set_xticks(torch.stack(pfode_error_data.samples)[mask])
     ax_top.set_xticklabels(ticklabels)
-    ax_top.set_xlabel('Number of Bins')
+    ax_top.set_xlabel(title + '\nNumber of Bins')
 
     plt.legend()
 
