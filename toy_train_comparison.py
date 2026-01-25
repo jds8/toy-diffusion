@@ -244,7 +244,8 @@ def compute_icov_error_vs_bins(
             fake_traj_NbD1, _ = compute_fake_gaussian_trajs(
                 abscissa_N1,
                 cfg.num_sample_batches,
-                dim
+                dim,
+                cfg.num_icov_samples,
             )
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
             fake_traj_NbD1, _ = compute_fake_bm_trajs_random(
@@ -255,6 +256,7 @@ def compute_icov_error_vs_bins(
                 num_trajs=cfg.num_sample_batches//2,
                 num_samples=cfg.num_icov_samples,
             )
+            sample_levels = einops.repeat(abscissa_N1, 'n 1 -> (n b)', b=cfg.num_sample_batches)
         else:
             raise NotImplementedError
         ode_llk = std.ode_log_likelihood(
@@ -263,10 +265,9 @@ def compute_icov_error_vs_bins(
             alpha=torch.tensor([alpha]),
             exact=cfg.compute_exact_trace,
         )
-        if type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            reduction_op = get_reduction_op(cfg)
-            new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
-            ode_llk = (new_llk, *ode_llk[1:])
+        reduction_op = get_reduction_op(cfg)
+        new_llk = einops.reduce(ode_llk[0], 't (b i) -> t b', reduction_op, i=cfg.num_icov_samples)
+        ode_llk = (new_llk, *ode_llk[1:])
         ode_llk_Nb = ode_llk[0][-1]
         if type(stds[0].example) == MultivariateGaussianExampleConfig:
             ode_llk_NB = einops.rearrange(ode_llk_Nb.cpu(), '(n b) -> n b', n=abscissa_N1.shape[0])
@@ -275,12 +276,13 @@ def compute_icov_error_vs_bins(
                 torch.tensor(2.).log() - scipy.special.loggamma(dim / 2)
             transformed_ode_lk_NB = transformed_ode_llk_NB.exp()
         elif type(stds[0].example) == BrownianMotionDiffExampleConfig:
-            transformed_ode_lk_NB = compute_transformed_ode(
-                abscissa_N1.cpu().squeeze(),
+            transformed_ode_lk_Nb = compute_transformed_ode(
+                sample_levels,
                 ode_llk[0][-1],
                 alpha=alpha,
                 dt=dt
             )
+            transformed_ode_lk_NB = einops.rearrange(transformed_ode_lk_Nb, '(n b) -> n b', b=cfg.num_sample_batches)
         else:
             raise NotImplementedError
         ode_lks.append(transformed_ode_lk_NB)
@@ -297,13 +299,14 @@ def compute_icov_error_vs_bins(
                 x=xs,
             )
             errors_B_list.append(torch.tensor(error_N))
-        plt.plot(abscissa_N1.squeeze().cpu(), dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha)))
-        plt.scatter(abscissa_N1.squeeze().cpu(), transformed_ode_lk_NB[:, b].cpu().numpy())
-        plt.savefig('{}/{}_estimates.pdf'.format(
-            HydraConfig.get().run.dir,
-            std.cfg.model_name
-        ))
-        plt.clf()
+        if type(stds[0].example) == MultivariateGaussianExampleConfig:
+            plt.plot(abscissa_N1.squeeze().cpu(), dd.pdf(abscissa_N1.squeeze().cpu())/(1-dd.cdf(alpha)))
+            plt.scatter(abscissa_N1.squeeze().cpu(), transformed_ode_lk_NB[:, b].cpu().numpy())
+            plt.savefig('{}/{}_estimates.pdf'.format(
+                HydraConfig.get().run.dir,
+                std.cfg.model_name
+            ))
+            plt.clf()
 
         if cfg.density_integrator == Integrator.EULER:
             small_idx = torch.topk(fake_traj_NbD1.norm(dim=-2).squeeze(), k=7, largest=False).indices
@@ -354,9 +357,9 @@ def compute_icov_error_vs_bins(
     min_bins = min(num_bins)
     max_bins = max(num_bins)
     if min_bins < max_bins:
-        label = f'bins=[{min_bins}, {max_bins}]'
+        label = 'Bins in [{}, {}]'.format(min_bins, max_bins)
     else:
-        label = f'bins={min_bins}'
+        label = f'Bins={min_bins}'
     all_bins_flattened = torch.cat(
         [bins.bins for all_bins_lst in all_bins for bins in all_bins_lst],
         dim=0
@@ -436,10 +439,14 @@ def make_plots(
     )
     plt.xscale("log")
     plt.yscale("log")
-    plt.grid(which='both', axis='y')
+    # plt.grid(which='both', axis='y')
     # ax3 = ax1.twiny()
     # ax3.set_xlim(ax1.get_xlim())
     # ax3.set_xlabel('Num Bins')
+
+    lwr, upr = plt.ylim()
+    lwr = min(lwr, 5e-3)
+    plt.ylim((5e-3, 5e-1))
 
     _, run_type = get_run_type(cfg)
     run_type = run_type.replace(' ', '_')
