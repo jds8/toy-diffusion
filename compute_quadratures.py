@@ -131,6 +131,28 @@ def pdf_3d_quadrature_bm(p: float, alpha: float, num_pts=1000) -> np.ndarray:
         result = exit_weight / total_weight
     return result
 
+def analytic_dtheta(p: float, alpha: float) -> np.ndarray:
+    if p < alpha:
+        return np.array(0.)
+    elif p < np.sqrt(2) * alpha:
+        arc_length = 4 * np.arccos(alpha / p)
+    elif p < np.sqrt(10) * alpha:
+        a = alpha / np.sqrt(0.5)
+        numerator = a ** 2 + a * np.sqrt(2 * p ** 2 - a ** 2) - a * np.sqrt(p ** 2 - a ** 2) + np.sqrt((p ** 2 - a ** 2) * (2 * p ** 2 - a ** 2))
+        arc_length = 2 * (2 * np.arccos(alpha / p) + np.arccos(numerator / (2 * p ** 2)))
+    else:
+        arc_length = 2 * np.pi
+    pdf = stats.chi(2).pdf(p)
+    return pdf * arc_length / (2 * np.pi)
+
+def efficient_normalizing_constant_bm(alpha: float) -> np.ndarray:
+    case1 = np.sqrt(2) * alpha
+    case2 = np.sqrt(10) * alpha
+    result1, _ = integrate.quad(lambda p: analytic_dtheta(p, alpha), alpha, case1)
+    result2, _ = integrate.quad(lambda p: analytic_dtheta(p, alpha), case1, case2)
+    result3 = 1 - stats.chi(2).cdf(case2)
+    return result1 + result2 + result3
+
 def pdf_2d_quadrature_bm(p: float, alpha: float, num_pts=1000) -> np.ndarray:
     dt = 0.5
     thetas = np.linspace(0, 2 * np.pi, num_pts)
@@ -250,10 +272,13 @@ if __name__ == '__main__':
     # plot_quadrature_vs_chi()
 
     alpha = 0.5
-    max_sample = 1.09
-    conditional_pdf = lambda p : scipy.stats.chi(2).pdf(p) / (1-scipy.stats.chi(2).cdf(0.5))
-    out = estimate_integral(max_sample, alpha, conditional_pdf)
-    print(out)
+    # max_sample = 1.09
+    # conditional_pdf = lambda p : scipy.stats.chi(2).pdf(p) / (1-scipy.stats.chi(2).cdf(0.5))
+    # out = estimate_integral(max_sample, alpha, conditional_pdf)
+    # print(out)
+
+    normalizing_constant = efficient_normalizing_constant_bm(alpha)
+    print(normalizing_constant)
 
     # pdf_values_alpha_2 = {
     #     2.0 :               0.1317,
