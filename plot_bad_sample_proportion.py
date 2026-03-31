@@ -87,10 +87,13 @@ def sample(cfg):
     cfg_obj = OmegaConf.to_object(cfg)
     if isinstance(omega_sampler, ContinuousSamplerConfig):
         if isinstance(cfg_obj.example, MultivariateGaussianExampleConfig):
+            # models = [
+            #     'VPSDEVelocitySampler_TemporalUnetAlpha_dim_120_MultivariateGaussian2ExampleConfigNoTernary_v10240001952'
+            #     'VPSDEVelocitySampler_TemporalUnetAlpha_dim_80_MultivariateGaussian4ExampleConfig_v10240002048',
+            #     'VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v10240001048',
+            # ]
             models = [
-                'VPSDEVelocitySampler_TemporalUnetAlpha_dim_120_MultivariateGaussian2ExampleConfig_v10891111424',
-                'VPSDEVelocitySampler_TemporalUnetAlpha_dim_80_MultivariateGaussian4ExampleConfig_v10240002048',
-                'VPSDEVelocitySampler_TemporalUnetAlpha_dim_32_MultivariateGaussian8ExampleConfig_v10240001048',
+                'VPSDEVelocitySampler_TemporalUnetAlpha_dim_120_MultivariateGaussian2ExampleConfigNoTernary_v10240001952'
             ]
         elif isinstance(cfg_obj.example, BrownianMotionDiffExampleConfig):
             models = [
@@ -105,7 +108,7 @@ def sample(cfg):
             diffusion_dim = get_diffusion_dim(model)
             dim_mults = get_dim_mults(int(model_dim))
             example = get_example(cfg_obj, model, model_dim)
-            model_prop_bad_samples = []
+            model_num_bad_samples = []
             for next_alpha in alphas:
                 new_cfg = deepcopy(cfg)
                 new_cfg.likelihood.alpha = next_alpha.item()
@@ -125,12 +128,12 @@ def sample(cfg):
                     sample_trajs = sample_traj_out.samples
                     trajs = sample_trajs[-1]
 
-                    prop_bad_samples = (trajs.norm(dim=-2).cpu() < alpha).to(float).mean()
-                    model_prop_bad_samples.append(prop_bad_samples)
-            plt.scatter(alphas, model_prop_bad_samples, label=model_dim_label)
+                    num_bad_samples = (trajs.norm(dim=-2).cpu() < alpha).sum()
+                    model_num_bad_samples.append(num_bad_samples)
+            plt.scatter(alphas, model_num_bad_samples, label=model_dim_label)
             plt.xlabel('Alpha')
-            plt.ylabel(f'Proportion (of {std.cfg.num_samples})')
-            plt.title('Proportion of Samples Outside alpha')
+            plt.ylabel(f'Number (of {std.cfg.num_samples})')
+            plt.title('Number of Samples Outside Support')
             plt.legend()
         plt.savefig('{}/bad_sample_proportions.pdf'.format(
             HydraConfig.get().run.dir,

@@ -298,15 +298,23 @@ def compute_icov_error_vs_bins(
         label = f'bins=[{min_bins}, {max_bins}]'
     else:
         label = f'bins={min_bins}'
+    xaxis = get_xaxis(stds[0], ode_llk[6])
     error_data = ErrorData(
         stds[0].cfg.timesteps,
-        stds[0].cfg.timesteps,
+        xaxis,
+        # stds[0].cfg.timesteps, # old second parameter
         quantiles[:, 1],
         quantiles[:, [0, 2]].movedim(0, 1),
         f'ICOV ({label})',
         'orange'
     )
     return error_data
+
+def get_xaxis(std, derivatives):
+    if std.cfg.density_integrator == Integrator.PYTORCH:
+        timesteps = derivatives[0][2].nelement()
+        return [timesteps]
+    return std.cfg.timesteps
 
 def save_error_data(error_data: ErrorData, title: str):
     rel_filename = f'{title}_{error_data.label}'.replace(' ', '_').replace('\n', '_')
@@ -335,13 +343,21 @@ def plot_errors(error_data: ErrorData, title: str):
     )
     save_error_data(error_data, title)
 
+def get_integrator_str(integrator):
+    if integrator == Integrator.PYTORCH:
+        return 'Dormand-Prince'
+    else:
+        integrator_str = str(integrator).split('.')[1]
+        return integrator_str.capitalize()
+
 def make_error_vs_samples(
         sample_error_data: ErrorData,
         icov_error_data: ErrorData,
         alpha: float,
         cfg: SampleConfig,
 ):
-    title = f'Integrated ({cfg.density_integrator}) Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
+    integrator_str = get_integrator_str(cfg.density_integrator)
+    title = f'Integrated ({integrator_str}) Absolute Error vs. Num. Diffusion Steps\n(alpha={alpha})'
     plot_errors(sample_error_data, title)
     plot_errors(icov_error_data, title)
     plt.xlabel('Diffusion Steps')

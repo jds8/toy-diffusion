@@ -192,7 +192,7 @@ def compute_icov_error_vs_bins(
     plt.ylim((-lim, lim))
     plt.xlim((-lim, lim))
     plt.gca().set_aspect('equal')
-    plt.title(r'$\theta$ Values Along Level Curve')
+    plt.title(r'$\phi$ Values Along Level Curve')
     if type(stds[0].example) == BrownianMotionDiffExampleConfig:
         plt.xlabel(r'$\Delta X1/\sqrt{\Delta t}$')
         plt.ylabel(r'$\Delta X2/\sqrt{\Delta t}$')

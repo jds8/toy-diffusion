@@ -1,4 +1,4 @@
-# provenance: https://github.com/jannerm/diffuser/blob/main/diffuser/models/diffusion.py
+# provenance: https://github.com/jannerm/diffuser/blob/main/diffuser/models/temporal.py
 
 import torch
 import torch.nn as nn

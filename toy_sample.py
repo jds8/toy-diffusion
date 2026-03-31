@@ -854,6 +854,12 @@ class ContinuousEvaluator(ToyEvaluator):
                 self.calls = []   # store evaluations
 
             def forward(self, t, y):
+                # there are three outputs:
+                # 1) time
+                # 2) z, a tuple consisting of
+                #     1) state (pfode)
+                #     2) probability (icov)
+                # 3) function eval (variable number)
                 f_eval = self.func(t, y)
                 z = y[0].detach().cpu(), y[1].detach().cpu()
                 self.calls.append((t.detach().cpu(), z, f_eval.detach().cpu()))
@@ -1069,42 +1075,47 @@ def compute_ode_log_likelihood(
     )
 
     # Plot ICOV trajectory
-    sol = ode_llk[2]
-    p = sol[1].to('cpu')
-    dp_dt = torch.stack([derivative[1] for derivative in ode_llk[6]]).to('cpu')
-    start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
-    times = torch.linspace(
-        start_time,
-        1.,
-        std.sampler.diffusion_timesteps,
-    )
-    states = sol[0]
-    radii = states[0].norm(dim=[1,2]).to('cpu')
+    try:
+        sol = ode_llk[2]
+        p = sol[1].to('cpu')
+        dp_dt = torch.stack([derivative[1] for derivative in ode_llk[6]]).to('cpu')
+        start_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+        times = torch.linspace(
+            start_time,
+            1.,
+            std.sampler.diffusion_timesteps,
+        )
+        states = sol[0]
+        radii = states[0].norm(dim=[1,2]).to('cpu')
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-    lc = plot_icov(p, times, radii, ax1)
-    cbar = fig.colorbar(lc, ax=ax1)
-    cbar.set_label("radius")
+        lc = plot_icov(p, times, radii, ax1)
+        cbar = fig.colorbar(lc, ax=ax1)
+        cbar.set_label("radius")
 
-    lc = plot_icov(dp_dt, times[:-1], radii, ax2)
-    cbar = fig.colorbar(lc, ax=ax2)
-    cbar.set_label("radius")
+        lc = plot_icov(dp_dt, times[:-1], radii, ax2)
+        cbar = fig.colorbar(lc, ax=ax2)
+        cbar.set_label("radius")
 
-    # plt.clf()
-    # fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-    # ax1.plot(times, p.to('cpu'))
-    # ax2.plot(times[:-1], dp_dt.to('cpu'))
-    ax1.set_ylabel(f"log p")
-    ax2.set_ylabel(f"(log p)'")
-    ax2.set_xlabel(f'Times')
-    lwr, _ = ax2.get_ylim()
-    lowest_dp_dt = dp_dt.min()
-    lwr = (lwr + lowest_dp_dt) / 2
-    ax2.set_ylim((lwr, 9.))
-    plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
-    plt.close()
-    print(p.shape)
+        # plt.clf()
+        # fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        # ax1.plot(times, p.to('cpu'))
+        # ax2.plot(times[:-1], dp_dt.to('cpu'))
+        ax1.set_ylabel(f"log p")
+        ax2.set_ylabel(f"(log p)'")
+        ax2.set_xlabel(f'Times')
+        lwr, upr = ax2.get_ylim()
+        lowest_dp_dt = dp_dt.min()
+        lwr = (lwr + 2*lowest_dp_dt) / 3
+        min_upr = min(upr, 50)
+        ax2.set_ylim((lwr, min_upr))
+        plt.savefig('{}/icov_plot.pdf'.format(HydraConfig.get().run.dir))
+        plt.close()
+        print(p.shape)
+    except Exception as e:
+        print(e)
+        import pdb; pdb.set_trace()
 
     return ode_llk, scaled_ode_llk
 
@@ -2354,6 +2365,9 @@ def test_brownian_motion_diff(
     states = bm_trajs[torch.arange(bm_trajs.shape[0]), exit_idx.squeeze()]
     plt.plot(times.numpy(), bm_trajs[..., 0].numpy().T, alpha=0.2)
     plt.scatter(dtimes.cpu().numpy(), states, marker='o', color='red')
+    plt.title(r'Two-Step Brownian Motion ($\alpha$=' + alpha_str + ')')
+    plt.xlabel('Time')
+    plt.ylabel('State')
     plt.savefig('{}/alpha={}_exit_brownian_motion_diff_samples.pdf'.format(
         save_dir,
         alpha_str,
@@ -3714,13 +3728,16 @@ def sample(cfg):
         # plot_ode_trajs(cfg, std, sample_traj_out)
 
         # plot pfode trajectories for 7 trajectories closest to the boundary
-        small_idx = torch.topk(sample_trajs[-1].norm(dim=-2).squeeze(), k=7, largest=False).indices
-        traj_subset = sample_trajs[:, small_idx, :, 0].to('cpu')
+        try:
+            small_idx = torch.topk(sample_trajs[-1].norm(dim=-2).squeeze(), k=7, largest=False).indices
+            traj_subset = sample_trajs[:, small_idx, :, 0].to('cpu')
 
-        derivatives = torch.stack(sample_traj_out.derivatives)[:, small_idx].squeeze().cpu()
-        end_integration_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
-        times = -torch.linspace(1., end_integration_time, std.sampler.diffusion_timesteps)
-        plot_pfode(traj_subset[:-1], derivatives, times[:-1], 'subset')
+            derivatives = torch.stack(sample_traj_out.derivatives)[:, small_idx].squeeze().cpu()
+            end_integration_time = std.sampler.t_eps if std.cfg.test == TestType.Test else 0.
+            times = -torch.linspace(1., end_integration_time, std.sampler.diffusion_timesteps)
+            plot_pfode(traj_subset[:-1], derivatives, times[:-1], 'subset')
+        except:
+            pass
 
         test(end_time, cfg, out_trajs, std, sample_trajs, [hebo])
         import pdb; pdb.set_trace()
